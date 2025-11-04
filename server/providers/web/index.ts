@@ -1,20 +1,11 @@
-import type { WebItem } from "@/types/web";
-import { TavilyWebProvider } from "./tavily";
+export type WebItem = {
+  url: string;
+  title: string;
+  domain: string;
+  published_at?: string;
+  summary?: string;
+};
 
-export interface WebSearchParams {
-  query: string;
-  languages?: string[];
-}
-
-export interface WebProvider {
-  search(params: WebSearchParams): Promise<WebItem[]>;
-}
-
-export function createWebProvider(): WebProvider {
-  const provider = (process.env.WEB_PROVIDER || "tavily").toLowerCase();
-  switch (provider) {
-    case "tavily":
-    default:
-      return new TavilyWebProvider();
-  }
+export async function webSearch(_: { q: string }): Promise<{ items: WebItem[] }> {
+  return { items: [] };
 }

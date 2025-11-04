@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Чат с агентом{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Чат с локальным агентом</h1>
+  <form id="chat-form" class="chat-form">
+    <label for="noteId">ID заметки (опционально)</label>
+    <input type="text" id="noteId" name="noteId" placeholder="uuid" />
+    <label for="message">Сообщение</label>
+    <textarea id="message" name="message" rows="4" placeholder="Напишите запрос..." required></textarea>
+    <button type="submit">Отправить</button>
+  </form>
+
+  <div id="chat-response" class="chat-response hidden">
+    <h2>Ответ агента</h2>
+    <p id="chat-reply"></p>
+    <div>
+      <h3>Черновики</h3>
+      <div id="draft-list"></div>
+      <button id="apply-draft" class="hidden">Применить выбранные действия</button>
+    </div>
+  </div>
+</section>
+{% endblock %}

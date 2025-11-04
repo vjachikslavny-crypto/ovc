@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Заметка{% endblock %}
+{% block content %}
+<section class="card" id="note-card" data-id="{{ note_id }}">
+  <h1 id="note-title">Заметка</h1>
+  <article id="note-content" class="note-content"></article>
+  <button id="refresh-note">Обновить</button>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    const card = document.getElementById('note-card');
+    const noteId = card.dataset.id;
+
+    async function loadNote() {
+      const res = await fetch(`/api/notes/${noteId}`);
+      if (!res.ok) return;
+      const note = await res.json();
+      document.getElementById('note-title').textContent = note.title;
+      document.getElementById('note-content').textContent = note.content_md;
+    }
+
+    document.getElementById('refresh-note').addEventListener('click', loadNote);
+    loadNote();
+  });
+</script>
+{% endblock %}

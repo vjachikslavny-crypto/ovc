@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Заметки{% endblock %}
+{% block content %}
+<section class="card" id="notes-section">
+  <h1>Заметки</h1>
+  <div id="notes-list" class="note-grid"></div>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    const res = await fetch('/api/notes');
+    if (!res.ok) return;
+    const notes = await res.json();
+    const container = document.getElementById('notes-list');
+    container.innerHTML = '';
+    notes.forEach(note => {
+      const card = document.createElement('a');
+      card.href = `/notes/${note.id}`;
+      card.className = 'note-card';
+      card.innerHTML = `<h3>${note.title}</h3><p>${note.content_md.slice(0, 120)}...</p>`;
+      container.appendChild(card);
+    });
+  });
+</script>
+{% endblock %}

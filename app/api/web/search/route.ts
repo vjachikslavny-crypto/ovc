@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { tavilySearch } from "@/server/web/tavily";
-
 const searchSchema = z.object({
   q: z.string().min(1)
 });
@@ -17,12 +15,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { q } = parsed.data;
-  const normalized = q.trim();
-
-  const results = normalized ? await tavilySearch(normalized) : [];
-
   return NextResponse.json({
-    items: results
+    items: []
   });
 }

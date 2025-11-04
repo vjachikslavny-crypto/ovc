@@ -7,7 +7,7 @@
 - 💬 Чат `/chat` — агент формирует дружелюбный ответ и набор draft-действий (`create/update/link/add_source/add_tag`), которые можно применить кнопкой «Применить изменения».
 - 🗒️ Заметки `/notes` — список заметок, семантический поиск (`/api/search`) и переходы к отдельным заметкам `/n/[id]` (markdown, источники, теги, бэклинки).
 - 🕸️ Граф `/graph` — визуализация заметок и связей (wikilink + семантические).
-- 🌐 Веб-источники — Tavily API в `/api/web/search`, агент добавляет реальные источники к заметкам (fallback не нужен; языки поиска настраиваются на странице `/settings`).
+- 🌐 Веб-источники — отключены (интернет не используется); агент опирается только на локальные заметки и RAG.
 - 🤖 Чат-агент — отвечает “по-человечески”, предлагает draft-действия (создать/обновить заметку, добавить ссылки/теги/источники), может искать по заметкам и в интернете, выводит дифф-карточки и атомарно коммитит выбранные изменения.
 - ⏰ Напоминания — демо-эндпойнт `/api/reminders/seed` и кнопка на `/settings`.
 - 🧠 AI-слой — заглушка эмбеддингов `server/ai/embeddings.ts`, простые правила агента `server/agent/index.ts`, векторный поиск `lib/rag.ts`.
@@ -46,13 +46,12 @@ pnpm dev
 ```
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/agent_notes
 VECTOR_DIM=384
-TAVILY_API_KEY=ваш_ключ_Tavily
-LLM_PROVIDER=mock           # mock|openai
-EMBEDDINGS_PROVIDER=mock    # mock|openai
-OPENAI_API_KEY=
+LLM_PROVIDER=mock           # mock|ollama
+EMBEDDINGS_PROVIDER=mock    # mock|ollama
 AGENT_MODE=propose_only     # propose_only|safe_auto|full_auto
 QUIET_HOURS=22:00-09:00
-WEB_ENABLE=true
+SIMPLE_DB_URL=sqlite:///./simple_app/ovc.db
+OFFLINE_MODE=true
 ```
 
 ## Структура
@@ -73,12 +72,16 @@ WEB_ENABLE=true
 /drizzle/migrations  # SQL-м миграции
 ```
 
+## Simple App (Python)
+
+Для офлайн-режима доступна упрощённая версия на FastAPI. Подробные инструкции — в [`README_simple.md`](README_simple.md).
+
 ## Дальнейшие шаги
 
-- Подключить реальные эмбеддинги и LLM API вместо заглушек.
+- Подключить локальные модели (Ollama/vLLM) вместо заглушек.
 - Добавить полноценные нотификации (например, Telegram-бот).
 - Расширить diff-view и историю действий.
 - Улучшить UI (filtering, drag в графе, тёмная тема).
-- Подключить реального LLM-провайдера и заменить mock-оркестратор на tool-calling (OpenAI/Tavily).
+- Синхронизировать датасет между TS- и Python-стеками.
 
 Проект готов к локальному запуску без внешних API и может служить стартовой точкой для дальнейшего развития.

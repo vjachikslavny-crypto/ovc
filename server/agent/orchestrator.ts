@@ -1,12 +1,11 @@
 import { DraftAction, AgentReply, AgentMode } from "@/types/agent";
 import { db } from "@/lib/db";
 import { ragSearch } from "@/lib/rag";
+import type { SearchResult } from "@/lib/rag";
 import { commitDraft } from "@/server/agent/commitDraft";
-import { enrichWithWeb } from "@/server/agent/enrichWithWeb";
-import { createLLMProvider } from "@/server/providers/llm";
+import { getLLM } from "@/server/providers/llm";
 import { planAndDraftActions } from "@/server/agent";
 
-const webIntentRegex = /\b(источн|найд|поищ|web|интернет|перепроверь|факт|sources|search)\b/i;
 const DEFAULT_MODE: AgentMode = "propose_only";
 const agentMode = (process.env.AGENT_MODE as AgentMode) || DEFAULT_MODE;
 const REPLY_LIMIT = Number(process.env.AGENT_REPLY_LIMIT ?? 900);
@@ -51,26 +50,35 @@ async function runPipeline(text: string, options: HandleOptions): Promise<AgentR
     orderBy: (table, { desc }) => [desc(table.updatedAt)]
   });
 
-  const llmProvider = createLLMProvider();
-  let response: AgentReply;
-  try {
-    response = await llmProvider.plan({
-      text,
-      noteId: options.noteId,
-      notes: noteList,
-      languages: options.languages
-    });
-  } catch (error) {
-    console.error("LLM provider failed, falling back to rule-based plan", error);
-    response = await planAndDraftActions(text, {
-      notes: noteList,
-      noteId: options.noteId,
-      languages: options.languages
-    });
-  }
+  const llm = getLLM();
+
+  const response = await planAndDraftActions(text, {
+    notes: noteList,
+    noteId: options.noteId,
+    languages: options.languages
+  });
 
   let draft = response.draft ?? [];
   let reply = normalizeReply(response.reply);
+
+  let ragMatches: SearchResult[] = [];
+  try {
+    ragMatches = await ragSearch(text, 5);
+  } catch (error) {
+    console.warn("ragSearch failed", error);
+  }
+
+  try {
+    const llmReply = await llm.chat(
+      buildLLMPrompt(text, draft, ragMatches),
+      "Ты — локальный помощник заметок. Работай офлайн."
+    );
+    if (llmReply && llmReply.trim().length > 0) {
+      reply = normalizeReply(llmReply);
+    }
+  } catch (error) {
+    console.warn("LLM mock chat failed", error);
+  }
 
   if (!draft.some((action) => action.type === "create_note" || action.type === "update_note")) {
     const fallbackCreate = buildBasicCreateAction(text);
@@ -99,15 +107,6 @@ async function runPipeline(text: string, options: HandleOptions): Promise<AgentR
     }
   }
 
-  let ragScore = 0;
-  try {
-    const ragResults = await ragSearch(text, 1);
-    ragScore = ragResults[0]?.score ?? 0;
-  } catch (error) {
-    console.warn("ragSearch failed", error);
-  }
-  const userAskedWeb = webIntentRegex.test(text);
-
   let targetNoteId = options.noteId;
   if (!targetNoteId) {
     const updateAction = draft.find((action) => action.type === "update_note");
@@ -118,21 +117,7 @@ async function runPipeline(text: string, options: HandleOptions): Promise<AgentR
     if (linkAction?.type === "add_link") targetNoteId = linkAction.from_id;
   }
 
-  if (targetNoteId && shouldCallWeb({ userAskedWeb, ragScore, query: text })) {
-    const topic = inferTopic(text, draft, noteList, targetNoteId) || text;
-    try {
-      const enrichment = await enrichWithWeb(targetNoteId, topic, options.languages);
-      if (enrichment.actions.length > 0) {
-        draft = [...draft, ...enrichment.actions];
-        const domains = Array.from(new Set(enrichment.items.map((item) => item.domain))).slice(0, 3);
-        if (domains.length > 0) {
-          reply = normalizeReply(`${reply} Источники: ${domains.join(", ")}.`);
-        }
-      }
-    } catch (error) {
-      console.warn("Web enrichment failed", error);
-    }
-  }
+  // Интернет выключен, веб-обогащение не выполняется
 
   if (draft.length > 1) {
     draft = dedupeDraft(draft);
@@ -197,19 +182,6 @@ function hashString(input: string) {
     hash |= 0;
   }
   return hash.toString(16);
-}
-
-function inferTopic(message: string, draft: DraftAction[], notes: Array<{ id: string; title: string }>, noteId: string) {
-  const note = notes.find((n) => n.id === noteId);
-  if (note) return note.title;
-  const create = draft.find((action) => action.type === "create_note");
-  if (create?.type === "create_note") return create.title;
-  return message;
-}
-
-function shouldCallWeb({ userAskedWeb, ragScore, query }: { userAskedWeb: boolean; ragScore: number; query: string }) {
-  const looksFresh = /\b(20\d{2}|свеж|нов|сегодня|today|this\s+year|\b2025\b)\b/i.test(query);
-  return userAskedWeb || ragScore < 0.45 || looksFresh;
 }
 
 function maybeAutoApply(draft: DraftAction[], { userId, mode }: { userId: string; mode: AgentMode }) {
@@ -319,4 +291,34 @@ function normalizeReply(text: string | undefined) {
   if (!trimmed) return DEFAULT_REPLY;
   if (trimmed.length <= limit) return trimmed;
   return `${trimmed.slice(0, limit - 1).trimEnd()}…`;
+}
+
+function buildLLMPrompt(message: string, draft: DraftAction[], related: SearchResult[]) {
+  const summary = draft
+    .map((action, index) => {
+      switch (action.type) {
+        case "create_note":
+          return `${index + 1}. Создать заметку «${action.title}».`;
+        case "update_note":
+          return `${index + 1}. Обновить заметку ${action.id}: ${plainPreview(action.patch_md)}`;
+        case "add_link":
+          return `${index + 1}. Связать ${action.from_id} → ${action.to_title}.`;
+        case "add_tag":
+          return `${index + 1}. Добавить тег ${action.tag} к ${action.note_id}.`;
+        case "add_source":
+          return `${index + 1}. Добавить источник ${action.source.url}.`;
+        default:
+          return `${index + 1}. ${action.type}`;
+      }
+    })
+    .join(" \n");
+  const relatedNotes = related
+    .map((item) => `- Заметка ${item.noteId} (score=${item.score.toFixed(2)})`)
+    .join(" \n");
+
+  return `Пользователь написал: ${message}.\nПредложенные действия:\n${summary || "- Нет действий"}.\nПохожие заметки:\n${relatedNotes || "- Нет"}.\nСформулируй короткий ответ с упоминанием ключевых шагов.`;
+}
+
+function plainPreview(markdown: string) {
+  return markdown.replace(/[#*_`\-]/g, "").slice(0, 80);
 }

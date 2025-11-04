@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}OVC Simple App{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">OVC Simple</div>
+    <nav>
+      <a href="/">Чат</a>
+      <a href="/notes">Заметки</a>
+      <a href="/api/dataset/export" target="_blank">JSONL</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/js/app.js" defer></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

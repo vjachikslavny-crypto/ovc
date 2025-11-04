@@ -1,22 +1,29 @@
-import type { DraftAction, AgentReply } from "@/types/agent";
-import { MockLLMProvider } from "./mock";
-
-export type LLMPlanContext = {
-  text: string;
-  noteId?: string;
-  notes: Array<{ id: string; title: string; contentMd: string }>;
-  languages?: string[];
-};
-
-export interface LLMProvider {
-  plan(context: LLMPlanContext): Promise<AgentReply>;
+export interface LLM {
+  chat(prompt: string, systemPrompt?: string): Promise<string>;
 }
 
-export function createLLMProvider(): LLMProvider {
+export interface Embedder {
+  embed(texts: string[]): Promise<number[][]>;
+}
+
+export function getLLM(): LLM {
   const provider = (process.env.LLM_PROVIDER || "mock").toLowerCase();
   switch (provider) {
+    case "ollama":
+      return require("./ollama").llm as LLM;
     case "mock":
     default:
-      return new MockLLMProvider();
+      return require("./mock").llm as LLM;
+  }
+}
+
+export function getEmbedder(): Embedder {
+  const provider = (process.env.EMBEDDINGS_PROVIDER || "mock").toLowerCase();
+  switch (provider) {
+    case "ollama":
+      return require("./ollama").embedder as Embedder;
+    case "mock":
+    default:
+      return require("./mock").embedder as Embedder;
   }
 }

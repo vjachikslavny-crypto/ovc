@@ -1,0 +1,30 @@
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from app.api.chat import router as chat_router
+from app.api.commit import router as commit_router
+from app.api.notes import router as notes_router
+
+app = FastAPI(title="OVC Simple App", version="0.1.0")
+app.include_router(chat_router, prefix="/api")
+app.include_router(commit_router, prefix="/api")
+app.include_router(notes_router, prefix="/api")
+
+app.mount("/static", StaticFiles(directory="simple_app/static"), name="static")
+templates = Jinja2Templates(directory="simple_app/templates")
+
+
+@app.get("/")
+def index(request: Request):
+    return templates.TemplateResponse("chat.html", {"request": request})
+
+
+@app.get("/notes")
+def notes_page(request: Request):
+    return templates.TemplateResponse("notes.html", {"request": request})
+
+
+@app.get("/notes/{note_id}")
+def note_page(request: Request, note_id: str):
+    return templates.TemplateResponse("note.html", {"request": request, "note_id": note_id})
