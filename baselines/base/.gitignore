@@ -1,9 +1,0 @@
-.next
-node_modules
-.env
-pnpm-lock.yaml
-dist
-coverage
-*.log
-tmp
-data/postgres

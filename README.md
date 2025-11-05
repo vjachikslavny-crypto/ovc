@@ -1,87 +1,69 @@
-# OVC Agent Workspace
+# OVC Simple Agent
 
-Локальный прототип рабочей среды на **Next.js 14 + Postgres (pgvector)**. Чат-агент управляет заметками, строит граф связей, выполняет RAG-поиск и показывает черновик diff-патчей перед применением.
+Лёгкий офлайн-ассистент заметок на **FastAPI + SQLite**. Агент умеет общаться в чате, предлагать действия над заметками, строить граф связей и хранить журнал действий — всё без внешних API и сложных зависимостей.
 
-## Возможности
+## Что внутри
 
-- 💬 Чат `/chat` — агент формирует дружелюбный ответ и набор draft-действий (`create/update/link/add_source/add_tag`), которые можно применить кнопкой «Применить изменения».
-- 🗒️ Заметки `/notes` — список заметок, семантический поиск (`/api/search`) и переходы к отдельным заметкам `/n/[id]` (markdown, источники, теги, бэклинки).
-- 🕸️ Граф `/graph` — визуализация заметок и связей (wikilink + семантические).
-- 🌐 Веб-источники — отключены (интернет не используется); агент опирается только на локальные заметки и RAG.
-- 🤖 Чат-агент — отвечает “по-человечески”, предлагает draft-действия (создать/обновить заметку, добавить ссылки/теги/источники), может искать по заметкам и в интернете, выводит дифф-карточки и атомарно коммитит выбранные изменения.
-- ⏰ Напоминания — демо-эндпойнт `/api/reminders/seed` и кнопка на `/settings`.
-- 🧠 AI-слой — заглушка эмбеддингов `server/ai/embeddings.ts`, простые правила агента `server/agent/index.ts`, векторный поиск `lib/rag.ts`.
+- 💬 **Чат** `/` — агент отвечает дружелюбно и формирует draft-действия (`create_note`, `update_note`, `add_link`, `add_tag`, `add_source`).
+- 🗂 **Заметки** `/notes` — список, быстрый ввод новой заметки, поиск по содержимому.
+- 📄 **Редактор** `/notes/{id}` — Markdown, приоритет/важность, теги, связи, источники.
+- 🕸 **Граф** `/graph` — интерактивная визуализация заметок и групп (цвет и имя можно настроить).
+- 🔎 **RAG** — локальный TF‑IDF индекс, семантический поиск без внешних сервисов.
+- 🗃 **Логи** — все обращения к агенту и коммиты пишутся в JSONL (`/api/dataset/export`).
 
-## Стек
-
-- Next.js 14 (App Router, TypeScript), Tailwind + shadcn-стиль, Zustand, lucide-react, d3-force.
-- Postgres + pgvector, Drizzle ORM + migrations.
-- `pnpm` в качестве пакетного менеджера.
-
-## Запуск
+## Быстрый старт
 
 ```bash
-# 1. Установите зависимости
-pnpm install
-
-# 2. Поднимите Postgres + pgvector
-docker compose up -d
-
-# 3. Примените схему
-pnpm db:push
-
-# 4. Набейте демо-данные
-pnpm seed
-
-# 5. Запустите dev-сервер
-pnpm dev
+cd ~/OVC
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r simple_app/requirements.txt
+PYTHONPATH=simple_app python -m app.db.migrate   # создаём/обновляем БД
+uvicorn app.main:app --app-dir simple_app --reload
 ```
 
-Приложение будет доступно на `http://localhost:3000`.
+После запуска откройте `http://localhost:8000`.  
+Если схема изменилась, удалите `simple_app/ovc.db` и запустите миграцию снова.
 
 ## Переменные окружения
 
-Создайте `.env`, скопировав `.env.example`:
+Файл `.env` не обязателен, но можно задать:
 
 ```
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/agent_notes
-VECTOR_DIM=384
-LLM_PROVIDER=mock           # mock|ollama
-EMBEDDINGS_PROVIDER=mock    # mock|ollama
-AGENT_MODE=propose_only     # propose_only|safe_auto|full_auto
-QUIET_HOURS=22:00-09:00
 SIMPLE_DB_URL=sqlite:///./simple_app/ovc.db
+VECTOR_DIM=384
 OFFLINE_MODE=true
 ```
 
-## Структура
+## Структура проекта
 
 ```
-/app                 # App Router (страницы и API-роуты)
-/components          # UI-компоненты (чат, diff, граф, таблицы)
-/lib
-  actions.ts         # Zod-схемы и типы DraftAction
-  db.ts              # Инициализация Drizzle
-  rag.ts             # Чанки, индекс, поиск и автоссылки
-  schema.ts          # Drizzle-схема таблиц
-/server
-  /agent             # Правила агента, orchestrator, commitDraft
-  /tools             # Низкоуровневые инструменты (notes, rag, web)
-  /ai                # Заглушка эмбеддингов и cosine-similarity
-/scripts/seed.ts     # Генерация демо-данных
-/drizzle/migrations  # SQL-м миграции
+simple_app/
+├── app/
+│   ├── api/          # REST-эндпоинты (чат, коммит, заметки, граф, экспорт логов)
+│   ├── agent/        # DraftAction, оркестратор и правила поведения
+│   ├── db/           # SQLAlchemy модели, миграции, сессия
+│   ├── log/          # JSONL-логгер действий агента
+│   ├── providers/    # моковые LLM и embeddings, готовые к замене на реальные
+│   ├── rag/          # чанкирование Markdown и TF-IDF индекс
+│   └── main.py       # точка входа FastAPI
+├── templates/        # HTML-шаблоны (чат, заметки, карточка, граф)
+├── static/           # CSS/JS, тема и граф на D3
+├── requirements.txt  # зависимости Python
+└── run.sh            # скрипт автозапуска (venv + миграция + uvicorn)
 ```
 
-## Simple App (Python)
+## Работа с данными
 
-Для офлайн-режима доступна упрощённая версия на FastAPI. Подробные инструкции — в [`README_simple.md`](README_simple.md).
+- База по умолчанию — `simple_app/ovc.db` (SQLite).
+- TF‑IDF индекс автоматически пересчитывается при создании/изменении заметок.
+- Логи для обучения лежат в `simple_app/dataset.log`; выгрузка — `GET /api/dataset/export`.
 
-## Дальнейшие шаги
+## Куда развивать дальше
 
-- Подключить локальные модели (Ollama/vLLM) вместо заглушек.
-- Добавить полноценные нотификации (например, Telegram-бот).
-- Расширить diff-view и историю действий.
-- Улучшить UI (filtering, drag в графе, тёмная тема).
-- Синхронизировать датасет между TS- и Python-стеками.
+- Подключить локальную модель через Ollama/vLLM вместо mock-провайдера.
+- Добавить мини-историю коммитов и “undo”.
+- Реализовать экспорт/импорт заметок (Markdown/JSON).
+- Настроить e2e‑тесты UI (Playwright/pytest + httpx).
 
-Проект готов к локальному запуску без внешних API и может служить стартовой точкой для дальнейшего развития.
+OVC Simple Agent остаётся полностью офлайн и готов к кастомизации под вашу рабочую среду.
