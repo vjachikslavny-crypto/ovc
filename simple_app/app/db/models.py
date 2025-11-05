@@ -16,21 +16,29 @@ class Note(Base):
     __tablename__ = "notes"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    title = Column(Text, nullable=False)
-    content_md = Column(Text, nullable=False, default="")
+    title = Column(String, nullable=False)
+    style_theme = Column(String, nullable=False, default="clean")
+    layout_hints = Column(Text, nullable=False, default="{}")
+    blocks_json = Column(Text, nullable=False, default="[]")
+    passport_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
-    priority = Column(String, default="medium", nullable=False)
-    status = Column(String, default="active", nullable=False)
-    importance = Column(Float, default=1.0, nullable=False)
-    cluster = Column(String, default="default", nullable=False)
-    cluster_color = Column(String, default="#8b5cf6", nullable=False)
 
     chunks = relationship("NoteChunk", back_populates="note", cascade="all, delete-orphan")
     tags = relationship("NoteTag", back_populates="note", cascade="all, delete-orphan")
     sources = relationship("NoteSource", back_populates="note", cascade="all, delete-orphan")
-    links_from = relationship("NoteLink", back_populates="source_note", foreign_keys="NoteLink.from_id", cascade="all, delete-orphan")
-    links_to = relationship("NoteLink", back_populates="target_note", foreign_keys="NoteLink.to_id", cascade="all, delete-orphan")
+    links_from = relationship(
+        "NoteLink",
+        back_populates="source_note",
+        foreign_keys="NoteLink.from_id",
+        cascade="all, delete-orphan",
+    )
+    links_to = relationship(
+        "NoteLink",
+        back_populates="target_note",
+        foreign_keys="NoteLink.to_id",
+        cascade="all, delete-orphan",
+    )
 
 
 class NoteChunk(Base):
@@ -51,8 +59,8 @@ class NoteLink(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     from_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
     to_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
-    reason = Column(String, nullable=False)
-    confidence = Column(Float, nullable=False, default=0.5)
+    reason = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
     __table_args__ = (UniqueConstraint("from_id", "to_id", "reason", name="uq_note_links"),)
@@ -122,4 +130,4 @@ class GroupPreference(Base):
     label = Column(String, nullable=False, default="Группа")
     color = Column(String, nullable=False, default="#8b5cf6")
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)

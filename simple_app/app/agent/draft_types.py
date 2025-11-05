@@ -1,66 +1,72 @@
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal, Optional, Union
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Any, Literal, Optional, Union
+
+from pydantic import BaseModel, Field
 
 
 class DraftActionBase(BaseModel):
     type: str
+    note_id: Optional[str] = Field(default=None, alias="noteId")
+
+    class Config:
+        allow_population_by_field_name = True
 
 
-class CreateNoteAction(DraftActionBase):
-    type: Literal["create_note"] = "create_note"
-    title: str = Field(..., min_length=1)
-    content_md: str = Field(..., min_length=1)
+class BlockPayload(BaseModel):
+    id: Optional[str] = None
+    type: str
+    data: dict[str, Any]
 
 
-class UpdateNoteAction(DraftActionBase):
-    type: Literal["update_note"] = "update_note"
-    id: str
-    patch_md: str = Field(..., min_length=1)
-    position: Literal["append", "prepend"]
+class InsertBlockAction(DraftActionBase):
+    type: Literal["insert_block"] = "insert_block"
+    after_id: Optional[str] = Field(None, alias="afterId")
+    block: BlockPayload
 
 
-class AddLinkAction(DraftActionBase):
-    type: Literal["add_link"] = "add_link"
-    from_id: str
-    to_title: str
-    reason: str
-    confidence: float = Field(ge=0.0, le=1.0)
+class UpdateBlockAction(DraftActionBase):
+    type: Literal["update_block"] = "update_block"
+    block_id: str = Field(..., alias="id")
+    patch: dict[str, Any]
+
+
+class MoveBlockAction(DraftActionBase):
+    type: Literal["move_block"] = "move_block"
+    block_id: str = Field(..., alias="id")
+    after_id: Optional[str] = Field(None, alias="afterId")
 
 
 class AddTagAction(DraftActionBase):
     type: Literal["add_tag"] = "add_tag"
-    note_id: str
     tag: str
-    weight: Optional[float]
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
-class SourcePayload(BaseModel):
-    url: HttpUrl
-    title: str
-    domain: str
-    published_at: Optional[str]
-    summary: str
+class AddLinkAction(DraftActionBase):
+    type: Literal["add_link"] = "add_link"
+    from_id: str = Field(..., alias="fromId")
+    to_id: str = Field(..., alias="toId")
+    reason: Optional[str] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
-class AddSourceAction(DraftActionBase):
-    type: Literal["add_source"] = "add_source"
-    note_id: str
-    source: SourcePayload
+class SetStyleAction(DraftActionBase):
+    type: Literal["set_style"] = "set_style"
+    style_theme: str = Field(..., alias="styleTheme")
+    layout_hints: Optional[dict[str, Any]] = Field(default=None, alias="layoutHints")
 
 
 DraftAction = Union[
-    CreateNoteAction,
-    UpdateNoteAction,
-    AddLinkAction,
+    InsertBlockAction,
+    UpdateBlockAction,
+    MoveBlockAction,
     AddTagAction,
-    AddSourceAction,
+    AddLinkAction,
+    SetStyleAction,
 ]
 
 
 class AgentReply(BaseModel):
     reply: str
     draft: list[DraftAction]
-

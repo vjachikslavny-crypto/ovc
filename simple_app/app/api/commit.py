@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import List
+import uuid
+from typing import List, Set
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -9,23 +10,23 @@ from sqlalchemy import select
 
 from app.agent.draft_types import (
     AddLinkAction,
-    AddSourceAction,
     AddTagAction,
-    CreateNoteAction,
     DraftAction,
-    UpdateNoteAction,
+    InsertBlockAction,
+    MoveBlockAction,
+    SetStyleAction,
+    UpdateBlockAction,
 )
-from app.db.models import Note, NoteLink, NoteSource, NoteTag, Source
+from app.db.models import Note, NoteLink, NoteTag
 from app.db.session import get_session
 from app.log import dataset_logger
-from app.rag.chunking import chunk_markdown
-from app.rag.tfidf_index import index
+from app.api.notes import _reindex_note
 
 router = APIRouter(tags=["commit"])
 
 
 class CommitRequest(BaseModel):
-    draft: List[DraftAction] = Field(..., min_items=1)
+    draft: List[DraftAction] = Field(default_factory=list)
 
 
 class CommitResponse(BaseModel):
@@ -35,97 +36,165 @@ class CommitResponse(BaseModel):
 
 @router.post("/commit", response_model=CommitResponse)
 async def commit_endpoint(payload: CommitRequest):
+    if not payload.draft:
+        raise HTTPException(status_code=400, detail="Draft is empty")
+
     applied = 0
-    changed_notes: set[str] = set()
+    notes_requiring_index: Set[str] = set()
+    touched_notes: Set[str] = set()
 
     with get_session() as session:
         try:
             for action in payload.draft:
-                if isinstance(action, CreateNoteAction):
-                    note = Note(title=action.title, content_md=action.content_md)
+                if isinstance(action, InsertBlockAction):
+                    note = _require_note(session, action.note_id)
+                    blocks = json.loads(note.blocks_json or "[]")
+                    block_dict = action.block.dict(by_alias=True)
+                    if not block_dict.get("id"):
+                        block_dict["id"] = str(uuid.uuid4())
+                    blocks = _insert_block(blocks, block_dict, action.after_id)
+                    note.blocks_json = json.dumps(blocks, ensure_ascii=False)
                     session.add(note)
-                    session.flush()
-                    _reindex_note(session, note)
-                    changed_notes.add(note.id)
+                    touched_notes.add(note.id)
+                    notes_requiring_index.add(note.id)
                     applied += 1
-                elif isinstance(action, UpdateNoteAction):
-                    note = session.get(Note, action.id)
-                    if not note:
-                        continue
-                    if action.position == "append":
-                        note.content_md = f"{note.content_md}\n\n{action.patch_md}".strip()
-                    else:
-                        note.content_md = f"{action.patch_md}\n\n{note.content_md}".strip()
-                    session.add(note)
-                    session.flush()
-                    _reindex_note(session, note)
-                    changed_notes.add(note.id)
-                    applied += 1
+
+                elif isinstance(action, UpdateBlockAction):
+                    note = _require_note(session, action.note_id)
+                    blocks = json.loads(note.blocks_json or "[]")
+                    if _patch_block(blocks, action.block_id, action.patch):
+                        note.blocks_json = json.dumps(blocks, ensure_ascii=False)
+                        session.add(note)
+                        touched_notes.add(note.id)
+                        notes_requiring_index.add(note.id)
+                        applied += 1
+
+                elif isinstance(action, MoveBlockAction):
+                    note = _require_note(session, action.note_id)
+                    blocks = json.loads(note.blocks_json or "[]")
+                    if _move_block(blocks, action.block_id, action.after_id):
+                        note.blocks_json = json.dumps(blocks, ensure_ascii=False)
+                        session.add(note)
+                        touched_notes.add(note.id)
+                        notes_requiring_index.add(note.id)
+                        applied += 1
+
                 elif isinstance(action, AddTagAction):
-                    tag = NoteTag(note_id=action.note_id, tag=action.tag, weight=action.weight or 1.0)
-                    session.add(tag)
-                    changed_notes.add(action.note_id)
-                    applied += 1
-                elif isinstance(action, AddLinkAction):
-                    target = session.execute(select(Note).where(Note.title.ilike(action.to_title))).scalar_one_or_none()
-                    if not target:
-                        continue
-                    link = NoteLink(
-                        from_id=action.from_id,
-                        to_id=target.id,
-                        reason=action.reason,
-                        confidence=action.confidence,
-                    )
-                    session.add(link)
-                    applied += 1
-                elif isinstance(action, AddSourceAction):
-                    source = session.execute(select(Source).where(Source.url == action.source.url)).scalar_one_or_none()
-                    if not source:
-                        source = Source(
-                            url=str(action.source.url),
-                            domain=action.source.domain,
-                            title=action.source.title,
-                            summary=action.source.summary,
-                            published_at=action.source.published_at,
+                    note = _require_note(session, action.note_id)
+                    exists = (
+                        session.execute(
+                            select(NoteTag).where(
+                                NoteTag.note_id == note.id,
+                                NoteTag.tag == action.tag,
+                            )
                         )
-                        session.add(source)
-                        session.flush()
-                    note_source = NoteSource(note_id=action.note_id, source_id=source.id, relevance=1.0)
-                    session.add(note_source)
-                    changed_notes.add(action.note_id)
+                        .scalars()
+                        .first()
+                    )
+                    if not exists:
+                        session.add(NoteTag(note_id=note.id, tag=action.tag))
+                        touched_notes.add(note.id)
+                        applied += 1
+
+                elif isinstance(action, AddLinkAction):
+                    source = _require_note(session, action.from_id)
+                    target = _require_note(session, action.to_id)
+                    existing = (
+                        session.execute(
+                            select(NoteLink).where(
+                                NoteLink.from_id == source.id,
+                                NoteLink.to_id == target.id,
+                                NoteLink.reason == action.reason,
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    if not existing:
+                        session.add(
+                            NoteLink(
+                                from_id=source.id,
+                                to_id=target.id,
+                                reason=action.reason,
+                                confidence=action.confidence,
+                            )
+                        )
+                        touched_notes.add(source.id)
+                        applied += 1
+
+                elif isinstance(action, SetStyleAction):
+                    note = _require_note(session, action.note_id)
+                    note.style_theme = action.style_theme
+                    if action.layout_hints is not None:
+                        note.layout_hints = json.dumps(action.layout_hints, ensure_ascii=False)
+                    session.add(note)
+                    touched_notes.add(note.id)
                     applied += 1
+
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    dataset_logger.append({
-        "kind": "commit",
-        "draft": [action.dict() for action in payload.draft],
-        "applied": applied,
-        "rejected": len(payload.draft) - applied,
-        "notes_changed": list(changed_notes),
-    })
+        for note_id in notes_requiring_index:
+            note = session.get(Note, note_id)
+            if note:
+                _reindex_note(session, note)
 
-    return CommitResponse(applied=applied, notes_changed=list(changed_notes))
+        session.flush()
 
-
-def _reindex_note(session, note: Note) -> None:
-    tags = [tag.tag for tag in note.tags]
-    meta_chunk = (
-        f"{note.id}:meta",
-        f"{note.title}\nTags: {', '.join(tags)}\nPriority: {note.priority}\nStatus: {note.status}\n"
-        f"Cluster: {note.cluster}\nImportance: {note.importance}"
+    dataset_logger.append(
+        {
+            "kind": "commit",
+            "draft": [action.dict(by_alias=True) for action in payload.draft],
+            "applied": applied,
+            "rejected": len(payload.draft) - applied,
+            "notes_changed": list(touched_notes),
+        }
     )
-    content_chunks = chunk_markdown(note.content_md)
-    combined = [(f"{note.id}:{idx}", text) for idx, text in enumerate(content_chunks)] + [meta_chunk]
 
-    from app.db.models import NoteChunk  # local import to avoid cycle
+    return CommitResponse(applied=applied, notes_changed=list(touched_notes))
 
-    session.query(NoteChunk).filter(NoteChunk.note_id == note.id).delete()
-    new_chunks = []
-    for idx, (chunk_id, text) in enumerate(combined):
-        new_chunks.append(NoteChunk(note_id=note.id, idx=idx, text=text, embedding=json.dumps([])))
-    if new_chunks:
-        session.add_all(new_chunks)
-    session.flush()
 
-    index.upsert(note.id, combined)
+def _require_note(session, note_id: Optional[str]) -> Note:
+    if not note_id:
+        raise HTTPException(status_code=400, detail="Draft action missing noteId")
+    note = session.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+    return note
+
+
+def _insert_block(blocks: List[dict], block: dict, after_id: Optional[str]) -> List[dict]:
+    if not blocks or after_id is None:
+        return blocks + [block]
+    for idx, existing in enumerate(blocks):
+        if existing.get("id") == after_id:
+            blocks.insert(idx + 1, block)
+            return blocks
+    blocks.append(block)
+    return blocks
+
+
+def _patch_block(blocks: List[dict], block_id: str, patch: dict) -> bool:
+    for existing in blocks:
+        if existing.get("id") == block_id:
+            existing.update(patch)
+            return True
+    return False
+
+
+def _move_block(blocks: List[dict], block_id: str, after_id: Optional[str]) -> bool:
+    current_index = next((idx for idx, blk in enumerate(blocks) if blk.get("id") == block_id), None)
+    if current_index is None:
+        return False
+    block = blocks.pop(current_index)
+    if after_id is None:
+        blocks.insert(0, block)
+        return True
+    for idx, existing in enumerate(blocks):
+        if existing.get("id") == after_id:
+            blocks.insert(idx + 1, block)
+            return True
+    blocks.append(block)
+    return True

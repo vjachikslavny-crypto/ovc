@@ -8,3 +8,4 @@ __pycache__/
 dataset.log
 simple_app/ovc.db
 .DS_Store
+data/

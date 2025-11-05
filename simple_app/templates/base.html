@@ -1,25 +1,34 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}OVC Simple App{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/styles.css" />
-</head>
-<body>
-  <header class="topbar">
-    <div class="logo">OVC Simple</div>
-    <nav>
-      <a href="/">Чат</a>
-      <a href="/notes">Заметки</a>
-      <a href="/graph">Граф</a>
-      <a href="/api/dataset/export" target="_blank">JSONL</a>
-    </nav>
-  </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
-  <script src="/static/js/app.js" defer></script>
-  {% block extra_scripts %}{% endblock %}
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}OVC Human Notes{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body class="theme-clean" data-theme="clean">
+    <header class="app-shell__topbar">
+      <div class="app-shell__brand">
+        <span class="app-shell__logo">OVC</span>
+        <span class="app-shell__subtitle">Human Notes</span>
+      </div>
+      <nav class="app-shell__nav">
+        <a href="/notes" class="nav-link">База</a>
+        <a href="/" class="nav-link">Редактор</a>
+        <a href="/api/dataset/export" class="nav-link" target="_blank">JSONL</a>
+      </nav>
+      <div class="app-shell__actions">
+        <button class="pill-button" data-theme="clean">Clean</button>
+        <button class="pill-button" data-theme="brief">Brief</button>
+      </div>
+    </header>
+    <main id="app-root" class="app-shell__body">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="app-shell__footer">
+      <small>Offline · Готово к своей модели</small>
+    </footer>
+    <script type="module" src="/static/js/theme.js"></script>
+    {% block extra_scripts %}{% endblock %}
+  </body>
 </html>

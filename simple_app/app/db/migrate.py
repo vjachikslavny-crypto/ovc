@@ -1,23 +1,14 @@
-from sqlalchemy import text
-
 from app.db.models import Base
 from app.db.session import engine
 
 
-def upgrade():
-    Base.metadata.create_all(bind=engine)
+def upgrade() -> None:
+    # Given the scale of schema changes between revisions we opt for a full
+    # reset of SQLite structures. The application ships with demo data only,
+    # so dropping tables is acceptable in development.
     with engine.begin() as conn:
-        statements = [
-            "ALTER TABLE notes ADD COLUMN importance FLOAT NOT NULL DEFAULT 1.0",
-            "ALTER TABLE notes ADD COLUMN cluster VARCHAR NOT NULL DEFAULT 'default'",
-            "ALTER TABLE notes ADD COLUMN cluster_color VARCHAR NOT NULL DEFAULT '#8b5cf6'",
-        ]
-        for stmt in statements:
-            try:
-                conn.execute(text(stmt))
-            except Exception:
-                # Column already exists or backend does not support ALTER; ignore.
-                pass
+        Base.metadata.drop_all(bind=conn)
+        Base.metadata.create_all(bind=conn)
 
 
 if __name__ == "__main__":

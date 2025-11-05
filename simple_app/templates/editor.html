@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Редактор заметки{% endblock %}
+
+{% block content %}
+<div class="editor" data-note-id="{{ note_id or '' }}">
+  <section class="editor__header">
+    <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
+    <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+    <div class="editor__header-actions">
+      <button class="icon-button" id="note-info" aria-label="Паспорт заметки">i</button>
+      <button class="pill-button" id="note-share">Поделиться</button>
+    </div>
+  </section>
+
+  <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
+    <button class="toolbar__btn" data-action="bold">B</button>
+    <button class="toolbar__btn" data-action="italic"><em>I</em></button>
+    <button class="toolbar__btn" data-action="link">Link</button>
+    <button class="toolbar__btn" data-action="list">List</button>
+    <button class="toolbar__btn" data-action="quote">Quote</button>
+    <button class="toolbar__btn" data-action="align">Align</button>
+  </section>
+
+  <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
+    <div id="note-blocks" class="note-blocks"></div>
+  </section>
+
+  <div class="floating-actions" aria-live="polite">
+    <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
+    <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
+    <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
+    <input type="file" id="file-input" class="hidden" accept="image/*,.pdf,.doc,.docx" multiple />
+  </div>
+
+  <div class="bottom-sheet" id="block-palette" aria-hidden="true">
+    <div class="bottom-sheet__handle"></div>
+    <h3>Добавить блок</h3>
+    <div class="block-palette">
+      <button data-block="heading" data-level="1">Заголовок</button>
+      <button data-block="paragraph">Текст</button>
+      <button data-block="bulletList">Список</button>
+      <button data-block="quote">Цитата</button>
+      <button data-block="table">Таблица</button>
+      <button data-block="image">Картинка</button>
+      <button data-block="source">Источник</button>
+      <button data-block="todo">Задача</button>
+      <button data-block="summary">Сводка</button>
+      <button data-block="divider">Разделитель</button>
+    </div>
+  </div>
+
+  <aside class="note-inspector" id="note-inspector" aria-hidden="true">
+    <header>
+      <h3>Паспорт заметки</h3>
+      <button class="icon-button" data-close-inspector>×</button>
+    </header>
+    <section>
+      <h4>Теги</h4>
+      <div id="inspector-tags" class="chip-list"></div>
+    </section>
+    <section>
+      <h4>Связи</h4>
+      <ul id="inspector-links" class="link-list"></ul>
+    </section>
+    <section>
+      <h4>Свойства</h4>
+      <dl id="inspector-properties" class="property-list"></dl>
+    </section>
+    <section>
+      <h4>Автоматизация</h4>
+      <label class="toggle">
+        <input type="checkbox" id="llm-toggle" />
+        <span>Авто-оформление моделью (эксперимент)</span>
+      </label>
+    </section>
+  </aside>
+
+  <div class="inline-bubble" id="inline-bubble" role="toolbar" aria-hidden="true">
+    <button data-action="bold">B</button>
+    <button data-action="italic"><em>I</em></button>
+    <button data-action="link">Link</button>
+    <button data-action="quote">Quote</button>
+    <button data-action="list">List</button>
+    <button data-action="heading">H</button>
+  </div>
+
+  <div class="hint-banner" id="hint-banner" hidden>
+    <span id="hint-text"></span>
+    <button class="icon-button" id="hint-dismiss">×</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script type="module" src="/static/js/editor.js"></script>
+{% endblock %}

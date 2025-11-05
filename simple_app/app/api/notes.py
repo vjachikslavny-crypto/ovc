@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import List, Optional
+import json
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.db.models import Note, NoteLink, NoteSource, NoteTag
+from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
@@ -14,130 +15,154 @@ from app.rag.tfidf_index import index
 router = APIRouter(tags=["notes"])
 
 
-class NoteTagResponse(BaseModel):
-    tag: str
-    weight: float
-
-
-class NoteLinkResponse(BaseModel):
+class LinkPayload(BaseModel):
     id: str
-    from_id: str
-    to_id: str
-    to_title: str
-    reason: str
-    confidence: float
+    from_id: str = Field(alias="fromId")
+    to_id: str = Field(alias="toId")
+    title: str
+    reason: Optional[str]
+    confidence: Optional[float]
+
+    class Config:
+        allow_population_by_field_name = True
 
 
-class NoteResponse(BaseModel):
+class SourcePayload(BaseModel):
+    id: str
+    url: str
+    title: str
+    domain: str
+    published_at: Optional[str]
+    summary: Optional[str]
+
+
+class NoteSummary(BaseModel):
     id: str
     title: str
-    content_md: str
-    priority: str
-    status: str
-    importance: float
-    cluster: str
-    cluster_color: str
-    tags: List[NoteTagResponse] = []
+    style_theme: str = Field(alias="styleTheme")
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+
+    class Config:
+        allow_population_by_field_name = True
 
 
-class NoteDetailResponse(NoteResponse):
-    links_from: List[NoteLinkResponse] = []
-    links_to: List[NoteLinkResponse] = []
-    sources: List[dict] = []
+class NoteDetail(NoteSummary):
+    blocks: List[Dict[str, Any]]
+    layout_hints: Dict[str, Any] = Field(default_factory=dict, alias="layoutHints")
+    passport: Dict[str, Any] = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    links_from: List[LinkPayload] = Field(default_factory=list, alias="linksFrom")
+    links_to: List[LinkPayload] = Field(default_factory=list, alias="linksTo")
+    sources: List[SourcePayload] = Field(default_factory=list)
+
+    class Config(NoteSummary.Config):
+        pass
+
+
+class NoteListResponse(BaseModel):
+    items: List[NoteSummary]
+    total: int
+    limit: int
+    offset: int
 
 
 class NoteCreateRequest(BaseModel):
     title: str = Field(..., min_length=1)
-    content_md: str = Field(..., min_length=1)
-    priority: str = Field(default="medium")
-    importance: float = Field(default=1.0, ge=0.4, le=3.0)
-    cluster: str = Field(default="default", max_length=48)
-    cluster_color: str = Field(default="#8b5cf6", min_length=4, max_length=16)
+    style_theme: str = Field(default="clean", alias="styleTheme")
+    layout_hints: Dict[str, Any] = Field(default_factory=dict, alias="layoutHints")
+    blocks: List[Dict[str, Any]] = Field(default_factory=list)
+    passport: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class NoteUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    content_md: Optional[str] = None
-    priority: Optional[str] = None
-    status: Optional[str] = None
-    importance: Optional[float] = Field(default=None, ge=0.4, le=3.0)
-    cluster: Optional[str] = Field(default=None, max_length=48)
-    cluster_color: Optional[str] = Field(default=None, min_length=4, max_length=16)
+    title: Optional[str] = Field(default=None, min_length=1)
+    style_theme: Optional[str] = Field(default=None, alias="styleTheme")
+    layout_hints: Optional[Dict[str, Any]] = Field(default=None, alias="layoutHints")
+    blocks: Optional[List[Dict[str, Any]]] = None
+    passport: Optional[Dict[str, Any]] = None
+
+    class Config:
+        allow_population_by_field_name = True
 
 
-class TagRequest(BaseModel):
-    tag: str = Field(..., min_length=1)
-    weight: float = Field(default=1.0, ge=0.1)
-
-
-class LinkRequest(BaseModel):
-    target_id: str = Field(..., min_length=1)
-    reason: str = Field(default="manual")
-    confidence: float = Field(default=0.85, ge=0.0, le=1.0)
-
-
-@router.get("/notes", response_model=List[NoteResponse])
-async def list_notes():
-    items: List[NoteResponse] = []
+@router.get("/notes", response_model=NoteListResponse)
+async def list_notes(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
     with get_session() as session:
-        notes = session.execute(select(Note)).scalars().all()
-        for note in notes:
-            items.append(_serialize_note(note, include_links=False, include_sources=False))
-    return items
+        total = session.execute(select(func.count(Note.id))).scalar_one()
+        notes = (
+            session.execute(
+                select(Note)
+                .order_by(Note.updated_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
+
+        items = [_serialize_summary(note) for note in notes]
+        return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/notes/{note_id}", response_model=NoteDetailResponse)
+@router.get("/notes/{note_id}", response_model=NoteDetail)
 async def get_note(note_id: str):
     with get_session() as session:
         note = session.get(Note, note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        return _serialize_note(note, include_links=True, include_sources=True)
+        return _serialize_detail(note)
 
 
-@router.post("/notes", response_model=NoteDetailResponse)
+@router.post("/notes", response_model=NoteDetail, status_code=201)
 async def create_note(payload: NoteCreateRequest):
     with get_session() as session:
         note = Note(
             title=payload.title,
-            content_md=payload.content_md,
-            priority=payload.priority,
-            importance=payload.importance,
-            cluster=payload.cluster or "default",
-            cluster_color=payload.cluster_color or "#8b5cf6",
+            style_theme=payload.style_theme,
+            layout_hints=_dumps(payload.layout_hints),
+            blocks_json=_dumps(payload.blocks),
+            passport_json=_dumps(payload.passport),
         )
         session.add(note)
         session.flush()
-        _reindex(session, note)
+        _reindex_note(session, note)
         session.refresh(note)
-        return _serialize_note(note, include_links=True, include_sources=True)
+        return _serialize_detail(note)
 
 
-@router.patch("/notes/{note_id}", response_model=NoteDetailResponse)
+@router.patch("/notes/{note_id}", response_model=NoteDetail)
 async def update_note(note_id: str, payload: NoteUpdateRequest):
     with get_session() as session:
         note = session.get(Note, note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+
+        blocks_changed = False
+
         if payload.title is not None:
             note.title = payload.title
-        if payload.content_md is not None:
-            note.content_md = payload.content_md
-        if payload.priority is not None:
-            note.priority = payload.priority
-        if payload.status is not None:
-            note.status = payload.status
-        if payload.importance is not None:
-            note.importance = payload.importance
-        if payload.cluster is not None:
-            note.cluster = payload.cluster or "default"
-        if payload.cluster_color is not None:
-            note.cluster_color = payload.cluster_color or "#8b5cf6"
+        if payload.style_theme is not None:
+            note.style_theme = payload.style_theme
+        if payload.layout_hints is not None:
+            note.layout_hints = _dumps(payload.layout_hints)
+        if payload.blocks is not None:
+            note.blocks_json = _dumps(payload.blocks)
+            blocks_changed = True
+        if payload.passport is not None:
+            note.passport_json = _dumps(payload.passport)
+
         session.add(note)
         session.flush()
-        _reindex(session, note)
+
+        if blocks_changed:
+            _reindex_note(session, note)
+
         session.refresh(note)
-        return _serialize_note(note, include_links=True, include_sources=True)
+        return _serialize_detail(note)
 
 
 @router.delete("/notes/{note_id}")
@@ -152,159 +177,136 @@ async def delete_note(note_id: str):
     return {"status": "ok"}
 
 
-@router.post("/notes/{note_id}/tags", response_model=NoteDetailResponse)
-async def add_tag(note_id: str, payload: TagRequest):
-    with get_session() as session:
-        note = session.get(Note, note_id)
-        if not note:
-            raise HTTPException(status_code=404, detail="Note not found")
-        tag = session.execute(
-            select(NoteTag).where(NoteTag.note_id == note_id, NoteTag.tag == payload.tag)
-        ).scalar_one_or_none()
-        if tag:
-            tag.weight = payload.weight
-        else:
-            session.add(NoteTag(note_id=note_id, tag=payload.tag, weight=payload.weight))
-        session.flush()
-        _reindex(session, note)
-        session.refresh(note)
-        return _serialize_note(note, include_links=True, include_sources=True)
-
-
-@router.delete("/notes/{note_id}/tags/{tag}", response_model=NoteDetailResponse)
-async def remove_tag(note_id: str, tag: str):
-    with get_session() as session:
-        note = session.get(Note, note_id)
-        if not note:
-            raise HTTPException(status_code=404, detail="Note not found")
-        session.query(NoteTag).filter(NoteTag.note_id == note_id, NoteTag.tag == tag).delete()
-        session.flush()
-        _reindex(session, note)
-        session.refresh(note)
-        return _serialize_note(note, include_links=True, include_sources=True)
-
-
-@router.post("/notes/{note_id}/links", response_model=NoteDetailResponse)
-async def add_link(note_id: str, payload: LinkRequest):
-    with get_session() as session:
-        source = session.get(Note, note_id)
-        target = session.get(Note, payload.target_id)
-        if not source or not target:
-            raise HTTPException(status_code=404, detail="Note not found")
-        existing = session.execute(
-            select(NoteLink).where(
-                NoteLink.from_id == note_id,
-                NoteLink.to_id == payload.target_id,
-                NoteLink.reason == payload.reason,
-            )
-        ).scalar_one_or_none()
-        if not existing:
-            session.add(
-                NoteLink(
-                    from_id=note_id,
-                    to_id=payload.target_id,
-                    reason=payload.reason,
-                    confidence=payload.confidence,
-                )
-            )
-        session.flush()
-        session.refresh(source)
-        return _serialize_note(source, include_links=True, include_sources=True)
-
-
-@router.delete("/notes/{note_id}/links/{link_id}", response_model=NoteDetailResponse)
-async def remove_link(note_id: str, link_id: str):
-    with get_session() as session:
-        note = session.get(Note, note_id)
-        if not note:
-            raise HTTPException(status_code=404, detail="Note not found")
-        session.query(NoteLink).filter(NoteLink.id == link_id, NoteLink.from_id == note_id).delete()
-        session.flush()
-        session.refresh(note)
-        return _serialize_note(note, include_links=True, include_sources=True)
-
-
-def _serialize_note(note: Note, include_links: bool, include_sources: bool) -> NoteDetailResponse:
-    tags = [NoteTagResponse(tag=tag.tag, weight=tag.weight) for tag in note.tags]
-
-    links_from: List[NoteLinkResponse] = []
-    links_to: List[NoteLinkResponse] = []
-
-    if include_links:
-        for link in note.links_from:
-            target_title = link.target_note.title if link.target_note else ""
-            links_from.append(
-                NoteLinkResponse(
-                    id=link.id,
-                    from_id=link.from_id,
-                    to_id=link.to_id,
-                    to_title=target_title,
-                    reason=link.reason,
-                    confidence=link.confidence,
-                )
-            )
-        for link in note.links_to:
-            source_title = link.source_note.title if link.source_note else ""
-            links_to.append(
-                NoteLinkResponse(
-                    id=link.id,
-                    from_id=link.from_id,
-                    to_id=link.to_id,
-                    to_title=source_title,
-                    reason=link.reason,
-                    confidence=link.confidence,
-                )
-            )
-
-    sources_payload: List[dict] = []
-    if include_sources:
-        for note_source in note.sources:
-            src = note_source.source
-            sources_payload.append(
-                {
-                    "id": src.id,
-                    "url": src.url,
-                    "domain": src.domain,
-                    "title": src.title,
-                    "summary": src.summary,
-                    "published_at": src.published_at,
-                }
-            )
-
-    return NoteDetailResponse(
+def _serialize_summary(note: Note) -> NoteSummary:
+    return NoteSummary(
         id=note.id,
         title=note.title,
-        content_md=note.content_md,
-        priority=note.priority,
-        status=note.status,
-        importance=note.importance,
-        cluster=note.cluster,
-        cluster_color=note.cluster_color,
-        tags=tags,
-        links_from=links_from,
-        links_to=links_to,
-        sources=sources_payload,
+        styleTheme=note.style_theme,
+        createdAt=note.created_at.isoformat(),
+        updatedAt=note.updated_at.isoformat(),
     )
 
 
-def _reindex(session, note: Note) -> None:
-    tags = [tag.tag for tag in note.tags]
-    additional = [
-        (f"{note.id}:meta", f"{note.title}\nTags: {', '.join(tags)}\nPriority: {note.priority}\nStatus: {note.status}")
-    ]
-    chunks = chunk_markdown(note.content_md)
-    all_chunks = [(f"{note.id}:{idx}", text) for idx, text in enumerate(chunks)] + additional
+def _serialize_detail(note: Note) -> NoteDetail:
+    blocks = json.loads(note.blocks_json or "[]")
+    layout_hints = json.loads(note.layout_hints or "{}")
+    passport = json.loads(note.passport_json or "{}")
 
-    from app.db.models import NoteChunk  # local import to avoid circular
+    tags = [tag.tag for tag in note.tags]
+
+    links_from = [
+        LinkPayload(
+            id=link.id,
+            fromId=link.from_id,
+            toId=link.to_id,
+            title=link.target_note.title if link.target_note else "",
+            reason=link.reason,
+            confidence=link.confidence,
+        )
+        for link in note.links_from
+    ]
+    links_to = [
+        LinkPayload(
+            id=link.id,
+            fromId=link.from_id,
+            toId=link.to_id,
+            title=link.source_note.title if link.source_note else "",
+            reason=link.reason,
+            confidence=link.confidence,
+        )
+        for link in note.links_to
+    ]
+
+    sources = [
+        SourcePayload(
+            id=str(ns.id),
+            url=ns.source.url,
+            title=ns.source.title,
+            domain=ns.source.domain,
+            published_at=ns.source.published_at,
+            summary=ns.source.summary,
+        )
+        for ns in note.sources
+    ]
+
+    return NoteDetail(
+        id=note.id,
+        title=note.title,
+        styleTheme=note.style_theme,
+        createdAt=note.created_at.isoformat(),
+        updatedAt=note.updated_at.isoformat(),
+        blocks=blocks,
+        layoutHints=layout_hints,
+        passport=passport,
+        tags=tags,
+        linksFrom=links_from,
+        linksTo=links_to,
+        sources=sources,
+    )
+
+
+def _reindex_note(session, note: Note) -> None:
+    blocks = json.loads(note.blocks_json or "[]")
+    plain_text = _blocks_to_text(blocks)
+    chunks = chunk_markdown(plain_text)
 
     session.query(NoteChunk).filter(NoteChunk.note_id == note.id).delete()
     new_chunks = []
-    for chunk_id, text in all_chunks:
+    for idx, text in enumerate(chunks):
         new_chunks.append(
-            NoteChunk(note_id=note.id, idx=len(new_chunks), text=text, embedding="[]")
+            NoteChunk(
+                note_id=note.id,
+                idx=float(idx),
+                text=text,
+                embedding="[]",
+            )
         )
     if new_chunks:
         session.add_all(new_chunks)
     session.flush()
 
-    index.upsert(note.id, all_chunks)
+    index.upsert(note.id, [(f"{note.id}:{i}", text) for i, text in enumerate(chunks)])
+
+
+def _blocks_to_text(blocks: List[Dict[str, Any]]) -> str:
+    lines: List[str] = []
+    for block in blocks:
+        b_type = block.get("type")
+        data = block.get("data", {})
+        if b_type == "heading":
+            lines.append(str(data.get("text", "")))
+        elif b_type == "paragraph":
+            parts = data.get("parts", [])
+            text = "".join(part.get("text", "") for part in parts)
+            lines.append(text)
+        elif b_type in {"bulletList", "numberList"}:
+            for item in data.get("items", []):
+                if isinstance(item, dict):
+                    lines.append(item.get("text", ""))
+                else:
+                    lines.append(str(item))
+        elif b_type == "quote":
+            lines.append(str(data.get("text", "")))
+        elif b_type == "table":
+            for row in data.get("rows", []):
+                if isinstance(row, list):
+                    lines.append(" ".join(str(cell) for cell in row))
+        elif b_type == "source":
+            lines.append(str(data.get("title", "")))
+            if data.get("summary"):
+                lines.append(str(data.get("summary")))
+        elif b_type == "summary":
+            lines.append(str(data.get("text", "")))
+        elif b_type == "todo":
+            for item in data.get("items", []):
+                if isinstance(item, dict):
+                    lines.append(item.get("text", ""))
+        elif b_type == "image":
+            if data.get("caption"):
+                lines.append(str(data.get("caption")))
+        # divider and unknown types contribute no text
+    return "\n".join(line for line in lines if line)
+
+
+def _dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
