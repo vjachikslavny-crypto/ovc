@@ -13,7 +13,7 @@
 ## Simple App (Python + FastAPI)
 
 - `simple_app/app/main.py` — точка входа FastAPI
-- `simple_app/app/api/` — REST: `/api/chat`, `/api/commit`, `/api/notes`
+- `simple_app/app/api/` — REST: `/api/chat`, `/api/commit`, `/api/notes`, `/api/graph`
 - `simple_app/app/agent/` — DraftAction и оркестратор
 - `simple_app/app/rag/` — TF-IDF индекс и чанкирование
 - `simple_app/app/db/` — SQLAlchemy модели, сессия, миграция
@@ -34,4 +34,3 @@
 - TypeScript: `server/agent/orchestrator.ts` — логика черновиков без внешних поисков
 - Python: `simple_app/app/log/dataset_logger.py` — JSONL
 - `GET /api/dataset/export` — выгрузка логов
-

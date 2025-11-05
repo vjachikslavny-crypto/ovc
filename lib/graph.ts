@@ -1,4 +1,4 @@
-import type { Note, NoteLink } from "./schema";
+import type { NoteLink } from "./schema";
 
 export type GraphNode = {
   id: string;
@@ -19,7 +19,21 @@ export type GraphData = {
   edges: GraphEdge[];
 };
 
-export function buildGraph(notes: Note[], links: NoteLink[]): GraphData {
+// Типы для входных данных - принимаем только необходимые поля
+type NoteInput = {
+  id: string;
+  title: string;
+};
+
+type NoteLinkInput = {
+  id: string;
+  fromId: string;
+  toId: string;
+  reason: string;
+  confidence: number | null;
+};
+
+export function buildGraph(notes: NoteInput[], links: NoteLinkInput[]): GraphData {
   const nodeMap = new Map<string, GraphNode>();
   for (const note of notes) {
     nodeMap.set(note.id, {

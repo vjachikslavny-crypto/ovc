@@ -109,16 +109,23 @@ async def commit_endpoint(payload: CommitRequest):
 
 
 def _reindex_note(session, note: Note) -> None:
-    chunks = chunk_markdown(note.content_md)
+    tags = [tag.tag for tag in note.tags]
+    meta_chunk = (
+        f"{note.id}:meta",
+        f"{note.title}\nTags: {', '.join(tags)}\nPriority: {note.priority}\nStatus: {note.status}\n"
+        f"Cluster: {note.cluster}\nImportance: {note.importance}"
+    )
+    content_chunks = chunk_markdown(note.content_md)
+    combined = [(f"{note.id}:{idx}", text) for idx, text in enumerate(content_chunks)] + [meta_chunk]
+
     from app.db.models import NoteChunk  # local import to avoid cycle
 
     session.query(NoteChunk).filter(NoteChunk.note_id == note.id).delete()
     new_chunks = []
-    for idx, text in enumerate(chunks):
-        chunk_id = f"{note.id}:{idx}"
+    for idx, (chunk_id, text) in enumerate(combined):
         new_chunks.append(NoteChunk(note_id=note.id, idx=idx, text=text, embedding=json.dumps([])))
     if new_chunks:
         session.add_all(new_chunks)
     session.flush()
 
-    index.upsert(note.id, [(f"{note.id}:{idx}", text) for idx, text in enumerate(chunks)])
+    index.upsert(note.id, combined)

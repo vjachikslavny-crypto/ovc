@@ -9,3 +9,6 @@ tmp
 data/postgres
 ovc-project.zip
 ovc-project.zip
+.venv/
+simple_app/ovc.db
+tsconfig.tsbuildinfo

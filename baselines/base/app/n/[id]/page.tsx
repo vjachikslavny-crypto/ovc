@@ -149,7 +149,20 @@ export default async function NoteDetailPage({ params }: NotePageProps) {
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700">Источники</h3>
-        <SourcesTable sources={sourceList} />
+        <SourcesTable
+          sources={sourceList
+            .filter((s): s is typeof s & { url: string; domain: string; title: string; summary: string } => 
+              s.url != null && s.domain != null && s.title != null && s.summary != null
+            )
+            .map((s) => ({
+              id: s.id ?? undefined,
+              url: s.url,
+              domain: s.domain,
+              title: s.title,
+              summary: s.summary,
+              publishedAt: s.publishedAt ?? undefined
+            }))}
+        />
       </section>
     </div>
   );

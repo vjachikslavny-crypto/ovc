@@ -5,3 +5,4 @@ sqlalchemy
 scikit-learn
 python-multipart
 pydantic
+markdown

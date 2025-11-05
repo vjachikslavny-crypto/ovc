@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -12,12 +14,12 @@ router = APIRouter(tags=["chat"])
 
 class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1)
-    noteId: str | None = None
+    noteId: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     reply: str
-    draft: list[dict]
+    draft: List[Dict]
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -38,7 +40,7 @@ async def chat_endpoint(payload: ChatRequest):
 
 
 @router.get("/dataset/export")
-async def export_dataset(from_ts: str | None = None, to_ts: str | None = None):
+async def export_dataset(from_ts: Optional[str] = None, to_ts: Optional[str] = None):
     data = dataset_logger.export(from_ts=from_ts, to_ts=to_ts)
     return {
         "entries": data.splitlines() if data else []

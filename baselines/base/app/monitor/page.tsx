@@ -105,9 +105,9 @@ export default async function MonitorPage() {
                 </time>
               </header>
               <p className="mt-2 whitespace-pre-wrap text-gray-800">{item.text}</p>
-              {item.meta && (
+              {item.meta != null && (
                 <pre className="mt-3 overflow-x-auto rounded-md bg-white p-3 text-xs text-gray-700">
-                  {jsonPreview(item.meta)}
+                  {String(jsonPreview(item.meta))}
                 </pre>
               )}
             </article>

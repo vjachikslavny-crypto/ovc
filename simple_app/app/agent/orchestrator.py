@@ -42,14 +42,18 @@ def handle_user_message(text: str, note_id: Optional[str] = None) -> AgentReply:
 
 
 def _load_notes() -> List[dict]:
+    notes_payload: List[dict] = []
     with get_session() as session:
         records = session.execute(select(Note)).scalars().all()
-
-    for note in records:
-        chunks = chunk_markdown(note.content_md)
-        index.upsert(note.id, [(f"{note.id}:{idx}", text) for idx, text in enumerate(chunks)])
-
-    return [{"id": note.id, "title": note.title, "content_md": note.content_md} for note in records]
+        for note in records:
+            chunks = chunk_markdown(note.content_md)
+            index.upsert(note.id, [(f"{note.id}:{idx}", text) for idx, text in enumerate(chunks)])
+            notes_payload.append({
+                "id": note.id,
+                "title": note.title,
+                "content_md": note.content_md,
+            })
+    return notes_payload
 
 
 def _build_create_action(message: str) -> CreateNoteAction:

@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 LOG_PATH = Path(os.getenv("SIMPLE_DATASET_LOG", "simple_app/dataset.log"))
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -19,7 +19,7 @@ def append(record: Dict[str, Any]) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def export(from_ts: str | None = None, to_ts: str | None = None) -> str:
+def export(from_ts: Optional[str] = None, to_ts: Optional[str] = None) -> str:
     if not LOG_PATH.exists():
         return ""
     lines: list[str] = []

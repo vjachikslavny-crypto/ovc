@@ -76,7 +76,6 @@ export function GraphView({ data }: Props) {
   useEffect(() => {
     if (positionedNodes.length === 0) {
       setNodes([]);
-      setEdges([]);
       return;
     }
 
