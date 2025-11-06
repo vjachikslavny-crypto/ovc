@@ -11,6 +11,7 @@ from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
+from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints, parse_layout_hints
 
 router = APIRouter(tags=["notes"])
 
@@ -120,10 +121,11 @@ async def get_note(note_id: str):
 @router.post("/notes", response_model=NoteDetail, status_code=201)
 async def create_note(payload: NoteCreateRequest):
     with get_session() as session:
+        layout_data = merge_layout_hints(None, payload.layout_hints)
         note = Note(
             title=payload.title,
             style_theme=payload.style_theme,
-            layout_hints=_dumps(payload.layout_hints),
+            layout_hints=dumps_layout_hints(layout_data),
             blocks_json=_dumps(payload.blocks),
             passport_json=_dumps(payload.passport),
         )
@@ -148,7 +150,8 @@ async def update_note(note_id: str, payload: NoteUpdateRequest):
         if payload.style_theme is not None:
             note.style_theme = payload.style_theme
         if payload.layout_hints is not None:
-            note.layout_hints = _dumps(payload.layout_hints)
+            merged_hints = merge_layout_hints(note.layout_hints, payload.layout_hints)
+            note.layout_hints = dumps_layout_hints(merged_hints)
         if payload.blocks is not None:
             note.blocks_json = _dumps(payload.blocks)
             blocks_changed = True
@@ -189,7 +192,7 @@ def _serialize_summary(note: Note) -> NoteSummary:
 
 def _serialize_detail(note: Note) -> NoteDetail:
     blocks = json.loads(note.blocks_json or "[]")
-    layout_hints = json.loads(note.layout_hints or "{}")
+    layout_hints = parse_layout_hints(note.layout_hints)
     passport = json.loads(note.passport_json or "{}")
 
     tags = [tag.tag for tag in note.tags]

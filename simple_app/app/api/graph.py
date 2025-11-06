@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.db.models import GroupPreference, Note, NoteLink
 from app.db.session import get_session
+from app.utils.layout_hints import parse_layout_hints
 
 router = APIRouter(tags=["graph"])
 
@@ -39,7 +40,10 @@ async def graph_endpoint():
             group_meta = groups.get(group_key, groups["default"])
             blocks = json.loads(note.blocks_json or "[]")
             flat_text = _blocks_to_text(blocks)
-            size_score = max(0.4, min(3.0, len(flat_text) / 400.0 + len(blocks) / 8.0))
+            layout_hints = parse_layout_hints(note.layout_hints)
+            size_weight = layout_hints.get("sizeWeight", 1.0)
+            base_size = max(0.4, min(3.0, len(flat_text) / 400.0 + len(blocks) / 8.0))
+            size_score = max(0.3, min(6.0, base_size * size_weight))
 
             nodes.append(
                 {
@@ -51,6 +55,8 @@ async def graph_endpoint():
                     "blockCount": len(blocks),
                     "textSize": len(flat_text),
                     "sizeScore": size_score,
+                    "layoutHints": layout_hints,
+                    "sizeWeight": size_weight,
                     "tags": [tag.tag for tag in note.tags],
                     "updatedAt": note.updated_at.isoformat(),
                 }

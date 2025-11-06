@@ -92,8 +92,7 @@ function renderGraph(data) {
     .attr('stroke-width', 1.4)
     .selectAll('g')
     .data(nodes)
-    .join('g')
-    .call(drag(simulation));
+    .join('g');
 
   nodeGroup
     .append('title')
@@ -131,6 +130,7 @@ function renderGraph(data) {
       <strong>${d.title}</strong><br/>
       Блоков: ${d.blockCount}<br/>
       Символов: ${d.textSize}<br/>
+      Вес узла: ${formatWeight(d.sizeWeight)}<br/>
       Группа: ${d.group_label}<br/>
       Обновлено: ${new Date(d.updatedAt).toLocaleString()}
     `;
@@ -415,6 +415,12 @@ function rgbToHex({ r, g, b }) {
 function truncate(text, limit) {
   if (!text) return '';
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function formatWeight(value) {
+  const number = typeof value === 'number' ? value : Number.parseFloat(value);
+  if (Number.isNaN(number)) return '1.0';
+  return (Math.round(number * 10) / 10).toFixed(1);
 }
 
 function drag(simulation) {

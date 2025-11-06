@@ -1,5 +1,5 @@
 import { renderNote } from './blocks_render.js';
-import { initToolbar } from './toolbar.js';
+import { initToolbar, clearSelectionSnapshot, rememberSelection } from './toolbar.js';
 import { initInlineBubble } from './inline_bubble.js';
 import { initPalette } from './palette.js';
 import { initSmartInsert } from './smart_insert.js';
@@ -8,6 +8,7 @@ import { initHints } from './hints.js';
 import { uuid } from './utils.js';
 
 const SAVE_DEBOUNCE = 600;
+const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
 
 document.addEventListener('DOMContentLoaded', () => {
   const editorEl = document.querySelector('.editor');
@@ -31,10 +32,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const hintDismiss = document.getElementById('hint-dismiss');
   const llmToggle = document.getElementById('llm-toggle');
 
-  const inspector = initInspector(inspectorEl);
   const hints = initHints(hintBanner, hintText, hintDismiss);
+  const inspector = initInspector(inspectorEl, {
+    onSetLayoutHint: handleLayoutHintUpdate,
+    fetchNoteOptions: fetchLinkableNotes,
+    onCreateLink: createManualLink,
+  });
 
-  initToolbar(toolbarEl);
+  initToolbar(toolbarEl, canvas);
   initInlineBubble(bubbleEl, canvas);
   initPalette({ paletteEl, triggerEl: fabPlus, onInsert: handleInsertBlock });
   initSmartInsert(canvas, { onTransform: handleTransformBlock });
@@ -53,6 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   let saveTimer = null;
   let focusedBlockId = null;
+  let canvasClickBound = false;
+  let pendingCaretBlockId = null;
 
   const saveQueue = [];
 
@@ -74,11 +81,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return note.id;
   }
 
-  async function loadNote() {
-    const noteId = await ensureNote();
+  async function fetchNoteDetail(noteId) {
     const res = await fetch(`/api/notes/${noteId}`);
     if (!res.ok) throw new Error(await res.text());
-    const note = await res.json();
+    return res.json();
+  }
+
+  function applyNote(note) {
     noteState = {
       ...noteState,
       id: note.id,
@@ -86,40 +95,77 @@ document.addEventListener('DOMContentLoaded', () => {
       styleTheme: note.styleTheme,
       layoutHints: note.layoutHints ?? {},
       passport: note.passport ?? {},
-      blocks: Array.isArray(note.blocks) ? note.blocks : [],
+      blocks: cleanIncomingBlocks(note.blocks),
       tags: note.tags || [],
       linksFrom: note.linksFrom || [],
       linksTo: note.linksTo || [],
       sources: note.sources || [],
     };
+    focusedBlockId = null;
     render();
-    if (llmToggle) {
-      llmToggle.checked = Boolean(noteState.layoutHints?.autoLLM);
-    }
+  }
+
+  async function refreshNoteState() {
+    if (!noteState.id) return;
+    const note = await fetchNoteDetail(noteState.id);
+    applyNote(note);
+  }
+
+  async function loadNote() {
+    const noteId = await ensureNote();
+    const note = await fetchNoteDetail(noteId);
+    applyNote(note);
     hints.push('Нажмите ＋, чтобы добавить новый блок.');
   }
 
   function render() {
     titleEl.textContent = noteState.title || 'Без названия';
     renderNote(canvas, noteState, document.body.dataset.theme || 'clean');
+    clearSelectionSnapshot();
     hydrateBlocks();
     inspector.update(noteState);
-    if (focusedBlockId) {
-      const focusedEl = canvas.querySelector(`[data-block-id="${focusedBlockId}"]`);
-      focusedEl?.focus();
+    if (llmToggle) {
+      llmToggle.checked = Boolean(noteState.layoutHints?.autoLLM);
+    }
+    if (pendingCaretBlockId) {
+      const pendingEl = canvas.querySelector(`[data-block-id="${pendingCaretBlockId}"]`);
+      if (pendingEl) {
+        placeCaretAtEnd(pendingEl);
+      }
+      pendingCaretBlockId = null;
     }
   }
 
   function hydrateBlocks() {
     canvas.querySelectorAll('[data-block-id]').forEach((blockEl) => {
+      applyPlaceholderState(blockEl);
       blockEl.addEventListener('focus', () => {
         focusedBlockId = blockEl.dataset.blockId;
+        pendingCaretBlockId = null;
+        pendingCaretPlacement = null;
+      });
+      blockEl.addEventListener('mousedown', () => {
+        pendingCaretBlockId = null;
+        pendingCaretPlacement = null;
+      });
+      blockEl.addEventListener('mouseup', () => {
+        rememberSelection();
+      });
+      blockEl.addEventListener('keyup', () => {
+        rememberSelection();
       });
       blockEl.addEventListener('input', () => {
         updateBlockFromDom(blockEl);
+        applyPlaceholderState(blockEl);
         scheduleSave();
+        rememberSelection();
       });
     });
+
+    if (!canvasClickBound) {
+      canvas.addEventListener('click', onCanvasBlankClick);
+      canvasClickBound = true;
+    }
   }
 
   function updateBlockFromDom(blockEl) {
@@ -132,12 +178,16 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'heading':
         block.data.text = blockEl.textContent.trim();
         break;
-      case 'paragraph':
-        block.data.parts = [{ text: blockEl.textContent }];
+      case 'paragraph': {
+        const parts = extractRichTextParts(blockEl);
+        block.data.parts = parts;
         break;
+      }
       case 'bulletList':
       case 'numberList':
-        block.data.items = Array.from(blockEl.querySelectorAll('li')).map((li) => ({ text: li.textContent.trim() }));
+        block.data.items = Array.from(blockEl.querySelectorAll('li')).map((li) => ({
+          text: li.textContent.trim(),
+        }));
         break;
       case 'quote':
         block.data.text = blockEl.textContent.trim();
@@ -155,6 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
       default:
         break;
     }
+    applyPlaceholderState(blockEl);
   }
 
   function handleInsertBlock(block) {
@@ -172,6 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     noteState.blocks = blocks;
     focusedBlockId = block.id;
+    pendingCaretBlockId = block.id;
+    pendingCaretPlacement = { atEnd: true };
     hints.push('Выделите текст, чтобы появилось форматирование.');
     render();
     scheduleSave();
@@ -183,6 +236,8 @@ document.addEventListener('DOMContentLoaded', () => {
     block.type = nextData.type;
     block.data = nextData.data;
     focusedBlockId = blockId;
+    pendingCaretBlockId = blockId;
+    pendingCaretPlacement = { atEnd: true };
     render();
     scheduleSave();
   }
@@ -253,6 +308,9 @@ document.addEventListener('DOMContentLoaded', () => {
   infoBtn?.addEventListener('click', () => {
     const hidden = inspectorEl.getAttribute('aria-hidden') !== 'false';
     inspectorEl.setAttribute('aria-hidden', hidden ? 'false' : 'true');
+    if (hidden) {
+      inspector.onOpen?.(noteState);
+    }
   });
 
   fabVoice?.addEventListener('click', async () => {
@@ -280,5 +338,283 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.value = '';
   });
 
+  function handleLayoutHintUpdate(key, rawValue) {
+    const numeric = Number.parseFloat(rawValue);
+    const value = Number.isNaN(numeric) ? rawValue : Math.max(0.3, Math.min(6, numeric));
+    noteState.layoutHints = {
+      ...noteState.layoutHints,
+      [key]: value,
+    };
+    scheduleSave();
+  }
+
+  async function fetchLinkableNotes() {
+    const res = await fetch('/api/notes?limit=100');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (!Array.isArray(data?.items)) return [];
+    return data.items.map((item) => ({ id: item.id, title: item.title }));
+  }
+
+  async function createManualLink({ toId, reason }) {
+    const noteId = await ensureNote();
+    if (!toId) throw new Error('Не выбрана цель связи');
+    if (toId === noteId) throw new Error('Нельзя связать заметку саму с собой');
+    const normalizedReason = (reason || '').trim() || 'manual';
+    const payload = {
+      draft: [
+        {
+          type: 'add_link',
+          noteId,
+          fromId: noteId,
+          toId,
+          reason: normalizedReason,
+          confidence: 0.9,
+        },
+      ],
+    };
+    const res = await fetch('/api/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const result = await res.json();
+    if (!result.applied) {
+      throw new Error('Связь уже существует');
+    }
+    await refreshNoteState();
+  }
+
+  function onCanvasBlankClick(event) {
+    if (event.button !== 0) return;
+    if (event.target.closest('[data-block-id]')) return;
+    focusTailBlock();
+  }
+
+  function focusTailBlock() {
+    const lastBlock = canvas.querySelector('[data-block-id]:last-of-type');
+    if (lastBlock && lastBlock.getAttribute('contenteditable') === 'true') {
+      focusedBlockId = lastBlock.dataset.blockId;
+      placeCaretAtEnd(lastBlock);
+      return;
+    }
+    const fallback = {
+      id: uuid(),
+      type: 'paragraph',
+      data: { parts: [{ text: '' }] },
+    };
+    const nextBlocks = Array.isArray(noteState.blocks) ? noteState.blocks.slice() : [];
+    nextBlocks.push(fallback);
+    noteState.blocks = nextBlocks;
+    focusedBlockId = fallback.id;
+    pendingCaretBlockId = fallback.id;
+    pendingCaretPlacement = { atEnd: true };
+
+    render();
+    scheduleSave();
+  }
+
+  function placeCaretAtEnd(element) {
+    if (!element) return;
+    const target = element;
+    if (typeof target.focus === 'function') {
+      target.focus({ preventScroll: true });
+    }
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    let focusTarget = target;
+    if (target.matches('ul, ol')) {
+      const lastItem = target.querySelector('li:last-child');
+      if (lastItem) {
+        focusTarget = lastItem;
+      }
+    }
+    range.selectNodeContents(focusTarget);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    rememberSelection();
+  }
+
+  function restorePendingCaret() {
+    if (!pendingCaretBlockId) return;
+    const element = canvas.querySelector(`[data-block-id="${pendingCaretBlockId}"]`);
+    if (!element) {
+      pendingCaretBlockId = null;
+      pendingCaretPlacement = null;
+      return;
+    }
+    if (pendingCaretPlacement?.atEnd) {
+      placeCaretAtEnd(element);
+    } else if (pendingCaretPlacement?.offset != null) {
+      placeCaretAtOffset(element, pendingCaretPlacement.offset);
+    }
+    pendingCaretBlockId = null;
+    pendingCaretPlacement = null;
+  }
+
+  function stripPlaceholder(value, allowPlaceholderCheck = false) {
+    if (value === null || value === undefined) return '';
+    const stringValue = typeof value === 'string' ? value : String(value);
+    const trimmed = stringValue.trim();
+    if (!trimmed) return '';
+    if (allowPlaceholderCheck && PLACEHOLDER_STRINGS.has(trimmed)) {
+      return '';
+    }
+    return stringValue;
+  }
+
+  function cleanIncomingBlocks(blocks) {
+    if (!Array.isArray(blocks)) return [];
+    return blocks.map((block) => {
+      if (!block || typeof block !== 'object') return block;
+      const data = { ...(block.data || {}) };
+      if (block.type === 'heading') {
+        data.text = stripPlaceholder(data.text || '', true);
+        return { ...block, data };
+      }
+      if (block.type === 'paragraph') {
+        const rawParts = Array.isArray(data.parts)
+          ? data.parts
+          : [{ text: data.text || '' }];
+        const parts = rawParts
+          .map((part) => ({
+            text: stripPlaceholder(part?.text || '', true),
+            annotations: sanitizeAnnotations(part?.annotations),
+          }))
+          .filter((part) => part.text !== '');
+        data.parts = parts.length ? parts : [{ text: '' }];
+        delete data.text;
+        return { ...block, data };
+      }
+      return { ...block, data };
+    });
+  }
+
+  function sanitizeAnnotations(annotations) {
+    if (!annotations || typeof annotations !== 'object') return undefined;
+    const clean = {};
+    if (annotations.bold) clean.bold = true;
+    if (annotations.italic) clean.italic = true;
+    if (annotations.underline) clean.underline = true;
+    if (annotations.strike) clean.strike = true;
+    if (annotations.code) clean.code = true;
+    if (annotations.href) clean.href = String(annotations.href);
+    return Object.keys(clean).length ? clean : undefined;
+  }
+
+  function extractRichTextParts(blockEl) {
+    const segments = [];
+
+    const walk = (node, marks) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent ?? '';
+        if (text.length === 0) return;
+        segments.push({
+          text,
+          annotations: Object.keys(marks).length ? { ...marks } : undefined,
+        });
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      if (node.tagName?.toLowerCase() === 'br') {
+        if (segments.length === 0 || segments[segments.length - 1].text !== '\n') {
+          segments.push({
+            text: '\n',
+            annotations: Object.keys(marks).length ? { ...marks } : undefined,
+          });
+        } else {
+          segments[segments.length - 1].text += '\n';
+        }
+        return;
+      }
+
+      const nextMarks = accumulateMarks(node, marks);
+      node.childNodes.forEach((child) => walk(child, nextMarks));
+    };
+
+    blockEl.childNodes.forEach((child) => walk(child, {}));
+
+    const merged = mergeSegments(segments).map((part) =>
+      part.annotations ? part : { text: part.text }
+    );
+    return merged.length ? merged : [{ text: '' }];
+  }
+
+  function accumulateMarks(element, marks) {
+    const tag = element.tagName?.toLowerCase?.() || '';
+    const next = { ...marks };
+    if (tag === 'b' || tag === 'strong') next.bold = true;
+    if (tag === 'i' || tag === 'em') next.italic = true;
+    if (tag === 'u') next.underline = true;
+    if (tag === 's' || tag === 'del' || tag === 'strike') next.strike = true;
+    if (tag === 'code') next.code = true;
+    if (tag === 'a' && element.getAttribute) {
+      const href = element.getAttribute('href');
+      if (href) next.href = href;
+    }
+
+    const style = element.getAttribute?.('style') || '';
+    if (style) {
+      const lower = style.toLowerCase();
+      if (lower.includes('font-weight') && !next.bold) {
+        const match = lower.match(/font-weight\s*:\s*([^;]+)/);
+        if (match && parseInt(match[1], 10) >= 500) next.bold = true;
+      }
+      if (lower.includes('font-style') && !next.italic) {
+        if (lower.includes('italic')) next.italic = true;
+      }
+      if (lower.includes('text-decoration')) {
+        if (lower.includes('underline')) next.underline = true;
+        if (lower.includes('line-through')) next.strike = true;
+      }
+    }
+    return next;
+  }
+
+  function mergeSegments(segments) {
+    if (!segments.length) return segments;
+    const merged = [];
+    segments.forEach((segment) => {
+      const prev = merged[merged.length - 1];
+      if (
+        prev &&
+        shallowEqualAnnotations(prev.annotations, segment.annotations)
+      ) {
+        prev.text += segment.text;
+      } else {
+        merged.push({
+          text: segment.text,
+          annotations: segment.annotations,
+        });
+      }
+    });
+    return merged;
+  }
+
+  function shallowEqualAnnotations(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    return keysA.every((key) => Boolean(a[key]) === Boolean(b[key]));
+  }
+
   loadNote().catch((error) => console.error('Unable to load note', error));
+
+  function applyPlaceholderState(blockEl) {
+    if (!blockEl || !blockEl.dataset) return;
+    if (!blockEl.dataset.placeholder) return;
+    const text = (blockEl.textContent || '').replace(/\u200B/g, '').trim();
+    if (text.length === 0) {
+      blockEl.dataset.empty = 'true';
+    } else {
+      delete blockEl.dataset.empty;
+    }
+  }
 });

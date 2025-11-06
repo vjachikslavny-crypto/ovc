@@ -36,9 +36,9 @@ function buildBlock(type, dataset = {}) {
   const id = uuid();
   switch (type) {
     case 'heading':
-      return { id, type: 'heading', data: { level: parseInt(dataset.level || '1', 10), text: 'Новый заголовок' } };
+      return { id, type: 'heading', data: { level: parseInt(dataset.level || '1', 10), text: '' } };
     case 'paragraph':
-      return { id, type: 'paragraph', data: { parts: [{ text: 'Новый абзац' }] } };
+      return { id, type: 'paragraph', data: { parts: [{ text: '' }] } };
     case 'bulletList':
       return { id, type: 'bulletList', data: { items: [{ text: 'Первый пункт' }] } };
     case 'quote':

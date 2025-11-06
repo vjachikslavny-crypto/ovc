@@ -54,13 +54,16 @@ export function renderBlock(block) {
   }
 }
 
+const PLACEHOLDER_TEXT = new Set(['Новый заголовок', 'Новый абзац']);
+
 function renderHeading(data) {
   const level = Math.min(Math.max(parseInt(data.level ?? 1, 10), 1), 3);
   const el = document.createElement(`h${level + 1}`);
-  el.textContent = data.text || '';
+  el.textContent = sanitizePlaceholder(data.text || '');
   el.className = 'note-block note-block--heading';
   el.contentEditable = 'true';
   el.spellcheck = false;
+  el.dataset.placeholder = 'Заголовок';
   return el;
 }
 
@@ -69,7 +72,13 @@ function renderParagraph(data) {
   el.className = 'note-block note-block--paragraph';
   el.contentEditable = 'true';
   el.spellcheck = true;
-  const parts = Array.isArray(data.parts) ? data.parts : [{ text: data.text || '' }];
+  el.dataset.placeholder = 'Текст';
+  const parts = Array.isArray(data.parts)
+    ? data.parts.map((part) => ({
+        ...part,
+        text: sanitizePlaceholder(part.text || ''),
+      }))
+    : [{ text: sanitizePlaceholder(data.text || '') }];
   parts.forEach((part) => {
     const span = document.createElement('span');
     span.textContent = part.text || '';
@@ -92,6 +101,15 @@ function renderParagraph(data) {
     }
   });
   return el;
+}
+
+function sanitizePlaceholder(value) {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (PLACEHOLDER_TEXT.has(trimmed)) {
+    return '';
+  }
+  return value;
 }
 
 function renderList(data, tag) {

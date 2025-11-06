@@ -21,6 +21,7 @@ from app.db.models import Note, NoteLink, NoteTag
 from app.db.session import get_session
 from app.log import dataset_logger
 from app.api.notes import _reindex_note
+from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints
 
 router = APIRouter(tags=["commit"])
 
@@ -126,7 +127,8 @@ async def commit_endpoint(payload: CommitRequest):
                     note = _require_note(session, action.note_id)
                     note.style_theme = action.style_theme
                     if action.layout_hints is not None:
-                        note.layout_hints = json.dumps(action.layout_hints, ensure_ascii=False)
+                        merged_hints = merge_layout_hints(note.layout_hints, action.layout_hints)
+                        note.layout_hints = dumps_layout_hints(merged_hints)
                     session.add(note)
                     touched_notes.add(note.id)
                     applied += 1

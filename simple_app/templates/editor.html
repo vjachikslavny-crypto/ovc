@@ -7,8 +7,8 @@
     <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
     <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
     <div class="editor__header-actions">
-      <button class="icon-button" id="note-info" aria-label="Паспорт заметки">i</button>
-      <button class="pill-button" id="note-share">Поделиться</button>
+      <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>
+      <button class="pill-button pill-button--compact" id="note-share">Поделиться</button>
     </div>
   </section>
 
@@ -61,6 +61,43 @@
     <section>
       <h4>Связи</h4>
       <ul id="inspector-links" class="link-list"></ul>
+      <form id="inspector-link-form" class="inspector-link-form">
+        <select id="inspector-link-target" aria-label="Целевая заметка для связи"></select>
+        <input
+          type="text"
+          id="inspector-link-reason"
+          placeholder="Описание связи (опционально)"
+          aria-label="Описание связи"
+        />
+        <div class="inspector-link-actions">
+          <button type="submit" class="pill-button">Добавить связь</button>
+          <span id="inspector-link-status" class="muted" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+    <section>
+      <h4>Размер узла</h4>
+      <div class="inspector-size">
+        <input
+          type="range"
+          id="inspector-size"
+          min="0.3"
+          max="5"
+          step="0.1"
+          aria-label="Вес узла"
+        />
+        <div class="inspector-size-controls">
+          <input
+            type="number"
+            id="inspector-size-value"
+            min="0.3"
+            max="5"
+            step="0.1"
+            aria-label="Числовой вес узла"
+          />
+          <span class="muted">Вес влияет на размер точки на графе.</span>
+        </div>
+      </div>
     </section>
     <section>
       <h4>Свойства</h4>
