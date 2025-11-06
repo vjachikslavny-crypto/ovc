@@ -138,17 +138,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function hydrateBlocks() {
     canvas.querySelectorAll('[data-block-id]').forEach((blockEl) => {
+      const editableEl = getEditableElement(blockEl);
       applyPlaceholderState(blockEl);
       blockEl.addEventListener('focus', () => {
         focusedBlockId = blockEl.dataset.blockId;
         pendingCaretBlockId = null;
-        pendingCaretPlacement = null;
       });
-      blockEl.addEventListener('mousedown', () => {
-        pendingCaretBlockId = null;
-        pendingCaretPlacement = null;
-      });
+      if (editableEl && !blockEl.dataset.focusHandler) {
+        blockEl.dataset.focusHandler = '1';
+        blockEl.addEventListener('click', (event) => {
+          if (event.target === editableEl || editableEl.contains(event.target)) {
+            return;
+          }
+          focusEditable(editableEl);
+        });
+      }
       blockEl.addEventListener('mouseup', () => {
+        const editable = editableEl ?? blockEl;
+        requestAnimationFrame(() => {
+          if (!editable) return;
+          if (document.activeElement === editable || editable.contains(document.activeElement)) {
+            return;
+          }
+          const selection = window.getSelection();
+          if (selection && editable.contains(selection.anchorNode)) {
+            editable.focus({ preventScroll: false });
+            return;
+          }
+          focusEditable(editable);
+        });
         rememberSelection();
       });
       blockEl.addEventListener('keyup', () => {
@@ -224,7 +242,6 @@ document.addEventListener('DOMContentLoaded', () => {
     noteState.blocks = blocks;
     focusedBlockId = block.id;
     pendingCaretBlockId = block.id;
-    pendingCaretPlacement = { atEnd: true };
     hints.push('Выделите текст, чтобы появилось форматирование.');
     render();
     scheduleSave();
@@ -237,7 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
     block.data = nextData.data;
     focusedBlockId = blockId;
     pendingCaretBlockId = blockId;
-    pendingCaretPlacement = { atEnd: true };
     render();
     scheduleSave();
   }
@@ -409,10 +425,36 @@ document.addEventListener('DOMContentLoaded', () => {
     noteState.blocks = nextBlocks;
     focusedBlockId = fallback.id;
     pendingCaretBlockId = fallback.id;
-    pendingCaretPlacement = { atEnd: true };
 
     render();
     scheduleSave();
+  }
+
+  function focusEditable(element) {
+    if (!element) return;
+    if (typeof element.focus === 'function') {
+      element.focus({ preventScroll: false });
+    }
+    const selection = window.getSelection();
+    if (!selection) return;
+    const anchorInside = element.contains(selection.anchorNode);
+    const focusInside = element.contains(selection.focusNode);
+    if (anchorInside && focusInside) {
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function getEditableElement(blockEl) {
+    if (!blockEl) return null;
+    if (blockEl instanceof HTMLElement && blockEl.isContentEditable) {
+      return blockEl;
+    }
+    return blockEl.querySelector('[contenteditable="true"]');
   }
 
   function placeCaretAtEnd(element) {
@@ -441,18 +483,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function restorePendingCaret() {
     if (!pendingCaretBlockId) return;
     const element = canvas.querySelector(`[data-block-id="${pendingCaretBlockId}"]`);
-    if (!element) {
-      pendingCaretBlockId = null;
-      pendingCaretPlacement = null;
-      return;
-    }
-    if (pendingCaretPlacement?.atEnd) {
+    if (element) {
       placeCaretAtEnd(element);
-    } else if (pendingCaretPlacement?.offset != null) {
-      placeCaretAtOffset(element, pendingCaretPlacement.offset);
     }
     pendingCaretBlockId = null;
-    pendingCaretPlacement = null;
   }
 
   function stripPlaceholder(value, allowPlaceholderCheck = false) {
