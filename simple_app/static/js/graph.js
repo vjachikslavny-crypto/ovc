@@ -86,17 +86,31 @@ function renderGraph(data) {
     .attr('stroke-width', (d) => 1.2 + Math.max(0, (d.confidence || 0.5) * 2))
     .attr('stroke', (d) => getLinkColor(d.source.color, d.target.color));
 
-  const node = zoomLayer
+  const nodeGroup = zoomLayer
     .append('g')
     .attr('stroke', 'rgba(9,2,20,0.85)')
     .attr('stroke-width', 1.4)
-    .selectAll('circle')
+    .selectAll('g')
     .data(nodes)
-    .join('circle')
+    .join('g')
+    .call(drag(simulation));
+
+  nodeGroup
+    .append('title')
+    .text((d) => `${d.title}\n📦 Блоков: ${d.blockCount}\n✍️ Символов: ${d.textSize}`);
+
+  const node = nodeGroup
+    .append('circle')
     .attr('r', (d) => 16 + Math.min(40, Math.max(0, d.sizeScore * 12)))
     .attr('fill', (d) => d.color || '#8b5cf6')
-    .attr('filter', 'url(#node-glow)')
-    .call(drag(simulation));
+    .attr('filter', 'url(#node-glow)');
+
+  nodeGroup
+    .append('text')
+    .attr('class', 'graph-node-score')
+    .attr('text-anchor', 'middle')
+    .attr('dy', '0.45em')
+    .text((d) => Math.round(d.sizeScore * 10) / 10);
 
   const labels = zoomLayer
     .append('g')
@@ -110,7 +124,7 @@ function renderGraph(data) {
 
   const tooltip = document.getElementById('graph-tooltip');
 
-  node.on('mouseover', (event, d) => {
+  nodeGroup.on('mouseover', (event, d) => {
     highlightNode({ target: d });
     tooltip.classList.remove('hidden');
     tooltip.innerHTML = `
@@ -124,12 +138,12 @@ function renderGraph(data) {
     tooltip.style.top = `${event.pageY + 12}px`;
   });
 
-  node.on('mouseout', () => {
+  nodeGroup.on('mouseout', () => {
     highlightNode(null);
     tooltip.classList.add('hidden');
   });
 
-  node.on('dblclick', (_, d) => {
+  nodeGroup.on('dblclick', (_, d) => {
     window.open(`/notes/${d.id}`, '_blank');
   });
 
@@ -158,11 +172,11 @@ function renderGraph(data) {
       .attr('x2', (d) => d.target.x)
       .attr('y2', (d) => d.target.y);
 
-    node.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
+    nodeGroup.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
     labels.attr('x', (d) => d.x).attr('y', (d) => d.y);
   });
 
-  node.call(drag(simulation));
+  nodeGroup.call(drag(simulation));
 
   const zoomBehaviour = d3
     .zoom()
@@ -173,7 +187,7 @@ function renderGraph(data) {
 
   function highlightNode(payload) {
     const target = payload?.target;
-    node.classed('dimmed', (d) => target && d !== target);
+    nodeGroup.classed('dimmed', (d) => target && d !== target);
     labels.classed('dimmed', (d) => target && d !== target);
     link
       .classed('dimmed', (d) => target && d.source !== target && d.target !== target)
@@ -230,6 +244,7 @@ function initToolbar() {
     labels.classed('dimmed', false);
     link.classed('dimmed', false);
     svg.transition().duration(600).call(zoomBehaviour.transform, d3.zoomIdentity);
+    window.__graph?.simulation?.alpha(1).restart();
   });
 
   toggleLabels?.addEventListener('change', () => {
