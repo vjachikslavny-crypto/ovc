@@ -6,6 +6,7 @@
 
 - 🗂 **Список заметок** (`/notes`) — быстрый поиск, пагинация и создание заметок в один клик.
 - 📝 **Редактор** (`/` или `/notes/{id}`) — блоки рендерятся из JSON, темы `Clean`/`Brief`, верхний мини-toolbar, inline bubble, smart insert (URL → источник, `- ` → список, `Сводка:` → блок сводки), голос/вложения и “паспорт заметки”.
+- 🕸 **Граф** (`/graph`) — интерактивная визуализация связей (поиск, подсветка по наведению, настройка цвета и названия групп).
 - 🔁 **DraftAction API** (`/api/commit`) — атомарно применяет действия (`insert_block`, `update_block`, `move_block`, `add_tag`, `add_link`, `set_style`).
 - 🔎 **Локальный поиск** — TF-IDF индекс по тексту блоков, обновляется при каждом изменении.
 - 🗃 **Журнал** (`/api/dataset/export`) — JSONL-лог для обучения модели.
@@ -44,8 +45,9 @@ simple_app/
 │   ├── providers/    # LLM-заглушки и заготовка Ollama
 │   ├── rag/          # TF-IDF индекс
 │   └── main.py       # FastAPI приложение
-├── static/           # CSS/JS (рендер блоков, тулбары, palette, hints)
-├── templates/        # base.html, notes.html, editor.html
+├── static/           # CSS/JS (рендер блоков, тулбары, palette, graph)
+│   └── js/graph.js            # визуализация графа (D3)
+├── templates/        # base.html, notes.html, editor.html, graph.html
 ├── requirements.txt  # зависимости
 └── run.sh            # venv + миграция + запуск uvicorn
 ```
