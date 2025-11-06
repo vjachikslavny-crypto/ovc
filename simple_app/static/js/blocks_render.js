@@ -64,7 +64,7 @@ function renderHeading(data) {
   el.contentEditable = 'true';
   el.spellcheck = false;
   el.dataset.placeholder = 'Заголовок';
-  return el;
+  return markEditable(el);
 }
 
 function renderParagraph(data) {
@@ -100,7 +100,7 @@ function renderParagraph(data) {
       el.appendChild(span);
     }
   });
-  return el;
+  return markEditable(el);
 }
 
 function sanitizePlaceholder(value) {
@@ -125,7 +125,7 @@ function renderList(data, tag) {
     el.appendChild(li);
   });
   el.contentEditable = 'true';
-  return el;
+  return markEditable(el);
 }
 
 function renderQuote(data) {
@@ -140,7 +140,7 @@ function renderQuote(data) {
     figure.appendChild(figcaption);
   }
   figure.contentEditable = 'true';
-  return figure;
+  return markEditable(figure);
 }
 
 function renderTable(data) {
@@ -202,7 +202,7 @@ function renderSummary(data) {
   body.textContent = data.text || '';
   section.append(title, body);
   section.contentEditable = 'true';
-  return section;
+  return markEditable(section);
 }
 
 function renderTodo(data) {
@@ -220,11 +220,20 @@ function renderTodo(data) {
     list.appendChild(li);
   });
   list.contentEditable = 'true';
-  return list;
+  return markEditable(list);
 }
 
 function renderDivider() {
   const hr = document.createElement('hr');
   hr.className = 'note-block note-block--divider';
   return hr;
+}
+
+function markEditable(element) {
+  if (!element) return element;
+  element.classList.add('note-editable');
+  if (!element.hasAttribute('contenteditable')) {
+    element.setAttribute('contenteditable', 'true');
+  }
+  return element;
 }
