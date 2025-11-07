@@ -231,7 +231,7 @@ function renderDivider() {
 
 function markEditable(element) {
   if (!element) return element;
-  element.classList.add('note-editable');
+  element.classList.add('ovc-block', 'ovc-block-content', 'note-editable');
   if (!element.hasAttribute('contenteditable')) {
     element.setAttribute('contenteditable', 'true');
   }
