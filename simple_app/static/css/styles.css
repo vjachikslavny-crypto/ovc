@@ -189,14 +189,24 @@ header, footer {
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
 }
 
-.floating-actions {
-  position: fixed;
-  right: clamp(16px, 4vw, 36px);
-  bottom: clamp(16px, 6vw, 48px);
+.editor__canvas {
+  min-height: 60vh;
   display: flex;
-  flex-direction: row;
-  gap: 14px;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.floating-actions {
+  position: sticky;
+  top: var(--floating-actions-offset, 18px);
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-left: auto;
   z-index: 60;
+  right: auto;
+  bottom: auto;
 }
 
 .hidden {
@@ -259,10 +269,6 @@ header, footer {
 
 .toolbar__btn:hover {
   background: rgba(139, 92, 246, 0.25);
-}
-
-.editor__canvas {
-  min-height: 60vh;
 }
 
 .note-blocks {
@@ -346,12 +352,30 @@ header, footer {
 .note-block--table {
   width: 100%;
   border-collapse: collapse;
+  overflow-x: auto;
 }
 
 .note-block--table td,
 .note-block--table th {
   border: 1px solid rgba(148, 108, 255, 0.28);
   padding: 8px;
+  position: relative;
+  min-height: 2em;
+  min-width: 90px;
+  cursor: text;
+}
+
+.note-block--table td:focus,
+.note-block--table th:focus {
+  outline: 2px solid rgba(139, 92, 246, 0.6);
+  outline-offset: -2px;
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.note-block--table td.table-cell--active,
+.note-block--table th.table-cell--active {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
 }
 
 .note-block--image img {

@@ -145,16 +145,25 @@ function renderQuote(data) {
 
 function renderTable(data) {
   const table = document.createElement('table');
-  table.className = 'note-block note-block--table';
-  (data.rows || []).forEach((row) => {
+  table.className = 'note-block note-block--table ovc-block';
+  table.setAttribute('data-block-role', 'table');
+  const rows = Array.isArray(data.rows) && data.rows.length ? data.rows : [['', ''], ['', '']];
+
+  rows.forEach((row, rowIdx) => {
     const tr = document.createElement('tr');
-    (row || []).forEach((cell) => {
+    (row || []).forEach((cell, colIdx) => {
       const td = document.createElement('td');
+      td.className = 'ovc-block-content table-cell';
+      td.contentEditable = 'true';
+      td.spellcheck = false;
+      td.dataset.row = String(rowIdx);
+      td.dataset.col = String(colIdx);
       td.textContent = cell ?? '';
       tr.appendChild(td);
     });
     table.appendChild(tr);
   });
+
   return table;
 }
 

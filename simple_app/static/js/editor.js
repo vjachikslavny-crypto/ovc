@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!editorEl) return;
 
   const canvas = document.getElementById('note-blocks');
+  const floatingActions = document.querySelector('.floating-actions');
   const titleEl = document.getElementById('note-title');
   const shareBtn = document.getElementById('note-share');
   const backBtn = document.getElementById('nav-back');
@@ -127,65 +128,100 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeElement = document.activeElement;
     let savedFocus = null;
     let savedSelection = null;
+    let savedTableCellFocus = null;
     
     if (activeElement && canvas.contains(activeElement)) {
-      // Находим блок, который был в фокусе
-      const focusedBlockEl = activeElement.closest('[data-block-id]');
-      if (focusedBlockEl) {
-        const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
-        if (editable === activeElement || editable.contains(activeElement)) {
+      // Проверяем, является ли активный элемент ячейкой таблицы
+      if (activeElement.tagName === 'TD' || activeElement.tagName === 'TH') {
+        const tableEl = activeElement.closest('table[data-block-id]');
+        if (tableEl) {
+          const currentRow = activeElement.parentElement;
+          const currentRowIndex = Array.from(currentRow.parentElement.children).indexOf(currentRow);
+          const currentCellIndex = Array.from(currentRow.children).indexOf(activeElement);
           const selection = window.getSelection();
           
-          // Проверяем, есть ли выделение текста
-          const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
-          if (hasSelection) {
-            try {
-              const range = selection.getRangeAt(0);
-              // Сохраняем выделение через смещения от начала текста
-              const startRange = document.createRange();
-              startRange.selectNodeContents(editable);
-              startRange.setEnd(range.startContainer, range.startOffset);
-              const startOffset = startRange.toString().length;
-              
-              const endRange = document.createRange();
-              endRange.selectNodeContents(editable);
-              endRange.setEnd(range.endContainer, range.endOffset);
-              const endOffset = endRange.toString().length;
-              
-              savedSelection = {
-                startOffset: startOffset,
-                endOffset: endOffset,
-                selectedText: range.toString(),
-              };
-            } catch (e) {
-              // Игнорируем ошибки
-            }
-          }
-          
-          // Сохраняем позицию курсора, если нет выделения
-          if (!savedSelection && selection && selection.rangeCount > 0) {
+          // Сохраняем позицию курсора в ячейке
+          let cursorOffset = null;
+          if (selection && selection.rangeCount > 0) {
             try {
               const range = selection.getRangeAt(0);
               const textBeforeCursor = range.toString().length === 0 
-                ? getTextBeforeCursor(editable, range)
+                ? getTextBeforeCursor(activeElement, range)
                 : null;
               if (textBeforeCursor !== null) {
-                savedFocus = {
-                  blockId: focusedBlockEl.dataset.blockId,
-                  cursorOffset: textBeforeCursor.length,
-                };
+                cursorOffset = textBeforeCursor.length;
               }
             } catch (e) {
               // Игнорируем ошибки
             }
           }
           
-          // Если есть выделение, тоже сохраняем blockId
-          if (savedSelection) {
-            savedFocus = {
-              blockId: focusedBlockEl.dataset.blockId,
-              selection: savedSelection,
-            };
+          savedTableCellFocus = {
+            blockId: tableEl.dataset.blockId,
+            rowIndex: currentRowIndex,
+            cellIndex: currentCellIndex,
+            cursorOffset: cursorOffset,
+          };
+        }
+      } else {
+        // Обычная логика для других блоков
+        const focusedBlockEl = activeElement.closest('[data-block-id]');
+        if (focusedBlockEl) {
+          const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
+          if (editable === activeElement || editable.contains(activeElement)) {
+            const selection = window.getSelection();
+            
+            // Проверяем, есть ли выделение текста
+            const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
+            if (hasSelection) {
+              try {
+                const range = selection.getRangeAt(0);
+                // Сохраняем выделение через смещения от начала текста
+                const startRange = document.createRange();
+                startRange.selectNodeContents(editable);
+                startRange.setEnd(range.startContainer, range.startOffset);
+                const startOffset = startRange.toString().length;
+                
+                const endRange = document.createRange();
+                endRange.selectNodeContents(editable);
+                endRange.setEnd(range.endContainer, range.endOffset);
+                const endOffset = endRange.toString().length;
+                
+                savedSelection = {
+                  startOffset: startOffset,
+                  endOffset: endOffset,
+                  selectedText: range.toString(),
+                };
+              } catch (e) {
+                // Игнорируем ошибки
+              }
+            }
+            
+            // Сохраняем позицию курсора, если нет выделения
+            if (!savedSelection && selection && selection.rangeCount > 0) {
+              try {
+                const range = selection.getRangeAt(0);
+                const textBeforeCursor = range.toString().length === 0 
+                  ? getTextBeforeCursor(editable, range)
+                  : null;
+                if (textBeforeCursor !== null) {
+                  savedFocus = {
+                    blockId: focusedBlockEl.dataset.blockId,
+                    cursorOffset: textBeforeCursor.length,
+                  };
+                }
+              } catch (e) {
+                // Игнорируем ошибки
+              }
+            }
+            
+            // Если есть выделение, тоже сохраняем blockId
+            if (savedSelection) {
+              savedFocus = {
+                blockId: focusedBlockEl.dataset.blockId,
+                selection: savedSelection,
+              };
+            }
           }
         }
       }
@@ -193,16 +229,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
     titleEl.textContent = noteState.title || 'Без названия';
     renderNote(canvas, noteState, document.body.dataset.theme || 'clean');
+    ensureEditableFallback();
     clearSelectionSnapshot();
     hydrateBlocks();
+    // Повторная обработка ячеек таблиц после перерисовки
+    // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
+    // Не сбрасываем флаг tableHydrated, чтобы не терять фокус
+    canvas.querySelectorAll('[data-block-type="table"], table[data-block-id]').forEach((tableEl) => {
+      if (tableEl.tagName === 'TABLE') {
+        hydrateTableCells(tableEl);
+      }
+    });
+    updateFloatingActionsOffset();
     inspector.update(noteState);
 
     if (llmToggle) {
       llmToggle.checked = Boolean(noteState.layoutHints?.autoLLM);
     }
 
-    // Восстанавливаем фокус после перерисовки
-    if (pendingCaretBlockId) {
+    // Восстанавливаем фокус ячейки таблицы после перерисовки
+    if (savedTableCellFocus) {
+      const targetTableEl = canvas.querySelector(
+        `table[data-block-id="${savedTableCellFocus.blockId}"]`,
+      );
+      if (targetTableEl) {
+        const rows = Array.from(targetTableEl.querySelectorAll('tr'));
+        if (rows[savedTableCellFocus.rowIndex]) {
+          const targetRow = rows[savedTableCellFocus.rowIndex];
+          const cells = Array.from(targetRow.children);
+          if (cells[savedTableCellFocus.cellIndex]) {
+            const targetCell = cells[savedTableCellFocus.cellIndex];
+            requestAnimationFrame(() => {
+              targetCell.focus();
+              // Восстанавливаем позицию курсора
+              if (savedTableCellFocus.cursorOffset !== null) {
+                try {
+                  restoreCursorPosition(targetCell, savedTableCellFocus.cursorOffset);
+                } catch (e) {
+                  // Если не удалось, ставим курсор в конец
+                  placeCaretAtEnd(targetCell);
+                }
+              } else {
+                placeCaretAtEnd(targetCell);
+              }
+            });
+          }
+        }
+      }
+    } else if (pendingCaretBlockId) {
+      // Восстанавливаем фокус для обычных блоков
       const pendingEl = canvas.querySelector(
         `[data-block-id="${pendingCaretBlockId}"]`,
       );
@@ -364,6 +439,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function hydrateBlocks() {
     canvas.querySelectorAll('[data-block-id]').forEach((blockEl) => {
       if (!(blockEl instanceof HTMLElement)) return;
+
+      // Специальная обработка для таблиц - ячейки обрабатываются отдельно
+      const isTable = blockEl.dataset.blockRole === 'table' || blockEl.tagName === 'TABLE' || blockEl.dataset.blockType === 'table';
+      if (isTable) {
+        hydrateTableCells(blockEl);
+        return; // Не обрабатываем таблицу как обычный блок
+      }
 
       // каждый блок создаётся renderNote как note-block + contenteditable
       // считаем этот элемент редактируемой зоной
@@ -566,6 +648,283 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // ---- HYDRATE TABLE CELLS ----
+
+  function hydrateTableCells(tableEl) {
+    // Проверяем, не обработана ли таблица уже
+    // ВАЖНО: не сбрасываем флаг при повторной обработке, чтобы не навешивать обработчики дважды
+    if (tableEl.dataset.tableHydrated === 'true') {
+      // Просто обновляем обработчики для новых ячеек, если они есть
+      const cells = tableEl.querySelectorAll('td:not([data-cell-hydrated="true"]), th:not([data-cell-hydrated="true"])');
+      if (cells.length > 0) {
+        const blockId = tableEl.dataset.blockId;
+        cells.forEach((cell) => {
+          attachTableCellHandlers(cell, tableEl, blockId);
+        });
+      }
+      return;
+    }
+    tableEl.dataset.tableHydrated = 'true';
+
+    const cells = tableEl.querySelectorAll('td, th');
+    const blockId = tableEl.dataset.blockId;
+
+    cells.forEach((cell) => {
+      attachTableCellHandlers(cell, tableEl, blockId);
+    });
+  }
+
+  // Прикрепление обработчиков к ячейке таблицы
+  function attachTableCellHandlers(cell, tableEl, blockId) {
+    // Проверяем, не обработана ли ячейка уже
+    if (cell.dataset.cellHydrated === 'true') return;
+    cell.dataset.cellHydrated = 'true';
+
+    // Обработчик ввода текста в ячейку
+    cell.addEventListener('input', () => {
+      updateTableFromDOM(tableEl);
+      scheduleSave();
+    });
+
+    // Обработчик фокуса на ячейке
+    cell.addEventListener('focus', () => {
+      focusedBlockId = blockId;
+      // Добавляем класс для визуальной обратной связи
+      cell.classList.add('table-cell--active');
+      // Показываем тулбар управления таблицей при необходимости
+      showTableToolbar(tableEl);
+    });
+
+    // Обработчик потери фокуса
+    cell.addEventListener('blur', () => {
+      cell.classList.remove('table-cell--active');
+    });
+
+    // Навигация по таблице
+    cell.addEventListener('keydown', (event) => {
+      handleTableNavigation(event, cell, tableEl);
+    });
+
+    // Обработка клика для фокуса - не нужна, браузер сам обрабатывает клик
+    // Но добавляем защиту от сброса выделения, как для обычных блоков
+    cell.addEventListener('mouseup', () => {
+      // Устанавливаем защиту от сброса выделения
+      cell.dataset.justSelected = 'true';
+      setTimeout(() => {
+        delete cell.dataset.justSelected;
+      }, 100);
+    }, { passive: true });
+  }
+
+  // Обновление данных таблицы из DOM
+  function updateTableFromDOM(tableEl) {
+    const blockId = tableEl.dataset.blockId;
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block || block.type !== 'table') return;
+
+    const rows = Array.from(tableEl.querySelectorAll('tr'));
+    block.data.rows = rows.map((tr) =>
+      Array.from(tr.querySelectorAll('td, th')).map((td) => td.textContent ?? ''),
+    );
+  }
+
+  // Навигация по таблице
+  function handleTableNavigation(event, cell, tableEl) {
+    const { key, shiftKey } = event;
+    const currentRow = cell.parentElement;
+    const currentRowIndex = Array.from(currentRow.parentElement.children).indexOf(currentRow);
+    const currentCellIndex = Array.from(currentRow.children).indexOf(cell);
+    const rows = Array.from(tableEl.querySelectorAll('tr'));
+    const cellsInRow = Array.from(currentRow.children);
+
+    let targetCell = null;
+
+    switch (key) {
+      case 'Tab':
+        event.preventDefault();
+        if (shiftKey) {
+          // Shift+Tab - предыдущая ячейка
+          if (currentCellIndex > 0) {
+            targetCell = cellsInRow[currentCellIndex - 1];
+          } else if (currentRowIndex > 0) {
+            // Переход на последнюю ячейку предыдущей строки
+            const prevRow = rows[currentRowIndex - 1];
+            targetCell = prevRow.children[prevRow.children.length - 1];
+          }
+        } else {
+          // Tab - следующая ячейка
+          if (currentCellIndex < cellsInRow.length - 1) {
+            targetCell = cellsInRow[currentCellIndex + 1];
+          } else if (currentRowIndex < rows.length - 1) {
+            // Переход на первую ячейку следующей строки
+            const nextRow = rows[currentRowIndex + 1];
+            targetCell = nextRow.children[0];
+          }
+        }
+        break;
+
+      case 'ArrowRight':
+        if (event.ctrlKey || event.metaKey) return; // Разрешаем выделение текста
+        if (currentCellIndex < cellsInRow.length - 1) {
+          event.preventDefault();
+          targetCell = cellsInRow[currentCellIndex + 1];
+        }
+        break;
+
+      case 'ArrowLeft':
+        if (event.ctrlKey || event.metaKey) return;
+        if (currentCellIndex > 0) {
+          event.preventDefault();
+          targetCell = cellsInRow[currentCellIndex - 1];
+        }
+        break;
+
+      case 'ArrowDown':
+        if (event.ctrlKey || event.metaKey) return;
+        if (currentRowIndex < rows.length - 1) {
+          event.preventDefault();
+          const nextRow = rows[currentRowIndex + 1];
+          if (nextRow.children[currentCellIndex]) {
+            targetCell = nextRow.children[currentCellIndex];
+          }
+        }
+        break;
+
+      case 'ArrowUp':
+        if (event.ctrlKey || event.metaKey) return;
+        if (currentRowIndex > 0) {
+          event.preventDefault();
+          const prevRow = rows[currentRowIndex - 1];
+          if (prevRow.children[currentCellIndex]) {
+            targetCell = prevRow.children[currentCellIndex];
+          }
+        }
+        break;
+
+      case 'Enter':
+        // Enter - переход на следующую строку или создание новой
+        if (event.shiftKey) {
+          // Shift+Enter - новая строка внутри ячейки (стандартное поведение)
+          return;
+        }
+        event.preventDefault();
+        if (currentRowIndex < rows.length - 1) {
+          const nextRow = rows[currentRowIndex + 1];
+          if (nextRow.children[currentCellIndex]) {
+            targetCell = nextRow.children[currentCellIndex];
+          }
+        } else {
+          // Создаем новую строку
+          addTableRow(tableEl, currentRowIndex + 1);
+          // После добавления строки нужно найти новую ячейку
+          requestAnimationFrame(() => {
+            const newRows = Array.from(tableEl.querySelectorAll('tr'));
+            if (newRows[currentRowIndex + 1]) {
+              const newRow = newRows[currentRowIndex + 1];
+              if (newRow.children[currentCellIndex]) {
+                newRow.children[currentCellIndex].focus();
+              }
+            }
+          });
+          return;
+        }
+        break;
+    }
+
+    if (targetCell) {
+      targetCell.focus();
+      // Устанавливаем курсор в начало ячейки
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.selectNodeContents(targetCell);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  }
+
+  // Функция для отображения тулбара таблицы
+  function showTableToolbar(tableEl) {
+    // Пока просто заглушка, тулбар будет добавлен позже при необходимости
+  }
+
+  // Добавление строки в таблицу
+  function addTableRow(tableEl, position = -1) {
+    const blockId = tableEl.dataset.blockId;
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block || block.type !== 'table') return;
+
+    const rows = Array.from(tableEl.querySelectorAll('tr'));
+    const colCount = rows[0] ? rows[0].children.length : 2;
+    const newRow = Array(colCount).fill('');
+
+    if (position === -1 || position >= block.data.rows.length) {
+      block.data.rows.push(newRow);
+    } else {
+      block.data.rows.splice(position, 0, newRow);
+    }
+
+    // Сбрасываем флаг обработки для повторной гидратации
+    tableEl.dataset.tableHydrated = 'false';
+    render();
+    scheduleSave();
+  }
+
+  // Удаление строки из таблицы
+  function removeTableRow(tableEl, rowIndex) {
+    const blockId = tableEl.dataset.blockId;
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block || block.type !== 'table') return;
+
+    if (block.data.rows.length <= 1) return; // Не удаляем последнюю строку
+
+    block.data.rows.splice(rowIndex, 1);
+    tableEl.dataset.tableHydrated = 'false';
+    render();
+    scheduleSave();
+  }
+
+  // Добавление столбца в таблицу
+  function addTableColumn(tableEl, position = -1) {
+    const blockId = tableEl.dataset.blockId;
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block || block.type !== 'table') return;
+
+    block.data.rows.forEach((row) => {
+      if (position === -1 || position >= row.length) {
+        row.push('');
+      } else {
+        row.splice(position, 0, '');
+      }
+    });
+
+    tableEl.dataset.tableHydrated = 'false';
+    render();
+    scheduleSave();
+  }
+
+  // Удаление столбца из таблицы
+  function removeTableColumn(tableEl, colIndex) {
+    const blockId = tableEl.dataset.blockId;
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block || block.type !== 'table') return;
+
+    const minCols = Math.min(...block.data.rows.map((row) => row.length));
+    if (minCols <= 1) return; // Не удаляем последний столбец
+
+    block.data.rows.forEach((row) => {
+      if (colIndex < row.length) {
+        row.splice(colIndex, 1);
+      }
+    });
+
+    tableEl.dataset.tableHydrated = 'false';
+    render();
+    scheduleSave();
+  }
+
   // ---- UPDATE BLOCK FROM DOM ----
 
   function updateBlockFromDom(blockEl, editableEl) {
@@ -605,6 +964,18 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'quote':
         block.data.text = (src.textContent || '').trim();
         break;
+
+      case 'table': {
+        const table =
+          src.tagName === 'TABLE' ? src : src.querySelector('table');
+        if (!table) break;
+        block.data.rows = Array.from(table.querySelectorAll('tr')).map((tr) =>
+          Array.from(tr.querySelectorAll('td')).map(
+            (td) => td.textContent ?? '',
+          ),
+        );
+        break;
+      }
 
       case 'summary': {
         const raw = src.innerText || '';
@@ -875,6 +1246,30 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   }
 
+  function ensureEditableFallback() {
+    if (!canvas) return;
+    if (canvas.children.length > 0) return;
+    const placeholder = document.createElement('div');
+    placeholder.className =
+      'note-block note-block--paragraph ovc-block ovc-block-content note-editable';
+    placeholder.setAttribute('contenteditable', 'true');
+    placeholder.setAttribute('spellcheck', 'false');
+    placeholder.dataset.blockId = `placeholder-${uuid()}`;
+    placeholder.dataset.placeholder = 'Начните писать заметку...';
+    placeholder.dataset.empty = 'true';
+    canvas.appendChild(placeholder);
+  }
+
+  function updateFloatingActionsOffset() {
+    if (!floatingActions || !canvas) return;
+    const blockCount = canvas.querySelectorAll('.ovc-block-content').length || 1;
+    const dynamicOffset = Math.min(18 + blockCount * 6, 140);
+    floatingActions.style.setProperty(
+      '--floating-actions-offset',
+      `${dynamicOffset}px`,
+    );
+  }
+
   // ---- UTILS ----
 
   function focusEditable(element) {
@@ -1000,9 +1395,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getEditableElement(blockEl) {
     if (!blockEl) return null;
+    const inner =
+      blockEl.querySelector('.ovc-block-content[contenteditable="true"]') ||
+      blockEl.querySelector('.note-editable[contenteditable="true"]');
+    if (inner) return inner;
     if (blockEl.isContentEditable) return blockEl;
-    return blockEl.querySelector('.note-editable[contenteditable="true"]')
-      || blockEl.querySelector('[contenteditable="true"]');
+    return blockEl.querySelector('[contenteditable="true"]');
   }
 
   function placeCaretAtEnd(element) {
@@ -1184,6 +1582,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyPlaceholderState(blockEl) {
     if (!blockEl || !blockEl.dataset) return;
+    if (blockEl.dataset.blockRole === 'table' || blockEl.tagName === 'TABLE') {
+      return;
+    }
     if (!blockEl.dataset.placeholder) return;
     const text = (blockEl.textContent || '').replace(/\u200B/g, '').trim();
     if (text.length === 0) {
