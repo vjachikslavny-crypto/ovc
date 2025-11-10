@@ -442,6 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Специальная обработка для таблиц - ячейки обрабатываются отдельно
       const isTable = blockEl.dataset.blockRole === 'table' || blockEl.tagName === 'TABLE' || blockEl.dataset.blockType === 'table';
+      attachBlockControls(blockEl);
       if (isTable) {
         hydrateTableCells(blockEl);
         return; // Не обрабатываем таблицу как обычный блок
@@ -1244,6 +1245,131 @@ document.addEventListener('DOMContentLoaded', () => {
 
     render();
     scheduleSave();
+  }
+
+  function wrapBlockWithShell(blockEl) {
+    if (!blockEl || !blockEl.parentElement) return null;
+    if (blockEl.parentElement.classList.contains('note-block-shell')) {
+      return blockEl.parentElement;
+    }
+    const shell = document.createElement('div');
+    shell.className = 'note-block-shell';
+    blockEl.parentElement.insertBefore(shell, blockEl);
+    shell.appendChild(blockEl);
+    return shell;
+  }
+
+  function attachBlockControls(blockEl) {
+    const shell = wrapBlockWithShell(blockEl);
+    if (!shell) return null;
+    if (shell.dataset.actionsBound === 'true') return shell;
+
+    const actions = document.createElement('div');
+    actions.className = 'block-actions';
+    const buttons = [
+      { action: 'insert-before', label: '＋↑', title: 'Вставить блок выше' },
+      { action: 'insert-after', label: '＋↓', title: 'Вставить блок ниже' },
+      { action: 'move-up', label: '↑', title: 'Переместить вверх' },
+      { action: 'move-down', label: '↓', title: 'Переместить вниз' },
+      { action: 'delete', label: '✕', title: 'Удалить блок' },
+    ];
+
+    buttons.forEach(({ action, label, title }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.action = action;
+      btn.textContent = label;
+      btn.title = title;
+      btn.setAttribute('contenteditable', 'false');
+      btn.tabIndex = -1;
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handleBlockAction(blockEl.dataset.blockId, action);
+      });
+      actions.appendChild(btn);
+    });
+
+    shell.prepend(actions);
+    shell.dataset.actionsBound = 'true';
+    return shell;
+  }
+
+  function handleBlockAction(blockId, action) {
+    if (!blockId) return;
+    const blocks = Array.isArray(noteState.blocks)
+      ? [...noteState.blocks]
+      : [];
+    const index = blocks.findIndex((block) => block.id === blockId);
+    if (index === -1) return;
+
+    const commit = (nextBlocks, focusId) => {
+      noteState.blocks = nextBlocks;
+      if (focusId) {
+        pendingCaretBlockId = focusId;
+      }
+      render();
+      scheduleSave();
+    };
+
+    switch (action) {
+      case 'delete': {
+        if (blocks.length === 1) {
+          const fallback = createBlankParagraphBlock();
+          commit([fallback], fallback.id);
+          return;
+        }
+        blocks.splice(index, 1);
+        const nextFocus = blocks[Math.min(index, blocks.length - 1)]?.id;
+        commit(blocks, nextFocus);
+        return;
+      }
+
+      case 'move-up': {
+        if (index === 0) return;
+        [blocks[index - 1], blocks[index]] = [
+          blocks[index],
+          blocks[index - 1],
+        ];
+        commit(blocks, blockId);
+        return;
+      }
+
+      case 'move-down': {
+        if (index === blocks.length - 1) return;
+        [blocks[index + 1], blocks[index]] = [
+          blocks[index],
+          blocks[index + 1],
+        ];
+        commit(blocks, blockId);
+        return;
+      }
+
+      case 'insert-before': {
+        const newBlock = createBlankParagraphBlock();
+        blocks.splice(index, 0, newBlock);
+        commit(blocks, newBlock.id);
+        return;
+      }
+
+      case 'insert-after': {
+        const newBlock = createBlankParagraphBlock();
+        blocks.splice(index + 1, 0, newBlock);
+        commit(blocks, newBlock.id);
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
+  function createBlankParagraphBlock() {
+    return {
+      id: uuid(),
+      type: 'paragraph',
+      data: { parts: [{ text: '' }] },
+    };
   }
 
   function ensureEditableFallback() {

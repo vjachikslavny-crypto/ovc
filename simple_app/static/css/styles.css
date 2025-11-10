@@ -277,6 +277,14 @@ header, footer {
   gap: 18px;
 }
 
+.note-block-shell {
+  position: relative;
+}
+
+.note-block-shell + .note-block-shell {
+  margin-top: 0;
+}
+
 .note-block {
   background: rgba(24, 12, 46, 0.55);
   border-radius: var(--radius-md);
@@ -363,6 +371,37 @@ header, footer {
   min-height: 2em;
   min-width: 90px;
   cursor: text;
+}
+
+.block-actions {
+  position: absolute;
+  top: -22px;
+  right: 0;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.note-block-shell:hover .block-actions,
+.block-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.block-actions button {
+  border: 1px solid rgba(148, 108, 255, 0.35);
+  background: rgba(14, 6, 28, 0.85);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.block-actions button:hover {
+  background: rgba(139, 92, 246, 0.45);
 }
 
 .note-block--table td:focus,
