@@ -194,6 +194,7 @@ header, footer {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  position: relative;
 }
 
 .floating-actions {
@@ -207,6 +208,30 @@ header, footer {
   z-index: 60;
   right: auto;
   bottom: auto;
+  transition: all 0.3s ease;
+}
+
+/* Центрирование кнопок когда заметка пустая */
+.floating-actions--centered {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  align-self: center;
+  margin-left: 0;
+  flex-direction: row;
+  gap: 20px;
+  z-index: 70;
+}
+
+/* Скрываем кнопку голосовой заметки когда заметка пустая */
+.floating-actions--centered #fab-voice {
+  display: none;
+}
+
+/* Улучшаем видимость кнопок в центрированном состоянии */
+.floating-actions--centered .fab {
+  box-shadow: 0 20px 40px rgba(139, 92, 246, 0.4);
 }
 
 .hidden {
@@ -279,6 +304,16 @@ header, footer {
 
 .note-block-shell {
   position: relative;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  transition: background-color 0.15s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Визуальная обратная связь при выделении блока */
+.note-block-shell.selected,
+.note-block-shell[data-selected="true"] {
+  background-color: rgba(139, 92, 246, 0.05);
+  border-radius: 6px;
 }
 
 .note-block-shell + .note-block-shell {
@@ -375,16 +410,25 @@ header, footer {
 
 .block-actions {
   position: absolute;
-  top: -22px;
-  right: 0;
+  top: -14px;
+  right: 6px;
   display: flex;
   gap: 6px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.2s ease;
   pointer-events: none;
+  z-index: 3;
+  background: rgba(16, 6, 32, 0.95);
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 108, 255, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.note-block-shell:hover .block-actions,
+/* Кнопки появляются когда блок выделен (focused или имеет класс selected) */
+.note-block-shell.selected .block-actions,
+.note-block-shell[data-selected="true"] .block-actions,
+.note-block-shell .note-block:focus ~ .block-actions,
 .block-actions:focus-within {
   opacity: 1;
   pointer-events: auto;
@@ -400,8 +444,69 @@ header, footer {
   cursor: pointer;
 }
 
+.block-actions .block-action-handle,
+.block-actions button.block-action-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 108, 255, 0.35);
+  background: rgba(14, 6, 28, 0.85);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.block-actions .block-action-handle:active,
+.block-actions button.block-action-handle:active {
+  cursor: grabbing;
+}
+
+.block-actions .block-action-handle:hover,
+.block-actions button.block-action-handle:hover {
+  background: rgba(139, 92, 246, 0.35);
+}
+
 .block-actions button:hover {
   background: rgba(139, 92, 246, 0.45);
+}
+
+.note-block-shell.dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+}
+
+.note-block-shell.drop-before::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+  z-index: 10;
+}
+
+.note-block-shell.drop-after::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+  z-index: 10;
 }
 
 .note-block--table td:focus,

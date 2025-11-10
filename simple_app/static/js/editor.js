@@ -62,6 +62,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let focusedBlockId = null;
   let canvasClickBound = false;
   let pendingCaretBlockId = null;
+  const dragState = {
+    activeId: null,
+    overId: null,
+    position: null,
+  };
   const saveQueue = [];
 
   // ---- API / LOAD ----
@@ -228,9 +233,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     titleEl.textContent = noteState.title || 'Без названия';
+    
     renderNote(canvas, noteState, document.body.dataset.theme || 'clean');
-    ensureEditableFallback();
     clearSelectionSnapshot();
+    
     hydrateBlocks();
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
@@ -437,12 +443,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---- HYDRATE BLOCKS (ТОЧЕЧНЫЙ ФИКС) ----
 
   function hydrateBlocks() {
-    canvas.querySelectorAll('[data-block-id]').forEach((blockEl) => {
+    if (!canvas) return;
+    
+    const blocks = canvas.querySelectorAll('[data-block-id]');
+    if (blocks.length === 0) return;
+    
+    blocks.forEach((blockEl) => {
       if (!(blockEl instanceof HTMLElement)) return;
 
       // Специальная обработка для таблиц - ячейки обрабатываются отдельно
       const isTable = blockEl.dataset.blockRole === 'table' || blockEl.tagName === 'TABLE' || blockEl.dataset.blockType === 'table';
-      attachBlockControls(blockEl);
+      
+      // Создаем обертку и кнопки для всех блоков
+      // setupDragAndDrop будет вызван внутри attachBlockControls
+      const shell = attachBlockControls(blockEl);
+     
       if (isTable) {
         hydrateTableCells(blockEl);
         return; // Не обрабатываем таблицу как обычный блок
@@ -646,6 +661,48 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvasClickBound) {
       canvas.addEventListener('click', onCanvasBlankClick);
       canvasClickBound = true;
+    }
+    
+    // Добавляем обработчики drag для canvas (для drop в конец списка)
+    if (!canvas.dataset.dragBound) {
+      canvas.dataset.dragBound = 'true';
+      
+      canvas.addEventListener('dragover', (event) => {
+        if (!dragState.activeId) return;
+        // Проверяем, что мы не над каким-либо блоком
+        const target = event.target;
+        if (target.closest('.note-block-shell')) return;
+        
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = 'move';
+        }
+      });
+      
+      canvas.addEventListener('drop', (event) => {
+        if (!dragState.activeId) return;
+        // Проверяем, что мы не над каким-либо блоком
+        const target = event.target;
+        if (target.closest('.note-block-shell')) return;
+        
+        event.preventDefault();
+        event.stopPropagation();
+        
+        // Находим последний блок
+        const blocks = Array.from(canvas.querySelectorAll('.note-block-shell'));
+        if (blocks.length === 0) return;
+        
+        const lastBlock = blocks[blocks.length - 1];
+        const lastBlockEl = lastBlock.querySelector('[data-block-id]');
+        if (!lastBlockEl) return;
+        
+        const lastBlockId = lastBlockEl.dataset.blockId;
+        if (lastBlockId && lastBlockId !== dragState.activeId) {
+          performDragReorder(dragState.activeId, lastBlockId, 'after');
+        }
+        clearDragState();
+      });
     }
   }
 
@@ -1217,6 +1274,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function onCanvasBlankClick(event) {
     if (event.button !== 0) return;
+    // Игнорируем клики по кнопкам и их дочерним элементам
+    if (event.target.closest('.floating-actions')) return;
     if (event.target.closest('[data-block-id]')) return;
     focusTailBlock();
   }
@@ -1248,25 +1307,60 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function wrapBlockWithShell(blockEl) {
-    if (!blockEl || !blockEl.parentElement) return null;
-    if (blockEl.parentElement.classList.contains('note-block-shell')) {
-      return blockEl.parentElement;
+    if (!blockEl) {
+      console.error('[wrapBlockWithShell] blockEl отсутствует');
+      return null;
     }
+    
+    if (!blockEl.parentElement) {
+      console.error('[wrapBlockWithShell] blockEl.parentElement отсутствует для:', blockEl);
+      return null;
+    }
+    
+    // Если блок уже в обертке, возвращаем обертку
+    const currentParent = blockEl.parentElement;
+    if (currentParent.classList && currentParent.classList.contains('note-block-shell')) {
+      return currentParent;
+    }
+    
+    // Создаем обертку и перемещаем блок в неё
     const shell = document.createElement('div');
     shell.className = 'note-block-shell';
-    blockEl.parentElement.insertBefore(shell, blockEl);
-    shell.appendChild(blockEl);
-    return shell;
+    const parent = blockEl.parentElement;
+    
+    try {
+      // Вставляем обертку ПЕРЕД блоком, затем перемещаем блок в обертку
+      parent.insertBefore(shell, blockEl);
+      shell.appendChild(blockEl);
+      return shell;
+    } catch (error) {
+      console.error('[wrapBlockWithShell] Ошибка при создании обертки:', error);
+      return null;
+    }
   }
 
   function attachBlockControls(blockEl) {
+    if (!blockEl || !blockEl.dataset.blockId) return null;
+    
     const shell = wrapBlockWithShell(blockEl);
     if (!shell) return null;
-    if (shell.dataset.actionsBound === 'true') return shell;
+    
+    // Проверяем, не созданы ли кнопки уже
+    if (shell.dataset.actionsBound === 'true') {
+      return shell;
+    }
+    
+    // Проверяем, нет ли уже кнопок в обертке
+    const existingActions = shell.querySelector('.block-actions');
+    if (existingActions) {
+      shell.dataset.actionsBound = 'true';
+      return shell;
+    }
 
     const actions = document.createElement('div');
     actions.className = 'block-actions';
     const buttons = [
+      { action: 'drag-handle', label: '↕', title: 'Перетащить блок', handle: true },
       { action: 'insert-before', label: '＋↑', title: 'Вставить блок выше' },
       { action: 'insert-after', label: '＋↓', title: 'Вставить блок ниже' },
       { action: 'move-up', label: '↑', title: 'Переместить вверх' },
@@ -1275,24 +1369,232 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
 
     buttons.forEach(({ action, label, title }) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.action = action;
-      btn.textContent = label;
-      btn.title = title;
-      btn.setAttribute('contenteditable', 'false');
-      btn.tabIndex = -1;
-      btn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        handleBlockAction(blockEl.dataset.blockId, action);
-      });
-      actions.appendChild(btn);
+      if (action === 'drag-handle') {
+        // Для handle используем span вместо button, чтобы drag работал
+        const handle = document.createElement('span');
+        handle.className = 'block-action-handle';
+        handle.dataset.action = action;
+        handle.textContent = label;
+        handle.title = title;
+        handle.setAttribute('contenteditable', 'false');
+        handle.setAttribute('draggable', 'true');
+        handle.style.cssText = 'pointer-events: auto; cursor: grab; user-select: none;';
+        handle.setAttribute('role', 'button');
+        handle.setAttribute('tabindex', '-1');
+        actions.appendChild(handle);
+      } else {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.action = action;
+        btn.textContent = label;
+        btn.title = title;
+        btn.setAttribute('contenteditable', 'false');
+        btn.tabIndex = -1;
+        btn.style.cssText = 'pointer-events: auto;';
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleBlockAction(blockEl.dataset.blockId, action);
+        });
+        actions.appendChild(btn);
+      }
     });
 
-    shell.prepend(actions);
+    // Добавляем кнопки в начало обертки (перед блоком)
+    // Блок должен быть уже в обертке после wrapBlockWithShell
+    shell.insertBefore(actions, shell.firstChild);
     shell.dataset.actionsBound = 'true';
+    
+    // Добавляем обработчики для показа/скрытия кнопок при выделении блока
+    setupBlockSelectionHandlers(shell, blockEl);
+    
+    // Настраиваем drag and drop после создания кнопок
+    setupDragAndDrop(shell, blockEl.dataset.blockId);
+    
     return shell;
+  }
+  
+  // Функция для управления видимостью кнопок при выделении блока
+  function setupBlockSelectionHandlers(shell, blockEl) {
+    if (!shell || !blockEl) return;
+    
+    // Проверяем, не настроены ли уже обработчики
+    if (shell.dataset.selectionHandlersBound === 'true') return;
+    shell.dataset.selectionHandlersBound = 'true';
+    
+    // Функция для показа кнопок
+    const showActions = () => {
+      shell.classList.add('selected');
+      shell.dataset.selected = 'true';
+    };
+    
+    // Функция для скрытия кнопок
+    const hideActions = () => {
+      // Не скрываем, если кнопки или блок в фокусе
+      const actions = shell.querySelector('.block-actions');
+      const editableEl = getEditableElement(blockEl) || blockEl;
+      
+      if (actions && actions.contains(document.activeElement)) {
+        return; // Кнопки в фокусе - не скрываем
+      }
+      
+      if (editableEl && (editableEl === document.activeElement || editableEl.contains(document.activeElement))) {
+        return; // Блок в фокусе - не скрываем
+      }
+      
+      shell.classList.remove('selected');
+      shell.dataset.selected = 'false';
+    };
+    
+    // Показываем кнопки при фокусе на блоке
+    const editableEl = getEditableElement(blockEl) || blockEl;
+    if (editableEl) {
+      // Используем capture phase, чтобы перехватить событие до других обработчиков
+      editableEl.addEventListener('focus', showActions, { capture: true, passive: true });
+      
+      editableEl.addEventListener('blur', () => {
+        // Даем небольшую задержку, чтобы проверить, куда перешел фокус
+        setTimeout(hideActions, 150);
+      }, { capture: true, passive: true });
+    }
+    
+    // Показываем кнопки при клике на блок
+    shell.addEventListener('click', (event) => {
+      // Если клик не на кнопках, показываем их
+      if (!event.target.closest('.block-actions')) {
+        showActions();
+      }
+    }, { passive: true });
+    
+    // Держим кнопки видимыми при фокусе на них
+    const actions = shell.querySelector('.block-actions');
+    if (actions) {
+      actions.addEventListener('focusin', showActions, { passive: true });
+      
+      actions.addEventListener('focusout', () => {
+        setTimeout(hideActions, 150);
+      }, { passive: true });
+    }
+    
+    // Обработчик клика вне блока будет добавлен один раз для всех блоков
+    // См. initBlockSelectionHandlers ниже
+  }
+
+  function setupDragAndDrop(shell, blockId) {
+    if (!shell || !blockId) return;
+    if (shell.dataset.dragBound === 'true') return;
+    shell.dataset.dragBound = 'true';
+
+    // Находим handle элемент внутри shell
+    const handle = shell.querySelector('.block-action-handle');
+    if (!handle) {
+      // Handle должен быть создан в attachBlockControls
+      // Если его нет, значит что-то пошло не так
+      console.warn('[setupDragAndDrop] Handle не найден для блока:', blockId);
+      return;
+    }
+
+    // Убеждаемся, что handle draggable и только он
+    handle.draggable = true;
+    handle.setAttribute('draggable', 'true');
+    
+    // Предотвращаем drag для всех других элементов в shell
+    shell.querySelectorAll('*').forEach((el) => {
+      if (el !== handle) {
+        el.draggable = false;
+        if (el.setAttribute) {
+          el.setAttribute('draggable', 'false');
+        }
+      }
+    });
+
+    // Обработчик начала перетаскивания
+    handle.addEventListener('dragstart', (event) => {
+      dragState.activeId = blockId;
+      shell.classList.add('dragging');
+      
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', blockId);
+        // Используем пустое изображение, чтобы браузер использовал стандартный drag image
+        const emptyImg = new Image();
+        emptyImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        event.dataTransfer.setDragImage(emptyImg, 0, 0);
+      }
+      event.stopPropagation();
+    });
+
+    // Обработчик окончания перетаскивания
+    handle.addEventListener('dragend', (event) => {
+      clearDragState();
+    });
+
+    shell.addEventListener('dragover', (event) => {
+      if (!dragState.activeId || dragState.activeId === blockId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      
+      const rect = shell.getBoundingClientRect();
+      const mouseY = event.clientY;
+      const shellMiddle = rect.top + rect.height / 2;
+      const position = mouseY < shellMiddle ? 'before' : 'after';
+      
+      updateDropIndicator(shell, position);
+      dragState.overId = blockId;
+      dragState.position = position;
+      
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    shell.addEventListener('dragleave', (event) => {
+      // Проверяем, что мы действительно покидаем shell, а не переходим в дочерний элемент
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget && shell.contains(relatedTarget)) return;
+      
+      shell.classList.remove('drop-before', 'drop-after');
+      if (dragState.overId === blockId) {
+        dragState.overId = null;
+        dragState.position = null;
+      }
+    });
+
+    shell.addEventListener('drop', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      if (!dragState.activeId || dragState.activeId === blockId) {
+        clearDragState();
+        return;
+      }
+      
+      const position = dragState.position || 'after';
+      performDragReorder(dragState.activeId, blockId, position);
+      clearDragState();
+    });
+  }
+
+  
+  // Инициализация глобального обработчика для скрытия кнопок при клике вне блоков
+  let blockSelectionHandlerInitialized = false;
+  
+  function initBlockSelectionHandlers() {
+    if (blockSelectionHandlerInitialized) return;
+    blockSelectionHandlerInitialized = true;
+    
+    // Один обработчик на document для всех блоков
+    document.addEventListener('click', (event) => {
+      // Находим все обертки с кнопками
+      const allShells = document.querySelectorAll('.note-block-shell[data-selected="true"]');
+      allShells.forEach((shell) => {
+        // Если клик не внутри этого блока, скрываем кнопки
+        if (!shell.contains(event.target)) {
+          shell.classList.remove('selected');
+          shell.dataset.selected = 'false';
+        }
+      });
+    }, { capture: true, passive: true });
   }
 
   function handleBlockAction(blockId, action) {
@@ -1372,28 +1674,73 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  // Функция для обновления визуального индикатора места drop
+  function updateDropIndicator(shell, position) {
+    if (!shell) return;
+    // Убираем все индикаторы с других блоков
+    document.querySelectorAll('.note-block-shell').forEach((s) => {
+      if (s !== shell) {
+        s.classList.remove('drop-before', 'drop-after');
+      }
+    });
+    // Добавляем индикатор на текущий shell
+    shell.classList.remove('drop-before', 'drop-after');
+    shell.classList.add(position === 'before' ? 'drop-before' : 'drop-after');
+  }
+
+  function clearDragState() {
+    dragState.activeId = null;
+    dragState.overId = null;
+    dragState.position = null;
+    document
+      .querySelectorAll('.note-block-shell')
+      .forEach((shell) => shell.classList.remove('dragging', 'drop-before', 'drop-after'));
+  }
+
+  function performDragReorder(sourceId, targetId, position) {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const blocks = Array.isArray(noteState.blocks) ? [...noteState.blocks] : [];
+    const fromIndex = blocks.findIndex((block) => block.id === sourceId);
+    let targetIndex = blocks.findIndex((block) => block.id === targetId);
+    if (fromIndex === -1 || targetIndex === -1) return;
+
+    const [moved] = blocks.splice(fromIndex, 1);
+    targetIndex = blocks.findIndex((block) => block.id === targetId);
+    if (targetIndex === -1) targetIndex = blocks.length;
+    if (position === 'after') {
+      targetIndex += 1;
+    }
+    blocks.splice(targetIndex, 0, moved);
+
+    noteState.blocks = blocks;
+    pendingCaretBlockId = sourceId;
+    render();
+    scheduleSave();
+  }
+
   function ensureEditableFallback() {
-    if (!canvas) return;
-    if (canvas.children.length > 0) return;
-    const placeholder = document.createElement('div');
-    placeholder.className =
-      'note-block note-block--paragraph ovc-block ovc-block-content note-editable';
-    placeholder.setAttribute('contenteditable', 'true');
-    placeholder.setAttribute('spellcheck', 'false');
-    placeholder.dataset.blockId = `placeholder-${uuid()}`;
-    placeholder.dataset.placeholder = 'Начните писать заметку...';
-    placeholder.dataset.empty = 'true';
-    canvas.appendChild(placeholder);
+    // Больше не создаем placeholder блок - вместо этого показываем кнопки в центре
+    // Функция оставлена для совместимости, но ничего не делает
   }
 
   function updateFloatingActionsOffset() {
     if (!floatingActions || !canvas) return;
-    const blockCount = canvas.querySelectorAll('.ovc-block-content').length || 1;
-    const dynamicOffset = Math.min(18 + blockCount * 6, 140);
-    floatingActions.style.setProperty(
-      '--floating-actions-offset',
-      `${dynamicOffset}px`,
-    );
+    const blockCount = canvas.querySelectorAll('[data-block-id]').length;
+    const isEmpty = blockCount === 0;
+    
+    if (isEmpty) {
+      // Если заметка пустая - центрируем кнопки
+      floatingActions.classList.add('floating-actions--centered');
+      floatingActions.style.setProperty('--floating-actions-offset', 'auto');
+    } else {
+      // Если есть блоки - показываем кнопки справа с динамическим отступом
+      floatingActions.classList.remove('floating-actions--centered');
+      const dynamicOffset = Math.min(18 + blockCount * 6, 140);
+      floatingActions.style.setProperty(
+        '--floating-actions-offset',
+        `${dynamicOffset}px`,
+      );
+    }
   }
 
   // ---- UTILS ----
@@ -1721,6 +2068,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ---- INIT ----
+  
+  // Инициализируем глобальные обработчики для управления кнопками блоков
+  initBlockSelectionHandlers();
 
   loadNote().catch((error) =>
     console.error('Unable to load note', error),

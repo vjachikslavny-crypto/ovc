@@ -72,7 +72,10 @@ function renderParagraph(data) {
   el.className = 'note-block note-block--paragraph';
   el.contentEditable = 'true';
   el.spellcheck = true;
-  el.dataset.placeholder = 'Текст';
+  // Определяем placeholder в зависимости от того, пустой ли блок
+  const isEmpty = !data.parts || data.parts.length === 0 || 
+    (data.parts.length === 1 && (!data.parts[0].text || data.parts[0].text.trim() === ''));
+  el.dataset.placeholder = isEmpty ? 'Начните писать заметку...' : 'Текст';
   const parts = Array.isArray(data.parts)
     ? data.parts.map((part) => ({
         ...part,
