@@ -6,6 +6,7 @@ import { initSmartInsert } from './smart_insert.js';
 import { initInspector } from './inspector.js';
 import { initHints } from './hints.js';
 import { uuid } from './utils.js';
+import { initUploader } from './uploader.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -25,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const fabVoice = document.getElementById('fab-voice');
   const fabAttach = document.getElementById('fab-attach');
   const fileInput = document.getElementById('file-input');
+  const dropOverlay = document.getElementById('drop-overlay');
+  const uploadStatusEl = document.getElementById('upload-progress');
   const toolbarEl = document.getElementById('format-toolbar');
   const bubbleEl = document.getElementById('inline-bubble');
   const inspectorEl = document.getElementById('note-inspector');
@@ -44,6 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initInlineBubble(bubbleEl, canvas);
   initPalette({ paletteEl, triggerEl: fabPlus, onInsert: handleInsertBlock });
   initSmartInsert(canvas, { onTransform: handleTransformBlock });
+  initUploader({
+    attachBtn: fabAttach,
+    fileInput,
+    dropOverlay,
+    statusEl: uploadStatusEl,
+    ensureNote,
+    onBlocksReady: handleUploadedBlocks,
+    getDragState: () => dragState,
+  });
 
   let noteState = {
     id: editorEl.dataset.noteId || '',
@@ -1090,6 +1102,24 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   }
 
+  function handleUploadedBlocks(blocks) {
+    if (!Array.isArray(blocks) || !blocks.length) return;
+    const normalized = blocks
+      .filter(Boolean)
+      .map((block) => ({
+        id: block.id || uuid(),
+        type: block.type,
+        data: block.data || {},
+      }));
+    if (!normalized.length) return;
+    noteState.blocks = noteState.blocks.concat(normalized);
+    focusedBlockId = normalized.at(-1)?.id || null;
+    pendingCaretBlockId = null;
+    hints.push('Файл добавлен в конец заметки.');
+    render();
+    scheduleSave();
+  }
+
   function handleTransformBlock(blockId, nextData) {
     const block = noteState.blocks.find((item) => item.id === blockId);
     if (!block) return;
@@ -1193,21 +1223,6 @@ document.addEventListener('DOMContentLoaded', () => {
       type: 'paragraph',
       data: { parts: [{ text }] },
     });
-  });
-
-  fabAttach?.addEventListener('click', () => fileInput?.click());
-
-  fileInput?.addEventListener('change', (event) => {
-    const files = Array.from(event.target.files || []);
-    files.forEach((file) => {
-      const url = URL.createObjectURL(file);
-      handleInsertBlock({
-        id: uuid(),
-        type: 'image',
-        data: { src: url, alt: file.name, caption: '' },
-      });
-    });
-    fileInput.value = '';
   });
 
   // ---- LAYOUT HINTS / LINKS ----

@@ -1,93 +1,32 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import ValidationError
 from sqlalchemy import func, select
 
+from app.agent.block_models import BlockModel, dump_blocks, parse_blocks
+from app.api.note_models import (
+    LinkPayload,
+    NoteCreateRequest,
+    NoteDetail,
+    NoteListResponse,
+    NoteSummary,
+    NoteUpdateRequest,
+    SourcePayload,
+)
 from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
 from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints, parse_layout_hints
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["notes"])
-
-
-class LinkPayload(BaseModel):
-    id: str
-    from_id: str = Field(alias="fromId")
-    to_id: str = Field(alias="toId")
-    title: str
-    reason: Optional[str]
-    confidence: Optional[float]
-
-    class Config:
-        allow_population_by_field_name = True
-
-
-class SourcePayload(BaseModel):
-    id: str
-    url: str
-    title: str
-    domain: str
-    published_at: Optional[str]
-    summary: Optional[str]
-
-
-class NoteSummary(BaseModel):
-    id: str
-    title: str
-    style_theme: str = Field(alias="styleTheme")
-    created_at: str = Field(alias="createdAt")
-    updated_at: str = Field(alias="updatedAt")
-
-    class Config:
-        allow_population_by_field_name = True
-
-
-class NoteDetail(NoteSummary):
-    blocks: List[Dict[str, Any]]
-    layout_hints: Dict[str, Any] = Field(default_factory=dict, alias="layoutHints")
-    passport: Dict[str, Any] = Field(default_factory=dict)
-    tags: List[str] = Field(default_factory=list)
-    links_from: List[LinkPayload] = Field(default_factory=list, alias="linksFrom")
-    links_to: List[LinkPayload] = Field(default_factory=list, alias="linksTo")
-    sources: List[SourcePayload] = Field(default_factory=list)
-
-    class Config(NoteSummary.Config):
-        pass
-
-
-class NoteListResponse(BaseModel):
-    items: List[NoteSummary]
-    total: int
-    limit: int
-    offset: int
-
-
-class NoteCreateRequest(BaseModel):
-    title: str = Field(..., min_length=1)
-    style_theme: str = Field(default="clean", alias="styleTheme")
-    layout_hints: Dict[str, Any] = Field(default_factory=dict, alias="layoutHints")
-    blocks: List[Dict[str, Any]] = Field(default_factory=list)
-    passport: Dict[str, Any] = Field(default_factory=dict)
-
-    class Config:
-        allow_population_by_field_name = True
-
-
-class NoteUpdateRequest(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1)
-    style_theme: Optional[str] = Field(default=None, alias="styleTheme")
-    layout_hints: Optional[Dict[str, Any]] = Field(default=None, alias="layoutHints")
-    blocks: Optional[List[Dict[str, Any]]] = None
-    passport: Optional[Dict[str, Any]] = None
-
-    class Config:
-        allow_population_by_field_name = True
 
 
 @router.get("/notes", response_model=NoteListResponse)
@@ -126,7 +65,7 @@ async def create_note(payload: NoteCreateRequest):
             title=payload.title,
             style_theme=payload.style_theme,
             layout_hints=dumps_layout_hints(layout_data),
-            blocks_json=_dumps(payload.blocks),
+            blocks_json=_dumps_blocks(payload.blocks),
             passport_json=_dumps(payload.passport),
         )
         session.add(note)
@@ -153,7 +92,7 @@ async def update_note(note_id: str, payload: NoteUpdateRequest):
             merged_hints = merge_layout_hints(note.layout_hints, payload.layout_hints)
             note.layout_hints = dumps_layout_hints(merged_hints)
         if payload.blocks is not None:
-            note.blocks_json = _dumps(payload.blocks)
+            note.blocks_json = _dumps_blocks(payload.blocks)
             blocks_changed = True
         if payload.passport is not None:
             note.passport_json = _dumps(payload.passport)
@@ -191,7 +130,7 @@ def _serialize_summary(note: Note) -> NoteSummary:
 
 
 def _serialize_detail(note: Note) -> NoteDetail:
-    blocks = json.loads(note.blocks_json or "[]")
+    blocks = _load_blocks(note.blocks_json, note_id=note.id)
     layout_hints = parse_layout_hints(note.layout_hints)
     passport = json.loads(note.passport_json or "{}")
 
@@ -249,7 +188,7 @@ def _serialize_detail(note: Note) -> NoteDetail:
 
 
 def _reindex_note(session, note: Note) -> None:
-    blocks = json.loads(note.blocks_json or "[]")
+    blocks = _load_blocks(note.blocks_json, note_id=note.id)
     plain_text = _blocks_to_text(blocks)
     chunks = chunk_markdown(plain_text)
 
@@ -313,3 +252,26 @@ def _blocks_to_text(blocks: List[Dict[str, Any]]) -> str:
 
 def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _dumps_blocks(blocks: List[BlockModel]) -> str:
+    return _dumps(dump_blocks(blocks))
+
+
+def _load_blocks(raw_json: str, *, note_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except json.JSONDecodeError as exc:
+        logger.warning("Failed to decode blocks JSON for note %s: %s", note_id, exc)
+        return []
+
+    if not isinstance(parsed, list):
+        logger.warning("Blocks JSON for note %s is not a list", note_id)
+        return []
+
+    try:
+        typed_blocks = parse_blocks(parsed)
+    except ValidationError as exc:
+        logger.warning("Block schema validation failed for note %s: %s", note_id, exc)
+        return parsed
+    return dump_blocks(typed_blocks)

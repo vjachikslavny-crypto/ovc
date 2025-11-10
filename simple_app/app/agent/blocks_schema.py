@@ -145,10 +145,147 @@ BLOCK_SCHEMA: dict = {
                             "type": "object",
                             "properties": {
                                 "src": {"type": "string"},
+                                "full": {"type": ["string", "null"]},
                                 "alt": {"type": ["string", "null"]},
-                                "caption": {"type": ["string", "null"]},
+                                "w": {"type": ["integer", "null"]},
+                                "h": {"type": ["integer", "null"]},
                             },
                             "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "audio"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "src": {"type": "string"},
+                                "duration": {"type": ["number", "null"]},
+                                "waveform": {"type": ["string", "null"]},
+                            },
+                            "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "video"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "src": {"type": "string"},
+                                "poster": {"type": ["string", "null"]},
+                                "duration": {"type": ["number", "null"]},
+                                "w": {"type": ["integer", "null"]},
+                                "h": {"type": ["integer", "null"]},
+                            },
+                            "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "doc"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["pdf", "docx", "rtf", "pptx", "txt"],
+                                },
+                                "src": {"type": "string"},
+                                "preview": {"type": ["string", "null"]},
+                                "meta": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pages": {"type": ["integer", "null"]},
+                                        "slides": {"type": ["integer", "null"]},
+                                        "size": {"type": ["integer", "null"]},
+                                    },
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "required": ["kind", "src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "sheet"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": ["xlsx", "csv"]},
+                                "src": {"type": "string"},
+                                "sheets": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "rows": {"type": ["integer", "null"]},
+                            },
+                            "required": ["kind", "src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "code"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "language": {"type": ["string", "null"]},
+                                "src": {"type": "string"},
+                                "lines": {"type": ["integer", "null"]},
+                                "sha256": {"type": ["string", "null"]},
+                            },
+                            "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "archive"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "src": {"type": "string"},
+                                "tree": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": {"type": "string"},
+                                            "size": {"type": ["integer", "null"]},
+                                        },
+                                        "required": ["path"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "link"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "format": "uri"},
+                                "title": {"type": ["string", "null"]},
+                                "desc": {"type": ["string", "null"]},
+                                "image": {"type": ["string", "null"]},
+                            },
+                            "required": ["url"],
                             "additionalProperties": False,
                         },
                     }
@@ -232,4 +369,3 @@ BLOCK_SCHEMA: dict = {
         },
     },
 }
-

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -39,6 +39,7 @@ class Note(Base):
         foreign_keys="NoteLink.to_id",
         cascade="all, delete-orphan",
     )
+    files = relationship("FileAsset", back_populates="note", cascade="all, delete-orphan")
 
 
 class NoteChunk(Base):
@@ -131,3 +132,24 @@ class GroupPreference(Base):
     color = Column(String, nullable=False, default="#8b5cf6")
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+
+class FileAsset(Base):
+    __tablename__ = "files"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True)
+    kind = Column(String, nullable=False)
+    mime = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    size = Column(Integer, nullable=False)
+    path_original = Column(String, nullable=False)
+    path_preview = Column(String, nullable=True)
+    hash_sha256 = Column(String, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    pages = Column(Integer, nullable=True)
+    duration = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+
+    note = relationship("Note", back_populates="files")

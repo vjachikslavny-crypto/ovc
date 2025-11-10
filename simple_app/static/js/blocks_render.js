@@ -41,6 +41,8 @@ export function renderBlock(block) {
       return renderTable(data);
     case 'image':
       return renderImage(data);
+    case 'doc':
+      return renderDoc(data);
     case 'source':
       return renderSource(data);
     case 'summary':
@@ -55,6 +57,14 @@ export function renderBlock(block) {
 }
 
 const PLACEHOLDER_TEXT = new Set(['Новый заголовок', 'Новый абзац']);
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
+}
 
 function renderHeading(data) {
   const level = Math.min(Math.max(parseInt(data.level ?? 1, 10), 1), 3);
@@ -176,6 +186,8 @@ function renderImage(data) {
   const img = document.createElement('img');
   img.src = data.src || '';
   img.alt = data.alt || '';
+  img.loading = 'lazy';
+  img.decoding = 'async';
   figure.appendChild(img);
   if (data.caption) {
     const figcaption = document.createElement('figcaption');
@@ -183,6 +195,58 @@ function renderImage(data) {
     figure.appendChild(figcaption);
   }
   return figure;
+}
+
+function renderDoc(data) {
+  const card = document.createElement('article');
+  card.className = 'note-block note-block--doc';
+
+  const preview = document.createElement('div');
+  preview.className = 'doc-preview';
+  if (data.preview) {
+    const img = document.createElement('img');
+    img.src = data.preview;
+    img.alt = 'Превью документа';
+    img.loading = 'lazy';
+    preview.appendChild(img);
+  } else {
+    const badge = document.createElement('div');
+    badge.className = 'doc-preview__badge';
+    badge.textContent = (data.kind || 'DOC').toUpperCase();
+    preview.appendChild(badge);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'doc-meta';
+  const title = document.createElement('h4');
+  title.textContent = data.title || (data.kind === 'pdf' ? 'PDF-документ' : 'Документ');
+  const meta = document.createElement('p');
+  meta.className = 'doc-meta__info';
+  const info = [];
+  if (data.meta?.pages) info.push(`${data.meta.pages} стр.`);
+  if (data.meta?.size) info.push(formatBytes(data.meta.size));
+  if (data.kind) info.push(data.kind.toUpperCase());
+  meta.textContent = info.join(' · ') || 'Прикреплённый файл';
+
+  const actions = document.createElement('div');
+  actions.className = 'doc-actions';
+  if (data.src) {
+    const link = document.createElement('a');
+    link.href = data.src;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = 'Открыть оригинал';
+    link.className = 'pill-button pill-button--compact doc-actions__open';
+    actions.appendChild(link);
+  }
+
+  body.appendChild(title);
+  body.appendChild(meta);
+  body.appendChild(actions);
+
+  card.appendChild(preview);
+  card.appendChild(body);
+  return card;
 }
 
 function renderSource(data) {

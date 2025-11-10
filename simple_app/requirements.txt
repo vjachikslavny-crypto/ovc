@@ -6,3 +6,5 @@ scikit-learn
 python-multipart
 pydantic
 markdown
+pillow
+pypdf
