@@ -185,60 +185,65 @@ document.addEventListener('DOMContentLoaded', () => {
         // Обычная логика для других блоков
         const focusedBlockEl = activeElement.closest('[data-block-id]');
         if (focusedBlockEl) {
-          const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
-          if (editable === activeElement || editable.contains(activeElement)) {
-            const selection = window.getSelection();
-            
-            // Проверяем, есть ли выделение текста
-            const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
-            if (hasSelection) {
-              try {
-                const range = selection.getRangeAt(0);
-                // Сохраняем выделение через смещения от начала текста
-                const startRange = document.createRange();
-                startRange.selectNodeContents(editable);
-                startRange.setEnd(range.startContainer, range.startOffset);
-                const startOffset = startRange.toString().length;
-                
-                const endRange = document.createRange();
-                endRange.selectNodeContents(editable);
-                endRange.setEnd(range.endContainer, range.endOffset);
-                const endOffset = endRange.toString().length;
-                
-                savedSelection = {
-                  startOffset: startOffset,
-                  endOffset: endOffset,
-                  selectedText: range.toString(),
-                };
-              } catch (e) {
-                // Игнорируем ошибки
-              }
-            }
-            
-            // Сохраняем позицию курсора, если нет выделения
-            if (!savedSelection && selection && selection.rangeCount > 0) {
-              try {
-                const range = selection.getRangeAt(0);
-                const textBeforeCursor = range.toString().length === 0 
-                  ? getTextBeforeCursor(editable, range)
-                  : null;
-                if (textBeforeCursor !== null) {
-                  savedFocus = {
-                    blockId: focusedBlockEl.dataset.blockId,
-                    cursorOffset: textBeforeCursor.length,
+          // OVC: pdf - не сохраняем фокус для PDF блоков, чтобы не вызывать прокрутку при восстановлении
+          if (focusedBlockEl.closest('.doc-block--pdf')) {
+            // Не сохраняем фокус для PDF блоков
+          } else {
+            const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
+            if (editable === activeElement || editable.contains(activeElement)) {
+              const selection = window.getSelection();
+              
+              // Проверяем, есть ли выделение текста
+              const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
+              if (hasSelection) {
+                try {
+                  const range = selection.getRangeAt(0);
+                  // Сохраняем выделение через смещения от начала текста
+                  const startRange = document.createRange();
+                  startRange.selectNodeContents(editable);
+                  startRange.setEnd(range.startContainer, range.startOffset);
+                  const startOffset = startRange.toString().length;
+                  
+                  const endRange = document.createRange();
+                  endRange.selectNodeContents(editable);
+                  endRange.setEnd(range.endContainer, range.endOffset);
+                  const endOffset = endRange.toString().length;
+                  
+                  savedSelection = {
+                    startOffset: startOffset,
+                    endOffset: endOffset,
+                    selectedText: range.toString(),
                   };
+                } catch (e) {
+                  // Игнорируем ошибки
                 }
-              } catch (e) {
-                // Игнорируем ошибки
               }
-            }
-            
-            // Если есть выделение, тоже сохраняем blockId
-            if (savedSelection) {
-              savedFocus = {
-                blockId: focusedBlockEl.dataset.blockId,
-                selection: savedSelection,
-              };
+              
+              // Сохраняем позицию курсора, если нет выделения
+              if (!savedSelection && selection && selection.rangeCount > 0) {
+                try {
+                  const range = selection.getRangeAt(0);
+                  const textBeforeCursor = range.toString().length === 0 
+                    ? getTextBeforeCursor(editable, range)
+                    : null;
+                  if (textBeforeCursor !== null) {
+                    savedFocus = {
+                      blockId: focusedBlockEl.dataset.blockId,
+                      cursorOffset: textBeforeCursor.length,
+                    };
+                  }
+                } catch (e) {
+                  // Игнорируем ошибки
+                }
+              }
+              
+              // Если есть выделение, тоже сохраняем blockId
+              if (savedSelection) {
+                savedFocus = {
+                  blockId: focusedBlockEl.dataset.blockId,
+                  selection: savedSelection,
+                };
+              }
             }
           }
         }
@@ -308,6 +313,11 @@ document.addEventListener('DOMContentLoaded', () => {
         `[data-block-id="${pendingCaretBlockId}"]`,
       );
       if (pendingEl) {
+        // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
+        if (pendingEl.closest('.doc-block--pdf')) {
+          pendingCaretBlockId = null;
+          return;
+        }
         const editable = getEditableElement(pendingEl) || pendingEl;
         placeCaretAtEnd(editable);
       }
@@ -318,6 +328,10 @@ document.addEventListener('DOMContentLoaded', () => {
         `[data-block-id="${savedFocus.blockId}"]`,
       );
       if (targetBlockEl) {
+        // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
+        if (targetBlockEl.closest('.doc-block--pdf')) {
+          return;
+        }
         const editable = getEditableElement(targetBlockEl) || targetBlockEl;
         requestAnimationFrame(() => {
           editable.focus();
@@ -1331,12 +1345,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Игнорируем клики по кнопкам и их дочерним элементам
     if (event.target.closest('.floating-actions')) return;
     if (event.target.closest('[data-block-id]')) return;
+    // OVC: pdf - игнорируем клики по PDF блокам и их содержимому (изображения, контейнеры страниц)
+    if (event.target.closest('.doc-block--pdf')) return;
+    if (event.target.closest('.pdf-pages')) return;
+    if (event.target.closest('.pdf-page')) return;
+    if (event.target.closest('.pdf-page img')) return;
     focusTailBlock();
   }
 
   function focusTailBlock() {
     const lastBlock = canvas.querySelector('[data-block-id]:last-of-type');
     if (lastBlock) {
+      // OVC: pdf - не фокусируем, если последний блок - это PDF блок
+      if (lastBlock.closest('.doc-block--pdf')) {
+        return; // Не фокусируем PDF блоки
+      }
       const editable = getEditableElement(lastBlock) || lastBlock;
       focusedBlockId = lastBlock.dataset.blockId;
       placeCaretAtEnd(editable);
@@ -1639,6 +1662,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Один обработчик на document для всех блоков
     document.addEventListener('click', (event) => {
+      // OVC: pdf - игнорируем клики по PDF блокам и их содержимому, чтобы не сбрасывать состояние
+      if (event.target.closest('.doc-block--pdf')) return;
+      if (event.target.closest('.pdf-pages')) return;
+      if (event.target.closest('.pdf-page')) return;
+      if (event.target.closest('.pdf-page img')) return;
+      
       // Находим все обертки с кнопками
       const allShells = document.querySelectorAll('.note-block-shell[data-selected="true"]');
       allShells.forEach((shell) => {

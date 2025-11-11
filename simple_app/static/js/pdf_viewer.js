@@ -1,5 +1,8 @@
 // OVC: pdf - виджет для просмотра PDF с ленивой подгрузкой страниц
 
+// OVC: pdf - глобальное хранилище для сохранения состояния изображений при перерисовке
+const imageStateCache = new Map();
+
 export function initPdfViewers(container, onBlockUpdate) {
   // Инициализируем все PDF-блоки в контейнере
   const pdfBlocks = container.querySelectorAll('.doc-block--pdf');
@@ -24,7 +27,7 @@ export function initPdfViewers(container, onBlockUpdate) {
     block.dataset.pdfViewerInitialized = 'true';
     initPdfViewer(block, onBlockUpdate);
   });
-}
+  }
 
 function initPdfViewer(block, onBlockUpdate) {
   const fileId = block.dataset.fileId;
@@ -100,6 +103,48 @@ function initPdfViewer(block, onBlockUpdate) {
         pageNum, 
         loading: img.dataset.loading
       });
+      return;
+    }
+    
+    // OVC: pdf - проверяем, есть ли сохраненный src в dataset (после частичной перерисовки)
+    if (img.dataset.savedSrc && img.dataset.savedSrc !== '') {
+      console.log('PDF viewer: restoring saved src from dataset', { 
+        pageNum, 
+        savedSrc: img.dataset.savedSrc.substring(0, 50)
+      });
+      img.src = img.dataset.savedSrc;
+      // Восстанавливаем состояние загруженного изображения
+      img.dataset.loaded = 'true';
+      img.dataset.loading = 'false';
+      img.classList.add('pdf-page-img-loaded');
+      // Скрываем placeholder
+      const placeholder = img.parentElement?.querySelector('.pdf-page-placeholder');
+      if (placeholder) {
+        placeholder.setAttribute('hidden', '');
+        placeholder.style.display = 'none';
+      }
+      return;
+    }
+    
+    // OVC: pdf - проверяем глобальный кэш (после полной перерисовки блока)
+    const cacheKey = `${fileId}_page_${pageNum}`;
+    const cachedState = imageStateCache.get(cacheKey);
+    if (cachedState && cachedState.loaded && cachedState.src) {
+      console.log('PDF viewer: restoring from cache', { 
+        pageNum, 
+        cachedSrc: cachedState.src.substring(0, 50)
+      });
+      img.src = cachedState.src;
+      img.dataset.savedSrc = cachedState.src; // Сохраняем также в dataset
+      img.dataset.loaded = 'true';
+      img.dataset.loading = 'false';
+      img.classList.add('pdf-page-img-loaded');
+      // Скрываем placeholder
+      const placeholder = img.parentElement?.querySelector('.pdf-page-placeholder');
+      if (placeholder) {
+        placeholder.setAttribute('hidden', '');
+        placeholder.style.display = 'none';
+      }
       return;
     }
     
@@ -183,13 +228,26 @@ function initPdfViewer(block, onBlockUpdate) {
         placeholder.style.display = 'none';
       }
       
-      // OVC: pdf - убираем все inline стили, которые могут скрывать изображение
-      img.style.removeProperty('display');
-      img.style.removeProperty('opacity');
-      img.style.removeProperty('visibility');
-      
-      // Принудительно устанавливаем видимость через класс
-      img.classList.add('pdf-page-img-loaded');
+          // OVC: pdf - убираем все inline стили, которые могут скрывать изображение
+          img.style.removeProperty('display');
+          img.style.removeProperty('opacity');
+          img.style.removeProperty('visibility');
+          
+          // Принудительно устанавливаем видимость через класс
+          img.classList.add('pdf-page-img-loaded');
+          
+          // OVC: pdf - сохраняем src в dataset для восстановления после перерисовки
+          // Это поможет сохранить изображение, даже если блок будет перерисован
+          img.dataset.savedSrc = img.src;
+          
+          // OVC: pdf - также сохраняем в глобальном кэше для восстановления после полной перерисовки
+          const cacheKey = `${fileId}_page_${pageNum}`;
+          imageStateCache.set(cacheKey, {
+            src: img.src,
+            loaded: true,
+            naturalWidth: img.naturalWidth,
+            naturalHeight: img.naturalHeight
+          });
     };
     
     const handleImageError = (e) => {
@@ -296,6 +354,27 @@ function initPdfViewer(block, onBlockUpdate) {
       // Убеждаемся, что все существующие страницы наблюдаются
       pagesContainer.querySelectorAll('.pdf-page').forEach(page => {
         pageObserver.observe(page);
+        
+        // OVC: pdf - проверяем и восстанавливаем изображения из кэша для существующих страниц
+        const img = page.querySelector('img');
+        if (img && !img.src && !img.dataset.loaded) {
+          const pageNum = parseInt(img.dataset.pageNum || page.dataset.n || '1', 10);
+          const cacheKey = `${fileId}_page_${pageNum}`;
+          const cachedState = imageStateCache.get(cacheKey);
+          if (cachedState && cachedState.loaded && cachedState.src) {
+            console.log('PDF viewer: restoring existing page from cache', { pageNum, cachedSrc: cachedState.src.substring(0, 50) });
+            img.src = cachedState.src;
+            img.dataset.savedSrc = cachedState.src;
+            img.dataset.loaded = 'true';
+            img.dataset.loading = 'false';
+            img.classList.add('pdf-page-img-loaded');
+            const placeholder = page.querySelector('.pdf-page-placeholder');
+            if (placeholder) {
+              placeholder.setAttribute('hidden', '');
+              placeholder.style.display = 'none';
+            }
+          }
+        }
       });
       return; // Уже смонтированы
     }
@@ -329,6 +408,29 @@ function initPdfViewer(block, onBlockUpdate) {
       // OVC: pdf - НЕ устанавливаем display: none здесь, CSS сам скроет через селектор [data-loading="true"]
       // Но нужно скрыть через CSS, чтобы placeholder был виден
       
+      // OVC: pdf - предотвращаем всплытие событий клика на изображениях, чтобы не сбрасывать состояние
+      img.addEventListener('click', (e) => {
+        e.stopPropagation(); // Предотвращаем всплытие, чтобы клик не обрабатывался родительскими элементами
+      }, { passive: true });
+      
+      img.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); // Предотвращаем всплытие mousedown
+      }, { passive: true });
+      
+      // OVC: pdf - проверяем кэш перед добавлением элемента, чтобы сразу восстановить изображение
+      const cacheKey = `${fileId}_page_${i}`;
+      const cachedState = imageStateCache.get(cacheKey);
+      if (cachedState && cachedState.loaded && cachedState.src) {
+        console.log('PDF viewer: restoring new page from cache immediately', { pageNum: i, cachedSrc: cachedState.src.substring(0, 50) });
+        img.src = cachedState.src;
+        img.dataset.savedSrc = cachedState.src;
+        img.dataset.loaded = 'true';
+        img.dataset.loading = 'false';
+        img.classList.add('pdf-page-img-loaded');
+        placeholder.setAttribute('hidden', '');
+        placeholder.style.display = 'none';
+      }
+      
       // OVC: pdf - обработчики событий не нужны здесь, так как загрузка идет через loadPage()
       
       figure.appendChild(img);
@@ -337,7 +439,7 @@ function initPdfViewer(block, onBlockUpdate) {
       // OVC: pdf - подключаем каждую страницу к observer для lazy-loading
       pageObserver.observe(figure);
       
-      console.log('PDF viewer: page element created', { pageNum: i, container: pagesContainer, figure });
+      console.log('PDF viewer: page element created', { pageNum: i, container: pagesContainer, figure, restoredFromCache: !!cachedState });
     }
     
     console.log('PDF viewer: pages mounted and observed', { 
