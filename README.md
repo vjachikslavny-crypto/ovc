@@ -17,15 +17,32 @@
 ## Быстрый запуск
 
 ```bash
+# Перейдите в корневую директорию проекта
 cd ~/OVC
+
+# Создайте и активируйте виртуальное окружение (если еще не создано)
 python3 -m venv .venv
 source .venv/bin/activate
+
+# Установите зависимости
 pip install -r simple_app/requirements.txt
-PYTHONPATH=simple_app python -m app.db.migrate  # ⚠️ очищает текущие таблицы
+
+# Запустите миграцию базы данных (⚠️ очищает текущие таблицы)
+PYTHONPATH=simple_app python -m app.db.migrate
+
+# Запустите сервер
 uvicorn app.main:app --app-dir simple_app --reload
 ```
 
+Или используйте скрипт запуска:
+```bash
+cd ~/OVC
+./START_SERVER.sh
+```
+
 Откройте `http://localhost:8000`. Чтобы пересобрать схему, удалите `simple_app/ovc.db` и перезапустите миграцию.
+
+**Важно:** Всегда запускайте сервер из корневой директории проекта `OVC`, а не из `simple_app`!
 
 ## Переменные окружения
 

@@ -20,13 +20,28 @@ try:
 except ImportError:  # pragma: no cover
     PdfReader = None
 
+try:
+    import fitz  # PyMuPDF
+    HAS_PYMUPDF = True
+except ImportError:  # pragma: no cover
+    HAS_PYMUPDF = False
+except Exception:
+    HAS_PYMUPDF = False
+
+try:
+    from pdf2image import convert_from_bytes
+    HAS_PDF2IMAGE = True
+except ImportError:  # pragma: no cover
+    HAS_PDF2IMAGE = False
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4] if len(Path(__file__).resolve().parents) >= 5 else Path.cwd()
 UPLOAD_ROOT = PROJECT_ROOT / "data" / "uploads"
 ORIGINAL_DIR = UPLOAD_ROOT / "original"
 PREVIEW_DIR = UPLOAD_ROOT / "preview"
+PAGES_DIR = UPLOAD_ROOT / "pages"  # OVC: pdf - кэш страниц PDF
 
-for directory in (ORIGINAL_DIR, PREVIEW_DIR):
+for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,15 +106,112 @@ def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
     return preview_bytes, width, height
 
 
-def _generate_pdf_preview(file_id: str, pages: Optional[int]) -> bytes:
+def _render_pdf_page(data: bytes, page_num: int, scale: float = 1.0) -> Optional[bytes]:
+    """OVC: pdf - рендеринг страницы PDF в изображение."""
+    if page_num < 1:
+        return None
+    
+    try:
+        # Попытка использовать PyMuPDF (fitz) - самый быстрый вариант
+        if HAS_PYMUPDF:
+            try:
+                doc = fitz.open(stream=data, filetype="pdf")
+                if page_num > len(doc):
+                    doc.close()
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Page {page_num} out of range (PDF has {len(doc)} pages)")
+                    return None
+                page = doc[page_num - 1]  # 0-based index
+                # PyMuPDF: zoom factor (1.0 = 72 DPI, 2.0 = 144 DPI)
+                # Для лучшего качества используем scale * 1.5
+                zoom = scale * 1.5
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                # Конвертируем в PNG сначала
+                img_data = pix.tobytes("png")
+                doc.close()
+                # Конвертируем PNG в WEBP
+                img = Image.open(BytesIO(img_data))
+                out = BytesIO()
+                img.save(out, format="WEBP", quality=85, method=6)
+                return out.getvalue()
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"PyMuPDF render error for page {page_num}: {e}", exc_info=True)
+                return None
+        
+        # Попытка использовать pdf2image
+        if HAS_PDF2IMAGE:
+            try:
+                images = convert_from_bytes(data, first_page=page_num, last_page=page_num, dpi=int(72 * scale))
+                if not images:
+                    return None
+                img = images[0]
+                # Масштабируем если нужно
+                if scale != 1.0:
+                    new_size = (int(img.width * scale), int(img.height * scale))
+                    img = img.resize(new_size, Image.Resampling.LANCZOS)
+                out = BytesIO()
+                img.save(out, format="WEBP", quality=85)
+                return out.getvalue()
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"pdf2image render error: {e}", exc_info=True)
+                return None
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"PDF render error: {e}", exc_info=True)
+        return None
+    
+    return None
+
+
+def _generate_pdf_preview(data: bytes, file_id: str, pages: Optional[int]) -> bytes:
+    """OVC: pdf - генерация preview для PDF (рендер первой страницы или placeholder)."""
+    # Пытаемся отрендерить первую страницу
+    try:
+        preview_img = _render_pdf_page(data, 1, scale=1.0)
+        if preview_img:
+            # Масштабируем до разумного размера для preview
+            img = Image.open(BytesIO(preview_img))
+            img.thumbnail((1200, 1600), Image.Resampling.LANCZOS)
+            out = BytesIO()
+            img.save(out, format="WEBP", quality=85)
+            return out.getvalue()
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"PDF preview generation error: {e}", exc_info=True)
+    
+    # Fallback: placeholder если рендеринг недоступен
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"PDF preview: using placeholder for {file_id} (libraries: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE})")
     width, height = 1200, 800
     image = Image.new("RGB", (width, height), "#f8fafc")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default()
     title = "PDF Document"
-    subtitle = f"{pages or '?'} pages"
-    draw.text((width // 2 - 120, height // 2 - 40), title, fill="#0f172a", font=font)
-    draw.text((width // 2 - 80, height // 2 + 10), subtitle, fill="#475569", font=font)
+    subtitle = f"{pages or '?'} pages" if pages else "PDF файл"
+    # Простой расчет позиции для текста
+    try:
+        bbox = draw.textbbox((0, 0), title, font=font)
+        title_width = bbox[2] - bbox[0]
+        title_height = bbox[3] - bbox[1]
+    except:
+        title_width = len(title) * 20
+        title_height = 30
+    try:
+        bbox_small = draw.textbbox((0, 0), subtitle, font=font)
+        subtitle_width = bbox_small[2] - bbox_small[0]
+    except:
+        subtitle_width = len(subtitle) * 12
+    draw.text((width // 2 - title_width // 2, height // 2 - 40), title, fill="#0f172a", font=font)
+    draw.text((width // 2 - subtitle_width // 2, height // 2 + 10), subtitle, fill="#475569", font=font)
     out = BytesIO()
     image.save(out, format="WEBP", quality=85)
     return out.getvalue()
@@ -147,6 +259,7 @@ def _build_block(asset: FileAsset) -> dict:
             title=filename_without_ext or "PDF-документ",
             preview=_file_url(asset.id, "preview") if asset.path_preview else None,
             meta=DocMeta(pages=asset.pages, slides=None, size=asset.size),
+            view="cover",  # OVC: pdf - по умолчанию режим обложки
         )
         block = DocBlock(type="doc", id=generate_uuid(), data=doc_data)
         return dump_block(block)
@@ -182,7 +295,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         _write_file(preview_path, preview_bytes)
     elif meta.kind == "pdf":
         pages = _pdf_page_count(data)
-        preview_bytes = _generate_pdf_preview(file_id, pages)
+        preview_bytes = _generate_pdf_preview(data, file_id, pages)  # OVC: pdf - передаем data для рендеринга
         preview_path = PREVIEW_DIR / f"{file_id}.webp"
         _write_file(preview_path, preview_bytes)
 

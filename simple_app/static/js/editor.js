@@ -7,6 +7,7 @@ import { initInspector } from './inspector.js';
 import { initHints } from './hints.js';
 import { uuid } from './utils.js';
 import { initUploader } from './uploader.js';
+import { initPdfViewers } from './pdf_viewer.js';  // OVC: pdf - импорт PDF-виджета
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -250,6 +251,13 @@ document.addEventListener('DOMContentLoaded', () => {
     clearSelectionSnapshot();
     
     hydrateBlocks();
+    
+    // OVC: pdf - инициализация PDF-виджетов после рендеринга
+    // Сбрасываем флаг инициализации для всех PDF-блоков перед повторной инициализацией
+    canvas.querySelectorAll('.doc-block--pdf').forEach(block => {
+      block.dataset.pdfViewerInitialized = 'false';
+    });
+    initPdfViewers(canvas, handleBlockUpdate);
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
     // Не сбрасываем флаг tableHydrated, чтобы не терять фокус
@@ -1130,6 +1138,37 @@ document.addEventListener('DOMContentLoaded', () => {
     pendingCaretBlockId = blockId;
 
     render();
+    scheduleSave();
+  }
+
+  // OVC: pdf - обновление блока (например, изменение view)
+  function handleBlockUpdate(blockId, updates) {
+    const block = noteState.blocks.find((item) => item.id === blockId);
+    if (!block) {
+      console.warn('handleBlockUpdate: block not found', blockId);
+      return;
+    }
+
+    // Обновляем данные блока
+    if (updates.view !== undefined && block.type === 'doc') {
+      console.log('handleBlockUpdate: updating view', { 
+        blockId, 
+        oldView: block.data.view, 
+        newView: updates.view,
+        blockType: block.type,
+        blockData: block.data
+      });
+      block.data = { ...block.data, view: updates.view };
+      
+      // OVC: pdf - обновляем dataset в DOM, чтобы при следующем render() использовалось правильное значение
+      const blockEl = canvas.querySelector(`[data-block-id="${blockId}"]`);
+      if (blockEl && blockEl.dataset.view !== updates.view) {
+        console.log('handleBlockUpdate: updating DOM dataset', { blockId, oldView: blockEl.dataset.view, newView: updates.view });
+        blockEl.dataset.view = updates.view;
+      }
+    }
+
+    // Сохраняем изменения (но НЕ перерисовываем, чтобы не потерять состояние PDF viewer)
     scheduleSave();
   }
 

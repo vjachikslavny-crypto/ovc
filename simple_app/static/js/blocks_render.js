@@ -198,24 +198,83 @@ function renderImage(data) {
 }
 
 function renderDoc(data) {
+  // OVC: pdf - поддержка двух режимов просмотра (cover/inline)
+  const view = data.view || 'cover';
+  const isPdf = data.kind === 'pdf';
+  // Извлекаем file_id из URL вида /files/{file_id}/original
+  const fileId = data.src ? data.src.match(/\/files\/([^\/]+)/)?.[1] : null;
+  const pages = data.meta?.pages || 0;
+  
   const card = document.createElement('article');
   card.className = 'note-block note-block--doc';
-
-  const preview = document.createElement('div');
-  preview.className = 'doc-preview';
-  if (data.preview) {
-    const img = document.createElement('img');
-    img.src = data.preview;
-    img.alt = 'Превью документа';
-    img.loading = 'lazy';
-    preview.appendChild(img);
-  } else {
-    const badge = document.createElement('div');
-    badge.className = 'doc-preview__badge';
-    badge.textContent = (data.kind || 'DOC').toUpperCase();
-    preview.appendChild(badge);
+  if (isPdf) {
+    card.classList.add('doc-block--pdf');
+    if (fileId) card.dataset.fileId = fileId;
+    if (pages) card.dataset.pages = String(pages);
+    card.dataset.view = view;
   }
 
+  // Toolbar для PDF (виден только для PDF)
+  if (isPdf) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'doc-toolbar';
+    
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'doc-btn';
+    toggleBtn.dataset.action = 'toggle-view';
+    toggleBtn.textContent = view === 'cover' ? 'Просмотр' : 'Свернуть';
+    
+    toolbar.appendChild(toggleBtn);
+    card.appendChild(toolbar);
+  }
+
+  // Обложка/preview (для PDF используем doc-cover, для других - doc-preview)
+  if (isPdf) {
+    const cover = document.createElement('div');
+    cover.className = 'doc-cover';
+    if (view === 'inline') cover.hidden = true;
+    
+    if (data.preview) {
+      const img = document.createElement('img');
+      img.src = data.preview;
+      img.alt = 'Превью документа';
+      img.loading = 'lazy';
+      cover.appendChild(img);
+    } else {
+      const badge = document.createElement('div');
+      badge.className = 'doc-preview__badge';
+      badge.textContent = (data.kind || 'DOC').toUpperCase();
+      cover.appendChild(badge);
+    }
+    card.appendChild(cover);
+  } else {
+    // Для не-PDF блоков используем старую структуру с doc-preview
+    const preview = document.createElement('div');
+    preview.className = 'doc-preview';
+    if (data.preview) {
+      const img = document.createElement('img');
+      img.src = data.preview;
+      img.alt = 'Превью документа';
+      img.loading = 'lazy';
+      preview.appendChild(img);
+    } else {
+      const badge = document.createElement('div');
+      badge.className = 'doc-preview__badge';
+      badge.textContent = (data.kind || 'DOC').toUpperCase();
+      preview.appendChild(badge);
+    }
+    card.appendChild(preview);
+  }
+
+  // Контейнер для страниц PDF (только для PDF в режиме inline)
+  if (isPdf) {
+    const pagesContainer = document.createElement('div');
+    pagesContainer.className = 'pdf-pages';
+    if (view !== 'inline') pagesContainer.hidden = true;
+    card.appendChild(pagesContainer);
+  }
+
+  // Метаданные и действия (всегда видимы в конце)
   const body = document.createElement('div');
   body.className = 'doc-meta';
   const title = document.createElement('h4');
@@ -244,8 +303,9 @@ function renderDoc(data) {
   body.appendChild(meta);
   body.appendChild(actions);
 
-  card.appendChild(preview);
+  // Метаданные всегда в конце
   card.appendChild(body);
+  
   return card;
 }
 

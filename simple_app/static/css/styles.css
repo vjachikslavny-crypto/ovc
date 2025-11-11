@@ -633,6 +633,13 @@ header, footer {
   background: rgba(18, 9, 34, 0.85);
 }
 
+/* OVC: pdf - для PDF-блоков меняем layout на column */
+.doc-block--pdf {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
 .doc-preview {
   width: 120px;
   height: 150px;
@@ -667,6 +674,12 @@ header, footer {
   gap: 6px;
 }
 
+/* OVC: pdf - для PDF-блоков метаданные занимают всю ширину */
+.doc-block--pdf .doc-meta {
+  flex: none;
+  width: 100%;
+}
+
 .doc-meta h4 {
   margin: 0;
   font-size: 1.1rem;
@@ -686,6 +699,165 @@ header, footer {
 .doc-actions__open {
   font-size: 0.85rem;
   padding: 6px 14px;
+}
+
+/* OVC: pdf - стили для PDF-блоков (дополнительные стили для toolbar и страниц) */
+
+.doc-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(8, 2, 20, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.doc-toolbar .spacer {
+  flex: 1;
+}
+
+.doc-btn {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(139, 92, 246, 0.2);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.doc-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.35);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+.doc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.doc-cover {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 2, 20, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.doc-cover img {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-width: 100%;
+}
+
+.pdf-pages {
+  /* OVC: pdf - убираем max-height и overflow, чтобы все страницы были полностью видны */
+  /* max-height: 70vh; - убрано, чтобы контейнер мог растягиваться по содержимому */
+  /* overflow-y: auto; - убрано, чтобы не было скроллбара внутри контейнера */
+  overflow-x: hidden; /* Оставляем только горизонтальный overflow для предотвращения горизонтального скролла */
+  background: rgba(8, 2, 20, 0.5);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex !important; /* OVC: pdf - принудительно flex для видимости */
+  flex-direction: column;
+  gap: 16px;
+  /* min-height: 200px; - убрано, высота будет определяться содержимым */
+  width: 100%; /* OVC: pdf - полная ширина контейнера */
+}
+
+.pdf-pages[hidden] {
+  display: none !important;
+}
+
+.pdf-page-placeholder {
+  min-height: 400px;
+  background: rgba(139, 92, 246, 0.1);
+  border: 2px dashed rgba(139, 92, 246, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-sm);
+  margin: 8px 0;
+  font-size: 0.9rem;
+  text-align: center;
+  white-space: pre-line;
+  padding: 20px;
+}
+
+.pdf-page {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  position: relative;
+}
+
+.pdf-page img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  background: white;
+  opacity: 1;
+  visibility: visible;
+}
+
+/* OVC: pdf - скрываем изображение, если оно еще не загружено */
+/* OVC: pdf - не скрываем через display: none, чтобы не блокировать загрузку браузером */
+/* Вместо этого используем opacity и visibility, которые не блокируют загрузку */
+.pdf-page img:not([src]),
+.pdf-page img[src=""] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+}
+
+.pdf-page img[data-loading="true"]:not([data-loaded="true"]) {
+  /* OVC: pdf - используем opacity вместо скрытия через position/size
+     чтобы браузер загружал изображение, но оно было невидимо */
+  opacity: 0 !important;
+  /* НЕ используем display: none, position: absolute, width: 1px - это может помешать загрузке */
+}
+
+/* OVC: pdf - показываем изображение, когда оно загружено */
+.pdf-page img[data-loaded="true"],
+.pdf-page img.pdf-page-img-loaded {
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  position: static !important;
+  width: 100% !important;
+  height: auto !important;
+  overflow: visible !important;
+  clip: auto !important;
+}
+
+.pdf-page-placeholder {
+  display: flex;
+}
+
+/* OVC: pdf - скрываем placeholder когда изображение загружено */
+.pdf-page-placeholder[hidden],
+.pdf-page img[data-loaded="true"] ~ .pdf-page-placeholder,
+.pdf-page img.pdf-page-img-loaded ~ .pdf-page-placeholder {
+  display: none !important;
 }
 
 .note-block--source {

@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,7 +11,20 @@ from app.api.graph import router as graph_router
 from app.api.notes import router as notes_router
 from app.api.upload import router as upload_router
 
+# OVC: pdf - проверяем доступность библиотек при старте
+from app.services.files import HAS_PYMUPDF, HAS_PDF2IMAGE
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="OVC Simple App", version="0.1.0")
+
+# OVC: pdf - логируем статус библиотек при старте
+@app.on_event("startup")
+async def startup_event():
+    logger.info(f"PDF rendering libraries: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE}")
+    if not HAS_PYMUPDF and not HAS_PDF2IMAGE:
+        logger.warning("PDF rendering not available! Install pymupdf: pip install pymupdf")
+
 app.include_router(chat_router, prefix="/api")
 app.include_router(commit_router, prefix="/api")
 app.include_router(notes_router, prefix="/api")

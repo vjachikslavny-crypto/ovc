@@ -106,6 +106,7 @@ class DocData(BaseModel):
     title: Optional[str] = None
     preview: Optional[str] = None
     meta: Optional[DocMeta] = None
+    view: Literal["cover", "inline"] = "cover"  # OVC: pdf - режим просмотра
 
     class Config:
         extra = "forbid"
