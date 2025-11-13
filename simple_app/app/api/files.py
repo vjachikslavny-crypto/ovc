@@ -73,6 +73,13 @@ def stream_media(file_id: str, request: Request):
 
     file_size = path.stat().st_size
     range_header = request.headers.get("range")
+    
+    # OVC: audio - нормализуем MIME-тип для WebM с codecs
+    media_type = asset.mime
+    if media_type and "webm" in media_type.lower() and "codecs" in media_type:
+        # Для стриминга используем базовый тип, браузер сам определит codec
+        media_type = "audio/webm"
+    
     if range_header:
         start, end = _parse_range(range_header, file_size)
         chunk_size = 1024 * 64
@@ -80,6 +87,7 @@ def stream_media(file_id: str, request: Request):
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(end - start + 1),
+            "Content-Type": media_type,
         }
 
         def iter_file():
@@ -93,9 +101,9 @@ def stream_media(file_id: str, request: Request):
                     remaining -= len(chunk)
                     yield chunk
 
-        return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=asset.mime)
+        return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=media_type)
 
-    return FileResponse(path, media_type=asset.mime, filename=asset.filename)
+    return FileResponse(path, media_type=media_type, filename=asset.filename)
 
 
 @router.get("/files/{file_id}/page/{page_num}")

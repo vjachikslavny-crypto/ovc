@@ -234,10 +234,7 @@ header, footer {
   z-index: 70;
 }
 
-/* Скрываем кнопку голосовой заметки когда заметка пустая */
-.floating-actions--centered #fab-voice {
-  display: none;
-}
+/* OVC: audio - кнопка записи голоса теперь видна и для пустой заметки */
 
 /* Улучшаем видимость кнопок в центрированном состоянии */
 .floating-actions--centered .fab {
@@ -862,34 +859,60 @@ header, footer {
 }
 
 .audio-block {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.3);
   border-radius: var(--radius-md);
-  padding: 12px;
-  background: rgba(8, 2, 20, 0.7);
+  padding: 14px;
+  background: rgba(21, 10, 40, 0.85);
+  backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.15);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.audio-block:hover {
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.25);
 }
 
 .audio-controls {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
 
 .audio-btn {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: rgba(139, 92, 246, 0.15);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: 6px 10px;
+  color: var(--accent-strong);
+  padding: 8px 12px;
   cursor: pointer;
-  min-width: 36px;
-  transition: background 0.2s ease;
+  min-width: 40px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.2);
 }
 
 .audio-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(192, 132, 252, 0.6);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+.audio-btn--play {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(192, 132, 252, 0.4));
+  border-color: rgba(192, 132, 252, 0.6);
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
+  font-size: 1.1em;
+}
+
+.audio-btn--play:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(192, 132, 252, 0.5));
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.7);
+  transform: translateY(-1px) scale(1.05);
 }
 
 .audio-timeline {
@@ -897,21 +920,84 @@ header, footer {
   flex: 1;
   height: 40px;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  align-items: center;
+  /* OVC: audio - увеличиваем область клика до 40px, но визуально прогресс-бар остается узким (6px) */
+}
+
+.audio-timeline.dragging {
+  cursor: grabbing;
+  cursor: -webkit-grabbing;
 }
 
 .audio-wave {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  display: none; /* OVC: audio - скрываем waveform для упрощения */
 }
 
 .audio-progress {
   position: absolute;
-  inset: 0 auto 0 0;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 0%;
-  background: rgba(139, 92, 246, 0.25);
+  height: 6px;
+  background: linear-gradient(90deg, 
+    rgba(139, 92, 246, 0.9) 0%, 
+    rgba(192, 132, 252, 1) 50%,
+    rgba(139, 92, 246, 0.9) 100%);
   pointer-events: none;
+  transition: width 0.1s linear;
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+  /* OVC: audio - визуально узкая полоса, но кликабельная область широкая */
+}
+
+/* OVC: audio - фон для неактивной части прогресс-бара */
+.audio-timeline::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 6px;
+  background: rgba(139, 92, 246, 0.15);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* OVC: audio - индикатор текущей позиции (ползунок) */
+.audio-progress::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background: rgba(192, 132, 252, 1);
+  border: 2px solid rgba(139, 92, 246, 1);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.8), 0 0 16px rgba(192, 132, 252, 0.6);
+  pointer-events: none;
+  opacity: 1;
+}
+
+/* Скрываем ползунок в начале */
+.audio-progress[style*="width: 0%"]::after,
+.audio-progress[style*="width: 0"]::after {
+  opacity: 0;
+}
+
+/* OVC: audio - убираем transition при перетаскивании для мгновенного обновления */
+.audio-timeline.dragging .audio-progress {
+  transition: none;
+}
+
+.audio-timeline.dragging .audio-progress::after {
+  box-shadow: 0 0 12px rgba(139, 92, 246, 1), 0 0 20px rgba(192, 132, 252, 0.8);
 }
 
 .audio-time {
@@ -919,6 +1005,8 @@ header, footer {
   min-width: 90px;
   text-align: right;
   font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .audio-expanded {

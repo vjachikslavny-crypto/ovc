@@ -283,6 +283,18 @@ document.addEventListener('DOMContentLoaded', () => {
       block.dataset.pdfViewerInitialized = 'false';
     });
     initPdfViewers(canvas, handleBlockUpdate);
+    // OVC: audio - сохраняем состояние воспроизведения перед рендером
+    canvas.querySelectorAll('.audio-block').forEach(block => {
+      const audioEl = block.querySelector('audio');
+      if (audioEl) {
+        // Сохраняем текущее состояние
+        audioEl.dataset.savedTime = String(audioEl.currentTime);
+        audioEl.dataset.wasPlaying = String(!audioEl.paused);
+        audioEl.dataset.savedSrc = audioEl.src;
+      }
+    });
+    // OVC: audio - сбрасываем флаг инициализации только для новых блоков
+    // Блоки, которые уже были инициализированы, не будут переинициализированы
     initAudioPlayers(canvas, handleBlockUpdate);
     canvas.querySelectorAll('.doc-block--word').forEach(block => {
       block.dataset.wordViewerInitialized = 'false';
@@ -1380,6 +1392,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Игнорируем клики по кнопкам и их дочерним элементам
     if (event.target.closest('.floating-actions')) return;
     if (event.target.closest('[data-block-id]')) return;
+    // OVC: audio - игнорируем клики по аудио блокам и их элементам управления
+    if (event.target.closest('.audio-block')) return;
     // OVC: pdf - игнорируем клики по PDF блокам и их содержимому (изображения, контейнеры страниц)
     if (event.target.closest('.doc-block--pdf, .doc-block--word')) return;
     if (event.target.closest('.pdf-pages')) return;

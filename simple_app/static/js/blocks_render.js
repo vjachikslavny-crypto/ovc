@@ -381,11 +381,8 @@ function renderAudio(data) {
 
   const timeline = document.createElement('div');
   timeline.className = 'audio-timeline';
-  const wave = document.createElement('canvas');
-  wave.className = 'audio-wave';
   const progress = document.createElement('div');
   progress.className = 'audio-progress';
-  timeline.appendChild(wave);
   timeline.appendChild(progress);
   controls.appendChild(timeline);
 
@@ -412,7 +409,16 @@ function renderAudio(data) {
   const audioEl = document.createElement('audio');
   audioEl.preload = 'metadata';
   if (data.src) audioEl.src = data.src;
-  if (data.mime) audioEl.type = data.mime;
+  // OVC: audio - нормализуем MIME-тип для WebM с codecs
+  if (data.mime) {
+    // Для WebM с codecs используем базовый тип, браузер сам определит codec
+    const normalizedMime = data.mime.includes('webm') && data.mime.includes('codecs') 
+      ? 'audio/webm' 
+      : data.mime;
+    audioEl.type = normalizedMime;
+  }
+  // Добавляем controls для отладки (можно убрать позже)
+  audioEl.controls = false;
   block.appendChild(audioEl);
 
   const expanded = document.createElement('div');
