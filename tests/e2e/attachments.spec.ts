@@ -23,4 +23,10 @@ test.describe.skip('Attachments flow (skeleton)', () => {
     // TODO: drag docx, click "Просмотр", ensure inline content visible.
     expect(true).toBeTruthy();
   });
+
+  test('recording audio creates audio block', async ({ page }) => {
+    await page.goto('/notes');
+    // TODO: simulate microphone recording or mock endpoint.
+    expect(true).toBeTruthy();
+  });
 });

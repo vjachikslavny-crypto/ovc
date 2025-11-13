@@ -43,6 +43,8 @@ export function renderBlock(block) {
       return renderImage(data);
     case 'doc':
       return renderDoc(data);
+    case 'audio':
+      return renderAudio(data);
     case 'source':
       return renderSource(data);
     case 'summary':
@@ -358,6 +360,97 @@ function renderDoc(data) {
   return card;
 }
 
+function renderAudio(data) {
+  const view = data.view || 'mini';
+  const fileId = data.waveform ? data.waveform.match(/\/files\/(.+?)\//)?.[1] : (data.src?.match(/\/files\/(.+?)\//)?.[1] || '');
+  const block = document.createElement('article');
+  block.className = 'audio-block';
+  block.dataset.view = view;
+  if (fileId) block.dataset.fileId = fileId;
+  if (data.waveform) block.dataset.waveform = data.waveform;
+  if (data.duration) block.dataset.duration = String(data.duration);
+
+  const controls = document.createElement('div');
+  controls.className = 'audio-controls';
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'audio-btn audio-btn--play';
+  playBtn.dataset.action = 'play';
+  playBtn.textContent = '▶';
+  controls.appendChild(playBtn);
+
+  const timeline = document.createElement('div');
+  timeline.className = 'audio-timeline';
+  const wave = document.createElement('canvas');
+  wave.className = 'audio-wave';
+  const progress = document.createElement('div');
+  progress.className = 'audio-progress';
+  timeline.appendChild(wave);
+  timeline.appendChild(progress);
+  controls.appendChild(timeline);
+
+  const timeBox = document.createElement('div');
+  timeBox.className = 'audio-time';
+  const cur = document.createElement('span');
+  cur.className = 'audio-time__current';
+  cur.textContent = '0:00';
+  const sep = document.createTextNode('/');
+  const dur = document.createElement('span');
+  dur.className = 'audio-time__duration';
+  dur.textContent = data.duration ? formatTime(data.duration) : '–:–';
+  timeBox.append(cur, sep, dur);
+  controls.appendChild(timeBox);
+
+  const toggleView = document.createElement('button');
+  toggleView.className = 'audio-btn';
+  toggleView.dataset.action = 'toggle-view';
+  toggleView.textContent = view === 'expanded' ? '▾' : '▤';
+  controls.appendChild(toggleView);
+
+  block.appendChild(controls);
+
+  const audioEl = document.createElement('audio');
+  audioEl.preload = 'metadata';
+  if (data.src) audioEl.src = data.src;
+  if (data.mime) audioEl.type = data.mime;
+  block.appendChild(audioEl);
+
+  const expanded = document.createElement('div');
+  expanded.className = 'audio-expanded';
+  expanded.hidden = view !== 'expanded';
+  const actions = document.createElement('div');
+  actions.className = 'audio-actions';
+
+  const rewindBtn = document.createElement('button');
+  rewindBtn.className = 'audio-btn';
+  rewindBtn.dataset.action = 'rewind-10';
+  rewindBtn.textContent = '«10';
+  actions.appendChild(rewindBtn);
+
+  const forwardBtn = document.createElement('button');
+  forwardBtn.className = 'audio-btn';
+  forwardBtn.dataset.action = 'ffwd-10';
+  forwardBtn.textContent = '10»';
+  actions.appendChild(forwardBtn);
+
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'audio-btn';
+  downloadBtn.dataset.action = 'download';
+  downloadBtn.textContent = '⬇︎';
+  if (!data.src) downloadBtn.disabled = true;
+  actions.appendChild(downloadBtn);
+
+  expanded.appendChild(actions);
+  const transcript = document.createElement('div');
+  transcript.className = 'audio-transcript';
+  transcript.hidden = !data.transcript;
+  if (data.transcript) transcript.textContent = data.transcript;
+  expanded.appendChild(transcript);
+  block.appendChild(expanded);
+
+  return block;
+}
+
 function renderSource(data) {
   const card = document.createElement('article');
   card.className = 'note-block note-block--source';
@@ -421,4 +514,13 @@ function markEditable(element) {
     element.setAttribute('contenteditable', 'true');
   }
   return element;
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '–:–';
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${minutes}:${secs}`;
 }

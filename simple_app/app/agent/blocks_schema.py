@@ -162,8 +162,14 @@ BLOCK_SCHEMA: dict = {
                             "type": "object",
                             "properties": {
                                 "src": {"type": "string"},
+                                "mime": {"type": ["string", "null"]},
                                 "duration": {"type": ["number", "null"]},
                                 "waveform": {"type": ["string", "null"]},
+                                "transcript": {"type": ["string", "null"]},
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["mini", "expanded"],
+                                },
                             },
                             "required": ["src"],
                             "additionalProperties": False,

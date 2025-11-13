@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import audioop
 import hashlib
+import json
 import mimetypes
 import logging
+import wave
 import html as html_module
 from dataclasses import dataclass
 from io import BytesIO
@@ -14,7 +17,16 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.agent.block_models import DocBlock, DocData, DocMeta, ImageBlock, ImageData, dump_block
+from app.agent.block_models import (
+    AudioBlock,
+    AudioData,
+    DocBlock,
+    DocData,
+    DocMeta,
+    ImageBlock,
+    ImageData,
+    dump_block,
+)
 from app.db.models import FileAsset, generate_uuid
 
 try:
@@ -31,6 +43,11 @@ try:
     from striprtf.striprtf import rtf_to_text
 except ImportError:  # pragma: no cover
     rtf_to_text = None
+
+try:
+    from mutagen import File as MutagenFile
+except ImportError:  # pragma: no cover
+    MutagenFile = None
 
 try:
     from pypdf import PdfReader
@@ -61,8 +78,9 @@ ORIGINAL_DIR = UPLOAD_ROOT / "original"
 PREVIEW_DIR = UPLOAD_ROOT / "preview"
 PAGES_DIR = UPLOAD_ROOT / "pages"  # OVC: pdf - кэш страниц PDF
 DOC_HTML_DIR = UPLOAD_ROOT / "doc_html"
+WAVEFORM_DIR = UPLOAD_ROOT / "waveform"
 
-for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR, DOC_HTML_DIR):
+for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR, DOC_HTML_DIR, WAVEFORM_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -77,10 +95,26 @@ DOCX_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 RTF_MIME_TYPES = {"application/rtf", "text/rtf"}
+AUDIO_MIME_TYPES = {
+    "audio/webm",
+    "audio/webm;codecs=opus",
+    "audio/ogg",
+    "audio/ogg;codecs=opus",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/x-m4a",
+    "audio/mp4",
+    "audio/aac",
+}
+AUDIO_EXTENSIONS = (".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac")
 
 IMAGE_MAX_BYTES = 15 * 1024 * 1024
 PDF_MAX_BYTES = 50 * 1024 * 1024
 DOC_MAX_BYTES = 30 * 1024 * 1024
+AUDIO_MAX_BYTES = 50 * 1024 * 1024
+AUDIO_WAVE_POINTS = 256
 
 ALLOWED_HTML_TAGS = [
     "p",
@@ -153,8 +187,12 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         return FileMetadata(kind="docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension=".docx", max_bytes=DOC_MAX_BYTES)
     if mime in RTF_MIME_TYPES or filename.lower().endswith(".rtf"):
         return FileMetadata(kind="rtf", mime="application/rtf", extension=".rtf", max_bytes=DOC_MAX_BYTES)
+    if mime in AUDIO_MIME_TYPES or filename.lower().endswith(AUDIO_EXTENSIONS):
+        audio_mime = mime if mime in AUDIO_MIME_TYPES else "audio/webm"
+        extension = _guess_extension(filename, audio_mime) or ".webm"
+        return FileMetadata(kind="audio", mime=audio_mime, extension=extension, max_bytes=AUDIO_MAX_BYTES)
 
-    raise HTTPException(status_code=415, detail="Unsupported file type for this prototype (image/pdf/docx/rtf only).")
+    raise HTTPException(status_code=415, detail="Unsupported file type for this prototype (image/pdf/docx/rtf/audio only).")
 
 
 def _write_file(path: Path, data: bytes) -> None:
@@ -343,6 +381,61 @@ def _convert_rtf_to_html(data: bytes) -> tuple[str, Optional[int]]:
     return html_fragment, word_count
 
 
+def _default_waveform(points: int = 64) -> list[float]:
+    return [0.2 for _ in range(points)]
+
+
+def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], list[float]]:
+    duration = None
+    waveform: list[float] = []
+    if MutagenFile is not None:
+        try:
+            audio = MutagenFile(BytesIO(data))
+            if audio and audio.info:
+                duration = getattr(audio.info, "length", None)
+        except Exception:
+            duration = None
+
+    # Waveform only for PCM wav; others fallback
+    try:
+        if mime in {"audio/wav", "audio/x-wav", "audio/wave"}:
+            with wave.open(BytesIO(data)) as wav_file:
+                frames = wav_file.readframes(wav_file.getnframes())
+                sample_width = wav_file.getsampwidth()
+                channels = wav_file.getnchannels()
+                if channels > 1:
+                    frames = audioop.tomono(frames, sample_width, 0.5, 0.5)
+                total_samples = len(frames) // sample_width
+                if total_samples == 0:
+                    raise ValueError("empty audio")
+                bucket = max(total_samples // AUDIO_WAVE_POINTS, 1)
+                waveform = []
+                max_sample = float((1 << (8 * sample_width - 1)) - 1) or 1.0
+                for idx in range(AUDIO_WAVE_POINTS):
+                    start = idx * bucket * sample_width
+                    if start >= len(frames):
+                        break
+                    end = min(len(frames), start + bucket * sample_width)
+                    chunk = frames[start:end]
+                    if not chunk:
+                        waveform.append(0.0)
+                        continue
+                    peak = audioop.max(chunk, sample_width)
+                    waveform.append(round(min(1.0, peak / max_sample), 4))
+    except Exception:
+        waveform = []
+
+    if not waveform:
+        waveform = _default_waveform()
+    return duration, waveform
+
+
+def _write_waveform(file_id: str, values: list[float]) -> Path:
+    path = WAVEFORM_DIR / f"{file_id}.json"
+    path.write_text(json.dumps(values), encoding="utf-8")
+    return path
+
+
 def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -393,6 +486,18 @@ def _build_block(asset: FileAsset) -> dict:
         block = DocBlock(type="doc", id=generate_uuid(), data=doc_data)
         return dump_block(block)
 
+    if asset.kind == "audio":
+        audio_data = AudioData(
+            src=_file_url(asset.id, "stream"),
+            mime=asset.mime,
+            duration=asset.duration,
+            waveform=_file_url(asset.id, "waveform") if asset.path_waveform else None,
+            transcript=None,
+            view="mini",
+        )
+        block = AudioBlock(type="audio", id=generate_uuid(), data=audio_data)
+        return dump_block(block)
+
     raise HTTPException(status_code=500, detail=f"Unknown asset kind: {asset.kind}")
 
 
@@ -418,10 +523,12 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
 
     preview_path = None
     doc_html_path = None
+    waveform_path = None
     width = None
     height = None
     pages = None
     words = None
+    duration = None
 
     if meta.kind == "image":
         preview_bytes, width, height = _generate_image_preview(data)
@@ -450,6 +557,9 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         except Exception as e:
             logger.error(f"Error processing {meta.kind} file: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error processing {meta.kind} file: {str(e)}")
+    elif meta.kind == "audio":
+        duration, waveform_values = _extract_audio_metadata(data, meta.mime)
+        waveform_path = _write_waveform(file_id, waveform_values)
 
     asset = FileAsset(
         id=file_id,
@@ -461,10 +571,12 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_original=str(original_path),
         path_preview=str(preview_path) if preview_path else None,
         path_doc_html=str(doc_html_path) if doc_html_path else None,
+        path_waveform=str(waveform_path) if waveform_path else None,
         hash_sha256=_hash_bytes(data),
         width=width,
         height=height,
         pages=pages,
+        duration=duration,
         words=words,
     )
     session.add(asset)

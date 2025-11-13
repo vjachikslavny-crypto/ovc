@@ -12,3 +12,4 @@ pymupdf
 mammoth
 striprtf
 bleach
+mutagen

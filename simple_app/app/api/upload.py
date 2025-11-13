@@ -34,12 +34,8 @@ class UploadResponse(BaseModel):
         allow_population_by_field_name = True
 
 
-@router.post("/upload", response_model=UploadResponse)
-async def upload_files(
-    note_id: Optional[str] = Query(default=None, alias="noteId"),
-    files: List[UploadFile] = File(...),
-):
-    if not files:
+async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> UploadResponse:
+    if not uploads:
         raise HTTPException(status_code=400, detail="No files provided")
 
     response_blocks: List[dict] = []
@@ -52,7 +48,7 @@ async def upload_files(
                 if not note:
                     raise HTTPException(status_code=404, detail="Note not found")
 
-            for upload in files:
+            for upload in uploads:
                 stored = await file_service.save_upload(session, upload, note_id)
                 asset = stored.asset
                 response_blocks.append(stored.block)
@@ -67,7 +63,7 @@ async def upload_files(
                         previewUrl=f"/files/{asset.id}/preview" if asset.path_preview else None,
                     )
                 )
-            
+
             session.commit()
         except HTTPException:
             session.rollback()
@@ -77,3 +73,19 @@ async def upload_files(
             raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
     return UploadResponse(noteId=note_id, blocks=response_blocks, files=response_files)
+
+
+@router.post("/upload", response_model=UploadResponse)
+async def upload_files(
+    note_id: Optional[str] = Query(default=None, alias="noteId"),
+    files: List[UploadFile] = File(...),
+):
+    return await _store_uploads(note_id, files)
+
+
+@router.post("/upload/audio", response_model=UploadResponse)
+async def upload_audio(
+    note_id: Optional[str] = Query(default=None, alias="noteId"),
+    file: UploadFile = File(...),
+):
+    return await _store_uploads(note_id, [file])

@@ -36,6 +36,23 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[1].data.kind, "pdf")
         self.assertEqual(parsed[2].data.kind, "csv")
 
+    def test_parse_audio_block(self):
+        blocks = [
+            {
+                "type": "audio",
+                "data": {
+                    "src": "/files/a1/stream",
+                    "mime": "audio/webm",
+                    "duration": 12.5,
+                    "waveform": "/files/a1/waveform",
+                    "view": "expanded",
+                },
+            }
+        ]
+
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].data.view, "expanded")
+
     def test_parse_doc_block_with_view(self):
         blocks = [
             {

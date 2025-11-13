@@ -146,6 +146,7 @@ class FileAsset(Base):
     path_original = Column(String, nullable=False)
     path_preview = Column(String, nullable=True)
     path_doc_html = Column(String, nullable=True)
+    path_waveform = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)

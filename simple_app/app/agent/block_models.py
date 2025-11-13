@@ -73,8 +73,11 @@ class ImageData(BaseModel):
 
 class AudioData(BaseModel):
     src: str
+    mime: Optional[str] = None
     duration: Optional[float] = Field(default=None, ge=0.0)
     waveform: Optional[str] = None
+    transcript: Optional[str] = None
+    view: Literal["mini", "expanded"] = "mini"
 
     class Config:
         extra = "forbid"

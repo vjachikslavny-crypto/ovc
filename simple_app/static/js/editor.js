@@ -8,6 +8,8 @@ import { initHints } from './hints.js';
 import { uuid } from './utils.js';
 import { initUploader } from './uploader.js';
 import { initPdfViewers } from './pdf_viewer.js';  // OVC: pdf - импорт PDF-виджета
+import { initAudioPlayers } from './audio_player.js';
+import { initAudioRecorder } from './audio_recorder.js';
 import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмотр DOCX/RTF
 
 const SAVE_DEBOUNCE = 600;
@@ -49,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initInlineBubble(bubbleEl, canvas);
   initPalette({ paletteEl, triggerEl: fabPlus, onInsert: handleInsertBlock });
   initSmartInsert(canvas, { onTransform: handleTransformBlock });
-  initUploader({
+  const uploader = initUploader({
     attachBtn: fabAttach,
     fileInput,
     dropOverlay,
@@ -57,6 +59,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureNote,
     onBlocksReady: handleUploadedBlocks,
     getDragState: () => dragState,
+  }) || { queueFiles: async () => {} };
+
+  initAudioRecorder({
+    button: fabVoice,
+    uploader,
+    onReady: () => hints.push('Аудиозапись добавлена в заметку.'),
   });
 
   let noteState = {
@@ -275,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
       block.dataset.pdfViewerInitialized = 'false';
     });
     initPdfViewers(canvas, handleBlockUpdate);
+    initAudioPlayers(canvas, handleBlockUpdate);
     canvas.querySelectorAll('.doc-block--word').forEach(block => {
       block.dataset.wordViewerInitialized = 'false';
     });
@@ -1180,7 +1189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Обновляем данные блока
-    if (updates.view !== undefined && block.type === 'doc') {
+    if (updates.view !== undefined && (block.type === 'doc' || block.type === 'audio')) {
       console.log('handleBlockUpdate: updating view', { 
         blockId, 
         oldView: block.data.view, 
@@ -1196,6 +1205,10 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('handleBlockUpdate: updating DOM dataset', { blockId, oldView: blockEl.dataset.view, newView: updates.view });
         blockEl.dataset.view = updates.view;
       }
+    }
+
+    if (updates.duration !== undefined && block.type === 'audio') {
+      block.data = { ...block.data, duration: updates.duration };
     }
 
     // Сохраняем изменения (но НЕ перерисовываем, чтобы не потерять состояние PDF viewer)
@@ -1298,16 +1311,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hidden) {
       inspector.onOpen?.(noteState);
     }
-  });
-
-  fabVoice?.addEventListener('click', async () => {
-    const text = prompt('Продиктуйте заметку (ввод текстом)');
-    if (!text) return;
-    handleInsertBlock({
-      id: uuid(),
-      type: 'paragraph',
-      data: { parts: [{ text }] },
-    });
   });
 
   // ---- LAYOUT HINTS / LINKS ----

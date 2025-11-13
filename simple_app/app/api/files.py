@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, Response, HTMLResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse
 
 from app.db.models import FileAsset
 from app.db.session import get_session
@@ -51,6 +51,51 @@ def download_doc_html(file_id: str):
         raise HTTPException(status_code=404, detail="Document preview file is missing on disk")
     content = path.read_text(encoding="utf-8")
     return HTMLResponse(content=content, media_type="text/html; charset=utf-8")
+
+
+@router.get("/files/{file_id}/waveform")
+def download_waveform(file_id: str):
+    asset = _fetch_asset(file_id)
+    if not asset.path_waveform:
+        raise HTTPException(status_code=404, detail="Waveform not available for this file")
+    path = Path(asset.path_waveform)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Waveform file is missing on disk")
+    return Response(content=path.read_text(encoding="utf-8"), media_type="application/json")
+
+
+@router.get("/files/{file_id}/stream")
+def stream_media(file_id: str, request: Request):
+    asset = _fetch_asset(file_id)
+    path = Path(asset.path_original)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Original file is missing on disk")
+
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range")
+    if range_header:
+        start, end = _parse_range(range_header, file_size)
+        chunk_size = 1024 * 64
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+        }
+
+        def iter_file():
+            with path.open("rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(chunk_size, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=asset.mime)
+
+    return FileResponse(path, media_type=asset.mime, filename=asset.filename)
 
 
 @router.get("/files/{file_id}/page/{page_num}")
@@ -114,3 +159,16 @@ def get_pdf_page(file_id: str, page_num: int, scale: float = Query(1.0, ge=0.5, 
     except Exception as e:
         logger.error(f"Error rendering PDF page {page_num} for {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+def _parse_range(range_header: str, file_size: int) -> tuple[int, int]:
+    if not range_header.startswith("bytes="):
+        return 0, file_size - 1
+    range_values = range_header.replace("bytes=", "").split("-", 1)
+    start = int(range_values[0]) if range_values[0] else 0
+    end = int(range_values[1]) if len(range_values) > 1 and range_values[1] else file_size - 1
+    start = max(0, start)
+    end = min(file_size - 1, end)
+    if start > end:
+        start = 0
+    return start, end

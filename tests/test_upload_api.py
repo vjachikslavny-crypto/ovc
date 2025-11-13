@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import base64
 import io
+import math
+import struct
 import sys
 import unittest
+import wave
 import zipfile
 from pathlib import Path
 
@@ -84,6 +87,24 @@ def make_simple_rtf() -> bytes:
     return b"{\\rtf1\\ansi Hello RTF!}"
 
 
+def make_wav(duration: float = 0.4) -> bytes:
+    buffer = io.BytesIO()
+    sample_rate = 16000
+    amplitude = 0.3
+    frequency = 440
+    total_frames = int(sample_rate * duration)
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        frames = bytearray()
+        for i in range(total_frames):
+            sample = int(amplitude * 32767 * math.sin(2 * math.pi * frequency * (i / sample_rate)))
+            frames.extend(struct.pack('<h', sample))
+        wav_file.writeframes(bytes(frames))
+    return buffer.getvalue()
+
+
 @unittest.skipIf(client is None, f"FastAPI app unavailable: {_APP_IMPORT_ERROR}")
 class UploadApiTests(unittest.TestCase):
     def test_upload_image_returns_block(self):
@@ -128,6 +149,21 @@ class UploadApiTests(unittest.TestCase):
         self.assertEqual(block["type"], "doc")
         self.assertEqual(block["data"]["kind"], "pdf")
         self.assertTrue(block["data"]["src"].endswith("/original"))
+
+    def test_upload_audio_creates_block(self):
+        wav_bytes = make_wav()
+        response = client.post(
+            "/api/upload",
+            files={"files": ("tone.wav", wav_bytes, "audio/wav")},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        block = payload["blocks"][0]
+        self.assertEqual(block["type"], "audio")
+        self.assertIn("src", block["data"])
+        file_id = payload["files"][0]["id"]
+        waveform = client.get(f"/files/{file_id}/waveform")
+        self.assertEqual(waveform.status_code, 200)
 
     @unittest.skipUnless(MAMMOTH_AVAILABLE, "mammoth dependency is missing")
     def test_upload_docx_exposes_inline_preview(self):
