@@ -95,6 +95,7 @@ class DocMeta(BaseModel):
     pages: Optional[int] = Field(default=None, ge=1)
     slides: Optional[int] = Field(default=None, ge=1)
     size: Optional[int] = Field(default=None, ge=0)
+    words: Optional[int] = Field(default=None, ge=0)
 
     class Config:
         extra = "forbid"

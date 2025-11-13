@@ -36,6 +36,23 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[1].data.kind, "pdf")
         self.assertEqual(parsed[2].data.kind, "csv")
 
+    def test_parse_doc_block_with_view(self):
+        blocks = [
+            {
+                "type": "doc",
+                "data": {
+                    "kind": "docx",
+                    "src": "/files/4/original",
+                    "view": "inline",
+                },
+            }
+        ]
+
+        parsed = parse_blocks(blocks)
+
+        self.assertEqual(parsed[0].data.kind, "docx")
+        self.assertEqual(parsed[0].data.view, "inline")
+
     def test_parse_invalid_block_type(self):
         blocks = [{"type": "unknown", "data": {}}]
         with self.assertRaises(ValidationError):

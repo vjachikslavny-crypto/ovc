@@ -8,6 +8,7 @@ import { initHints } from './hints.js';
 import { uuid } from './utils.js';
 import { initUploader } from './uploader.js';
 import { initPdfViewers } from './pdf_viewer.js';  // OVC: pdf - импорт PDF-виджета
+import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмотр DOCX/RTF
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -142,11 +143,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---- RENDER ----
 
   function render() {
+    // OVC: title - не перерисовываем, если редактируется название заметки
+    if (isEditingTitle) {
+      return;
+    }
+    
     // Сохраняем информацию о текущем фокусе и выделении перед перерисовкой
     const activeElement = document.activeElement;
     let savedFocus = null;
     let savedSelection = null;
     let savedTableCellFocus = null;
+    
+    // OVC: title - не сохраняем фокус, если активный элемент - это titleEl
+    if (activeElement === titleEl) {
+      // Не сохраняем фокус для titleEl, чтобы не вызывать проблемы
+      return;
+    }
     
     if (activeElement && canvas.contains(activeElement)) {
       // Проверяем, является ли активный элемент ячейкой таблицы
@@ -186,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const focusedBlockEl = activeElement.closest('[data-block-id]');
         if (focusedBlockEl) {
           // OVC: pdf - не сохраняем фокус для PDF блоков, чтобы не вызывать прокрутку при восстановлении
-          if (focusedBlockEl.closest('.doc-block--pdf')) {
+          if (focusedBlockEl.closest('.doc-block--pdf, .doc-block--word')) {
             // Не сохраняем фокус для PDF блоков
           } else {
             const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
@@ -263,6 +275,10 @@ document.addEventListener('DOMContentLoaded', () => {
       block.dataset.pdfViewerInitialized = 'false';
     });
     initPdfViewers(canvas, handleBlockUpdate);
+    canvas.querySelectorAll('.doc-block--word').forEach(block => {
+      block.dataset.wordViewerInitialized = 'false';
+    });
+    initWordViewers(canvas, handleBlockUpdate);
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
     // Не сбрасываем флаг tableHydrated, чтобы не терять фокус
@@ -314,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (pendingEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (pendingEl.closest('.doc-block--pdf')) {
+        if (pendingEl.closest('.doc-block--pdf, .doc-block--word')) {
           pendingCaretBlockId = null;
           return;
         }
@@ -329,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (targetBlockEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (targetBlockEl.closest('.doc-block--pdf')) {
+        if (targetBlockEl.closest('.doc-block--pdf, .doc-block--word')) {
           return;
         }
         const editable = getEditableElement(targetBlockEl) || targetBlockEl;
@@ -1225,7 +1241,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- TITLE / THEME / LLM ----
 
+  // OVC: title - защита от сброса текста при редактировании названия
+  // Сохраняем флаг, что редактируется название, чтобы не вызывать render()
+  let isEditingTitle = false;
+  
+  titleEl.addEventListener('focus', () => {
+    isEditingTitle = true;
+  });
+  
+  titleEl.addEventListener('blur', () => {
+    isEditingTitle = false;
+    // Обновляем title в noteState при потере фокуса
+    noteState.title = titleEl.textContent.trim();
+    scheduleSave();
+  });
+  
   titleEl.addEventListener('input', () => {
+    // Обновляем title в noteState при вводе, но НЕ вызываем render()
     noteState.title = titleEl.textContent.trim();
     scheduleSave();
   });
@@ -1346,7 +1378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (event.target.closest('.floating-actions')) return;
     if (event.target.closest('[data-block-id]')) return;
     // OVC: pdf - игнорируем клики по PDF блокам и их содержимому (изображения, контейнеры страниц)
-    if (event.target.closest('.doc-block--pdf')) return;
+    if (event.target.closest('.doc-block--pdf, .doc-block--word')) return;
     if (event.target.closest('.pdf-pages')) return;
     if (event.target.closest('.pdf-page')) return;
     if (event.target.closest('.pdf-page img')) return;
@@ -1357,7 +1389,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lastBlock = canvas.querySelector('[data-block-id]:last-of-type');
     if (lastBlock) {
       // OVC: pdf - не фокусируем, если последний блок - это PDF блок
-      if (lastBlock.closest('.doc-block--pdf')) {
+      if (lastBlock.closest('.doc-block--pdf, .doc-block--word')) {
         return; // Не фокусируем PDF блоки
       }
       const editable = getEditableElement(lastBlock) || lastBlock;
@@ -1663,7 +1695,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Один обработчик на document для всех блоков
     document.addEventListener('click', (event) => {
       // OVC: pdf - игнорируем клики по PDF блокам и их содержимому, чтобы не сбрасывать состояние
-      if (event.target.closest('.doc-block--pdf')) return;
+      if (event.target.closest('.doc-block--pdf, .doc-block--word')) return;
       if (event.target.closest('.pdf-pages')) return;
       if (event.target.closest('.pdf-page')) return;
       if (event.target.closest('.pdf-page img')) return;

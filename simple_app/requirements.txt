@@ -9,3 +9,6 @@ markdown
 pillow
 pypdf
 pymupdf
+mammoth
+striprtf
+bleach

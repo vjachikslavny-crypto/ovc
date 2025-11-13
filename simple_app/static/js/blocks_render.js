@@ -198,42 +198,58 @@ function renderImage(data) {
 }
 
 function renderDoc(data) {
-  // OVC: pdf - поддержка двух режимов просмотра (cover/inline)
   const view = data.view || 'cover';
-  const isPdf = data.kind === 'pdf';
-  // Извлекаем file_id из URL вида /files/{file_id}/original
-  const fileId = data.src ? data.src.match(/\/files\/([^\/]+)/)?.[1] : null;
-  const pages = data.meta?.pages || 0;
-  
+  const kind = data.kind || 'doc';
+  const isPdf = kind === 'pdf';
+  const isWord = kind === 'docx' || kind === 'rtf';
+  const supportsInline = isPdf || isWord;
+  const fileId = data.src ? data.src.match(/\/files\/([^/]+)/)?.[1] : null;
+
   const card = document.createElement('article');
   card.className = 'note-block note-block--doc';
+  card.dataset.view = view;
+  if (fileId) card.dataset.fileId = fileId;
+  if (data.meta?.pages) card.dataset.pages = String(data.meta.pages);
+
   if (isPdf) {
     card.classList.add('doc-block--pdf');
-    if (fileId) card.dataset.fileId = fileId;
-    if (pages) card.dataset.pages = String(pages);
-    card.dataset.view = view;
+  }
+  if (isWord) {
+    card.classList.add('doc-block--word');
+    card.dataset.kind = kind;
   }
 
-  // Toolbar для PDF (виден только для PDF)
-  if (isPdf) {
+  if (supportsInline) {
     const toolbar = document.createElement('div');
     toolbar.className = 'doc-toolbar';
-    
+
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'doc-btn';
     toggleBtn.dataset.action = 'toggle-view';
     toggleBtn.textContent = view === 'cover' ? 'Просмотр' : 'Свернуть';
-    
     toolbar.appendChild(toggleBtn);
+
+    if (isWord) {
+      const spacer = document.createElement('div');
+      spacer.className = 'spacer';
+      toolbar.appendChild(spacer);
+
+      const toTopBtn = document.createElement('button');
+      toTopBtn.className = 'doc-btn';
+      toTopBtn.dataset.action = 'to-top';
+      toTopBtn.textContent = 'Вверх';
+      toTopBtn.disabled = view !== 'inline';
+      toolbar.appendChild(toTopBtn);
+    }
+
     card.appendChild(toolbar);
   }
 
-  // Обложка/preview (для PDF используем doc-cover, для других - doc-preview)
-  if (isPdf) {
+  if (supportsInline) {
     const cover = document.createElement('div');
     cover.className = 'doc-cover';
     if (view === 'inline') cover.hidden = true;
-    
+
     if (data.preview) {
       const img = document.createElement('img');
       img.src = data.preview;
@@ -241,14 +257,36 @@ function renderDoc(data) {
       img.loading = 'lazy';
       cover.appendChild(img);
     } else {
+      // OVC: docx - для Word файлов показываем информативный бейдж вместо превью
       const badge = document.createElement('div');
       badge.className = 'doc-preview__badge';
-      badge.textContent = (data.kind || 'DOC').toUpperCase();
+      
+      if (isWord) {
+        // Для Word файлов показываем название и информацию
+        const title = document.createElement('div');
+        title.className = 'doc-badge__title';
+        title.textContent = data.title || 'Документ Word';
+        badge.appendChild(title);
+        
+        if (data.meta?.words) {
+          const words = document.createElement('div');
+          words.className = 'doc-badge__meta';
+          words.textContent = `${data.meta.words} слов`;
+          badge.appendChild(words);
+        }
+        
+        const type = document.createElement('div');
+        type.className = 'doc-badge__type';
+        type.textContent = kind.toUpperCase();
+        badge.appendChild(type);
+      } else {
+        badge.textContent = kind.toUpperCase();
+      }
+      
       cover.appendChild(badge);
     }
     card.appendChild(cover);
   } else {
-    // Для не-PDF блоков используем старую структуру с doc-preview
     const preview = document.createElement('div');
     preview.className = 'doc-preview';
     if (data.preview) {
@@ -260,13 +298,12 @@ function renderDoc(data) {
     } else {
       const badge = document.createElement('div');
       badge.className = 'doc-preview__badge';
-      badge.textContent = (data.kind || 'DOC').toUpperCase();
+      badge.textContent = kind.toUpperCase();
       preview.appendChild(badge);
     }
     card.appendChild(preview);
   }
 
-  // Контейнер для страниц PDF (только для PDF в режиме inline)
   if (isPdf) {
     const pagesContainer = document.createElement('div');
     pagesContainer.className = 'pdf-pages';
@@ -274,17 +311,31 @@ function renderDoc(data) {
     card.appendChild(pagesContainer);
   }
 
-  // Метаданные и действия (всегда видимы в конце)
+  if (isWord) {
+    const inlineContainer = document.createElement('div');
+    inlineContainer.className = 'word-inline';
+    inlineContainer.hidden = view !== 'inline';
+    inlineContainer.dataset.loaded = 'false';
+    inlineContainer.innerHTML = `
+      <div class="word-inline__placeholder">
+        <div class="word-inline__spinner"></div>
+        <p>Загружаем документ...</p>
+      </div>
+    `;
+    card.appendChild(inlineContainer);
+  }
+
   const body = document.createElement('div');
   body.className = 'doc-meta';
   const title = document.createElement('h4');
-  title.textContent = data.title || (data.kind === 'pdf' ? 'PDF-документ' : 'Документ');
+  title.textContent = data.title || (isPdf ? 'PDF-документ' : 'Документ');
   const meta = document.createElement('p');
   meta.className = 'doc-meta__info';
   const info = [];
   if (data.meta?.pages) info.push(`${data.meta.pages} стр.`);
+  if (data.meta?.words) info.push(`${data.meta.words} слов`);
   if (data.meta?.size) info.push(formatBytes(data.meta.size));
-  if (data.kind) info.push(data.kind.toUpperCase());
+  if (kind) info.push(kind.toUpperCase());
   meta.textContent = info.join(' · ') || 'Прикреплённый файл';
 
   const actions = document.createElement('div');
@@ -302,10 +353,8 @@ function renderDoc(data) {
   body.appendChild(title);
   body.appendChild(meta);
   body.appendChild(actions);
-
-  // Метаданные всегда в конце
   card.appendChild(body);
-  
+
   return card;
 }
 

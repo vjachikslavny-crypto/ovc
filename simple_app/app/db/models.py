@@ -145,11 +145,13 @@ class FileAsset(Base):
     size = Column(Integer, nullable=False)
     path_original = Column(String, nullable=False)
     path_preview = Column(String, nullable=True)
+    path_doc_html = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     pages = Column(Integer, nullable=True)
     duration = Column(Float, nullable=True)
+    words = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
     note = relationship("Note", back_populates="files")

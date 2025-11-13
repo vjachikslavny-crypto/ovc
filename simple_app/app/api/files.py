@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, HTMLResponse
 
 from app.db.models import FileAsset
 from app.db.session import get_session
@@ -39,6 +39,18 @@ def download_preview(file_id: str):
         raise HTTPException(status_code=404, detail="Preview file is missing on disk")
     media_type = "image/webp" if path.suffix.lower() == ".webp" else asset.mime
     return FileResponse(path, media_type=media_type, filename=f"{asset.id}{path.suffix}")
+
+
+@router.get("/files/{file_id}/doc.html", response_class=HTMLResponse)
+def download_doc_html(file_id: str):
+    asset = _fetch_asset(file_id)
+    if not asset.path_doc_html:
+        raise HTTPException(status_code=404, detail="Document preview not available for this file")
+    path = Path(asset.path_doc_html)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Document preview file is missing on disk")
+    content = path.read_text(encoding="utf-8")
+    return HTMLResponse(content=content, media_type="text/html; charset=utf-8")
 
 
 @router.get("/files/{file_id}/page/{page_num}")

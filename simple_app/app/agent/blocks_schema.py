@@ -198,6 +198,7 @@ BLOCK_SCHEMA: dict = {
                                     "enum": ["pdf", "docx", "rtf", "pptx", "txt"],
                                 },
                                 "src": {"type": "string"},
+                                "title": {"type": ["string", "null"]},
                                 "preview": {"type": ["string", "null"]},
                                 "meta": {
                                     "type": "object",
@@ -205,8 +206,13 @@ BLOCK_SCHEMA: dict = {
                                         "pages": {"type": ["integer", "null"]},
                                         "slides": {"type": ["integer", "null"]},
                                         "size": {"type": ["integer", "null"]},
+                                        "words": {"type": ["integer", "null"]},
                                     },
                                     "additionalProperties": False,
+                                },
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["cover", "inline"],
                                 },
                             },
                             "required": ["kind", "src"],

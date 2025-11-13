@@ -665,6 +665,52 @@ header, footer {
   border: 1px dashed rgba(255, 255, 255, 0.2);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
+  display: inline-block;
+  text-align: center;
+}
+
+/* OVC: docx - неоновый стиль бейджа для Word файлов */
+.doc-preview__badge .doc-badge__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  word-break: break-word;
+  text-shadow: 0 0 10px rgba(139, 92, 246, 0.5), 0 0 20px rgba(139, 92, 246, 0.3);
+  letter-spacing: -0.02em;
+}
+
+.doc-preview__badge .doc-badge__meta {
+  font-size: 14px;
+  color: var(--accent-strong);
+  margin-bottom: 10px;
+  font-weight: 500;
+  text-shadow: 0 0 8px rgba(192, 132, 252, 0.4);
+}
+
+.doc-preview__badge .doc-badge__type {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: var(--accent-strong);
+  text-transform: uppercase;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 2px solid rgba(139, 92, 246, 0.4);
+  text-shadow: 0 0 10px rgba(139, 92, 246, 0.6), 0 0 15px rgba(139, 92, 246, 0.4);
+  position: relative;
+}
+
+.doc-preview__badge .doc-badge__type::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-strong), transparent);
+  box-shadow: 0 0 10px var(--accent-strong);
 }
 
 .doc-meta {
@@ -749,6 +795,33 @@ header, footer {
   display: flex;
   justify-content: center;
   align-items: center;
+  min-height: 200px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* OVC: docx - для Word файлов убираем padding, чтобы бейдж занимал всю ширину */
+.doc-block--word .doc-cover {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+/* OVC: docx - неоновый стиль бейджа для Word файлов на всю ширину */
+.doc-block--word .doc-cover .doc-preview__badge {
+  padding: 32px 40px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: transparent;
+  border: 2px solid rgba(139, 92, 246, 0.4);
+  border-radius: var(--radius-md);
+  box-shadow: 
+    0 0 20px rgba(139, 92, 246, 0.3),
+    0 0 40px rgba(139, 92, 246, 0.15);
+  position: relative;
+  box-sizing: border-box;
 }
 
 .doc-cover img {
@@ -776,6 +849,154 @@ header, footer {
 
 .pdf-pages[hidden] {
   display: none !important;
+}
+
+.doc-block--word {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.doc-block--word .doc-cover {
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.word-inline {
+  /* OVC: docx - убираем ограничение высоты, чтобы текст отображался полностью */
+  max-height: none;
+  min-height: 200px;
+  overflow: visible;
+  background: rgba(8, 2, 20, 0.6);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 24px;
+  margin-top: 12px;
+  line-height: 1.6;
+  scroll-behavior: smooth;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.word-inline[hidden] {
+  display: none;
+}
+
+.word-inline p {
+  margin: 0 0 1em;
+  text-align: left;
+  width: 100%;
+}
+
+.word-inline h1,
+.word-inline h2,
+.word-inline h3,
+.word-inline h4,
+.word-inline h5,
+.word-inline h6 {
+  margin: 1em 0 0.4em;
+  line-height: 1.2;
+}
+
+.word-inline ul,
+.word-inline ol {
+  margin: 0.8em 0 0.8em 1.5em;
+  padding-left: 1.5em;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.word-inline li {
+  margin: 0.4em 0;
+}
+
+.word-inline img {
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin: 12px 0;
+  display: block;
+}
+
+.word-inline table {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  box-sizing: border-box;
+}
+
+.word-inline th,
+.word-inline td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 12px;
+  text-align: left;
+  word-wrap: break-word;
+}
+
+.word-inline blockquote {
+  margin: 16px 0;
+  padding-left: 20px;
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  font-style: italic;
+}
+
+.word-inline code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.word-inline pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.word-inline pre code {
+  background: none;
+  padding: 0;
+}
+
+.word-inline__placeholder,
+.word-inline__error {
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.word-inline__spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent);
+  animation: wordInlineSpin 0.8s linear infinite;
+}
+
+.word-inline__error {
+  color: #fca5a5;
+  border: 1px solid rgba(252, 165, 165, 0.35);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(127, 29, 29, 0.25);
+}
+
+@keyframes wordInlineSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pdf-page-placeholder {

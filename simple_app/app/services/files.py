@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import logging
+import html as html_module
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +16,21 @@ from sqlalchemy.orm import Session
 
 from app.agent.block_models import DocBlock, DocData, DocMeta, ImageBlock, ImageData, dump_block
 from app.db.models import FileAsset, generate_uuid
+
+try:
+    import bleach
+except ImportError:  # pragma: no cover
+    bleach = None
+
+try:
+    import mammoth
+except ImportError:  # pragma: no cover
+    mammoth = None
+
+try:
+    from striprtf.striprtf import rtf_to_text
+except ImportError:  # pragma: no cover
+    rtf_to_text = None
 
 try:
     from pypdf import PdfReader
@@ -34,14 +51,18 @@ try:
 except ImportError:  # pragma: no cover
     HAS_PDF2IMAGE = False
 
+# OVC: docx - Playwright больше не используется для генерации превью Word файлов
+# Превью для Word файлов не генерируется, используется только inline просмотр
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4] if len(Path(__file__).resolve().parents) >= 5 else Path.cwd()
 UPLOAD_ROOT = PROJECT_ROOT / "data" / "uploads"
 ORIGINAL_DIR = UPLOAD_ROOT / "original"
 PREVIEW_DIR = UPLOAD_ROOT / "preview"
 PAGES_DIR = UPLOAD_ROOT / "pages"  # OVC: pdf - кэш страниц PDF
+DOC_HTML_DIR = UPLOAD_ROOT / "doc_html"
 
-for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR):
+for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR, DOC_HTML_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -52,9 +73,54 @@ IMAGE_MIME_TYPES = {
     "image/gif",
 }
 PDF_MIME_TYPES = {"application/pdf"}
+DOCX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+RTF_MIME_TYPES = {"application/rtf", "text/rtf"}
 
 IMAGE_MAX_BYTES = 15 * 1024 * 1024
 PDF_MAX_BYTES = 50 * 1024 * 1024
+DOC_MAX_BYTES = 30 * 1024 * 1024
+
+ALLOWED_HTML_TAGS = [
+    "p",
+    "br",
+    "strong",
+    "em",
+    "u",
+    "s",
+    "a",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "code",
+    "pre",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "td",
+    "th",
+    "img",
+    "figure",
+    "figcaption",
+    "span",
+]
+
+ALLOWED_HTML_ATTRS = {
+    "a": ["href", "title", "rel", "target"],
+    "img": ["src", "alt"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
+    "*": ["class"],
+}
 
 
 class FileMetadata(BaseModel):
@@ -83,8 +149,12 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         return FileMetadata(kind="image", mime=mime, extension=_guess_extension(filename, mime), max_bytes=IMAGE_MAX_BYTES)
     if mime in PDF_MIME_TYPES or filename.lower().endswith(".pdf"):
         return FileMetadata(kind="pdf", mime="application/pdf", extension=".pdf", max_bytes=PDF_MAX_BYTES)
+    if mime in DOCX_MIME_TYPES or filename.lower().endswith(".docx"):
+        return FileMetadata(kind="docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension=".docx", max_bytes=DOC_MAX_BYTES)
+    if mime in RTF_MIME_TYPES or filename.lower().endswith(".rtf"):
+        return FileMetadata(kind="rtf", mime="application/rtf", extension=".rtf", max_bytes=DOC_MAX_BYTES)
 
-    raise HTTPException(status_code=415, detail="Unsupported file type for this prototype (image/pdf only).")
+    raise HTTPException(status_code=415, detail="Unsupported file type for this prototype (image/pdf/docx/rtf only).")
 
 
 def _write_file(path: Path, data: bytes) -> None:
@@ -227,6 +297,52 @@ def _pdf_page_count(data: bytes) -> Optional[int]:
         return None
 
 
+def _sanitize_html_fragment(fragment: str) -> str:
+    if bleach is None:  # pragma: no cover
+        return html_module.escape(fragment)
+    cleaned = bleach.clean(fragment, tags=ALLOWED_HTML_TAGS, attributes=ALLOWED_HTML_ATTRS, strip=True)
+    return cleaned
+
+
+def _write_doc_html(file_id: str, html_fragment: str) -> Path:
+    path = DOC_HTML_DIR / f"{file_id}.html"
+    path.write_text(html_fragment, encoding="utf-8")
+    return path
+
+
+# OVC: docx - функция генерации превью удалена, т.к. превью для Word файлов не генерируется
+# Вместо превью используется информативный бейдж с названием файла и количеством слов
+
+
+def _convert_docx_to_html(data: bytes) -> tuple[str, Optional[int]]:
+    if mammoth is None:
+        raise HTTPException(status_code=500, detail="DOCX preview is unavailable (mammoth not installed).")
+    result = mammoth.convert_to_html(BytesIO(data))
+    html_fragment = result.value or ""
+    if bleach is not None:
+        text_only = bleach.clean(html_fragment, tags=[], strip=True)
+    else:  # pragma: no cover
+        text_only = html_module.escape(html_fragment)
+    word_count = len(text_only.split())
+    return html_fragment, word_count
+
+
+def _convert_rtf_to_html(data: bytes) -> tuple[str, Optional[int]]:
+    if rtf_to_text is None:
+        raise HTTPException(status_code=500, detail="RTF preview is unavailable (striprtf not installed).")
+    try:
+        text = rtf_to_text(data.decode("utf-8", errors="ignore"))
+    except Exception:
+        text = rtf_to_text(data.decode("latin-1", errors="ignore"))
+    paragraphs = [seg.strip() for seg in text.split("\n") if seg.strip()]
+    html_parts = []
+    for paragraph in paragraphs:
+        html_parts.append(f"<p>{html_module.escape(paragraph)}</p>")
+    html_fragment = "".join(html_parts)
+    word_count = len(text.split())
+    return html_fragment, word_count
+
+
 def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -264,6 +380,19 @@ def _build_block(asset: FileAsset) -> dict:
         block = DocBlock(type="doc", id=generate_uuid(), data=doc_data)
         return dump_block(block)
 
+    if asset.kind in {"docx", "rtf"}:
+        filename_without_ext = Path(asset.filename).stem if asset.filename else None
+        doc_data = DocData(
+            kind="docx" if asset.kind == "docx" else "rtf",
+            src=_file_url(asset.id, "original"),
+            title=filename_without_ext or asset.filename,
+            preview=_file_url(asset.id, "preview") if asset.path_preview else None,
+            meta=DocMeta(pages=asset.pages, slides=None, size=asset.size, words=asset.words),
+            view="cover",
+        )
+        block = DocBlock(type="doc", id=generate_uuid(), data=doc_data)
+        return dump_block(block)
+
     raise HTTPException(status_code=500, detail=f"Unknown asset kind: {asset.kind}")
 
 
@@ -274,6 +403,7 @@ class StoredAsset:
 
 
 async def save_upload(session: Session, upload: UploadFile, note_id: Optional[str]) -> StoredAsset:
+    logger = logging.getLogger(__name__)  # OVC: docx - определяем logger в начале функции
     meta = _classify_file(upload)
     data = await upload.read()
     if not data:
@@ -287,7 +417,11 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     _write_file(original_path, data)
 
     preview_path = None
-    width = height = pages = None
+    doc_html_path = None
+    width = None
+    height = None
+    pages = None
+    words = None
 
     if meta.kind == "image":
         preview_bytes, width, height = _generate_image_preview(data)
@@ -298,6 +432,24 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         preview_bytes = _generate_pdf_preview(data, file_id, pages)  # OVC: pdf - передаем data для рендеринга
         preview_path = PREVIEW_DIR / f"{file_id}.webp"
         _write_file(preview_path, preview_bytes)
+    elif meta.kind in {"docx", "rtf"}:
+        try:
+            if meta.kind == "docx":
+                html_fragment, words = _convert_docx_to_html(data)
+            else:
+                html_fragment, words = _convert_rtf_to_html(data)
+            sanitized = _sanitize_html_fragment(html_fragment)
+            doc_html_path = _write_doc_html(file_id, sanitized)
+            
+            # OVC: docx - не генерируем превью для Word файлов, используем только inline просмотр
+            # Превью не создается - будет показан бейдж с типом файла
+            preview_path = None
+            logger.info(f"Processed {meta.kind} file {file_id}, HTML length: {len(html_fragment)}, words: {words}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error processing {meta.kind} file: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error processing {meta.kind} file: {str(e)}")
 
     asset = FileAsset(
         id=file_id,
@@ -308,10 +460,12 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         size=len(data),
         path_original=str(original_path),
         path_preview=str(preview_path) if preview_path else None,
+        path_doc_html=str(doc_html_path) if doc_html_path else None,
         hash_sha256=_hash_bytes(data),
         width=width,
         height=height,
         pages=pages,
+        words=words,
     )
     session.add(asset)
     session.flush()

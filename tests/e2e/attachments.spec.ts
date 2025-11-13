@@ -17,4 +17,10 @@ test.describe.skip('Attachments flow (skeleton)', () => {
     // TODO: Implement PDF viewer assertions.
     expect(true).toBeTruthy();
   });
+
+  test('uploading a DOCX toggles between cover and inline', async ({ page }) => {
+    await page.goto('/notes');
+    // TODO: drag docx, click "Просмотр", ensure inline content visible.
+    expect(true).toBeTruthy();
+  });
 });
