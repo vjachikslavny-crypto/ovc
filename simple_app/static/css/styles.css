@@ -1144,6 +1144,48 @@ header, footer {
   font-size: 0.9rem;
 }
 
+/* OVC: slides - контейнер для всех слайдов (как в PDF) */
+.slides-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px 0;
+}
+
+.slides-pages[hidden] {
+  display: none;
+}
+
+.slides-page {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 200px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.slides-page-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 20px 40px rgba(5, 0, 15, 0.45);
+  background: white;
+  display: block;
+}
+
+.slides-single-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.slides-single-view[hidden] {
+  display: none;
+}
+
 .doc-block--word {
   flex-direction: column;
   align-items: stretch;

@@ -417,6 +417,17 @@ function renderSlides(data) {
   inline.className = 'slides-inline';
   inline.hidden = view !== 'inline';
 
+  // OVC: slides - контейнер для всех слайдов (как в PDF)
+  const slidesContainer = document.createElement('div');
+  slidesContainer.className = 'slides-pages';
+  if (view !== 'inline') slidesContainer.hidden = true;
+  inline.appendChild(slidesContainer);
+
+  // OVC: slides - старый режим с одним слайдом и навигацией (оставляем для совместимости)
+  const singleView = document.createElement('div');
+  singleView.className = 'slides-single-view';
+  singleView.hidden = true; // По умолчанию скрыт, показываем все слайды
+
   const pager = document.createElement('div');
   pager.className = 'slides-pager';
   const prevBtn = document.createElement('button');
@@ -435,7 +446,7 @@ function renderSlides(data) {
   nextBtn.dataset.action = 'next';
   nextBtn.textContent = '→';
   pager.append(prevBtn, indexLabel, nextBtn);
-  inline.appendChild(pager);
+  singleView.appendChild(pager);
 
   const viewPort = document.createElement('div');
   viewPort.className = 'slides-view';
@@ -444,11 +455,12 @@ function renderSlides(data) {
   img.alt = 'Слайд презентации';
   img.decoding = 'async';
   viewPort.appendChild(img);
-  inline.appendChild(viewPort);
+  singleView.appendChild(viewPort);
 
   const thumbs = document.createElement('div');
   thumbs.className = 'slides-thumbs';
-  inline.appendChild(thumbs);
+  singleView.appendChild(thumbs);
+  inline.appendChild(singleView);
 
   const placeholder = document.createElement('div');
   placeholder.className = 'slides-placeholder';

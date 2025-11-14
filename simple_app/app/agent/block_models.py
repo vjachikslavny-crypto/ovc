@@ -129,7 +129,7 @@ class SheetData(BaseModel):
 class SlidesData(BaseModel):
     kind: Literal["pptx"]
     src: str
-    slides: str
+    slides: Optional[str] = None  # OVC: pptx - опционально, если LibreOffice не установлен
     preview: Optional[str] = None
     count: Optional[int] = Field(default=None, ge=0)
     view: Literal["cover", "inline"] = "cover"

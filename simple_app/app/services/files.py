@@ -492,13 +492,38 @@ def _render_slide_images(pdf_bytes: bytes, file_id: str, pages: int) -> tuple[Pa
     return preview_path, json_path, pages, slides_dir
 
 
+def _find_libreoffice() -> Optional[str]:
+    """Находит путь к LibreOffice soffice на разных системах."""
+    # Стандартные пути для macOS
+    mac_paths = [
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/opt/homebrew/bin/soffice",
+        "/usr/local/bin/soffice",
+    ]
+    # Проверяем стандартные пути
+    for path in mac_paths:
+        if Path(path).exists():
+            return path
+    # Проверяем PATH
+    result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
 def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Path, int, Path]:
     logger = logging.getLogger(__name__)
+    soffice_path = _find_libreoffice()
+    if not soffice_path:
+        raise HTTPException(
+            status_code=500,
+            detail="LibreOffice (soffice) is not installed. Please install LibreOffice from https://www.libreoffice.org/download/"
+        )
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             cmd = [
-                "soffice",
+                soffice_path,
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -512,10 +537,9 @@ def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Pa
             if not pdf_path.exists():
                 raise HTTPException(status_code=500, detail="Failed to convert PPTX to PDF")
             pdf_bytes = pdf_path.read_bytes()
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="LibreOffice (soffice) is not installed on the server")
     except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=500, detail=f"LibreOffice failed: {exc.stderr.decode(errors='ignore')}")
+        error_msg = exc.stderr.decode(errors='ignore') if exc.stderr else str(exc)
+        raise HTTPException(status_code=500, detail=f"LibreOffice failed: {error_msg}")
 
     pages = _pdf_page_count(pdf_bytes)
     if not pages:
@@ -594,10 +618,11 @@ def _build_block(asset: FileAsset) -> dict:
         return dump_block(block)
 
     if asset.kind == "pptx":
+        # OVC: pptx - если слайды не были сгенерированы (LibreOffice не установлен), все равно создаем блок
         slides_data = SlidesData(
             kind="pptx",
             src=_file_url(asset.id, "original"),
-            slides=_slides_json_url(asset.id),
+            slides=_slides_json_url(asset.id) if asset.path_slides_json else None,
             preview=_slide_image_url(asset.id, 1) if asset.path_preview else None,
             count=asset.slides_count,
             view="cover",
@@ -668,9 +693,18 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
             logger.error(f"Error processing {meta.kind} file: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error processing {meta.kind} file: {str(e)}")
     elif meta.kind == "pptx":
-        preview_path, slides_json_path, slides_count, slides_dir_path = _convert_pptx_to_slides(original_path, file_id)
-        doc_html_path = None
-    elif meta.kind == "audio":
+        # OVC: pptx - пытаемся конвертировать, но не падаем если LibreOffice не установлен
+        try:
+            preview_path, slides_json_path, slides_count, slides_dir_path = _convert_pptx_to_slides(original_path, file_id)
+            doc_html_path = None
+        except HTTPException as e:
+            # Если LibreOffice не установлен или конвертация не удалась, загружаем файл без preview
+            logger.warning(f"PPTX conversion failed for {file_id}: {e.detail}. File will be saved without preview.")
+            preview_path = None
+            slides_json_path = None
+            slides_dir_path = None
+            slides_count = None
+            doc_html_path = None
     elif meta.kind == "audio":
         duration, waveform_values = _extract_audio_metadata(data, meta.mime)
         waveform_path = _write_waveform(file_id, waveform_values)

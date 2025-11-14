@@ -234,12 +234,12 @@ BLOCK_SCHEMA: dict = {
                             "properties": {
                                 "kind": {"type": "string", "enum": ["pptx"]},
                                 "src": {"type": "string"},
-                                "slides": {"type": "string"},
+                                "slides": {"type": ["string", "null"]},  # OVC: pptx - опционально
                                 "preview": {"type": ["string", "null"]},
                                 "count": {"type": ["integer", "null"], "minimum": 0},
                                 "view": {"type": "string", "enum": ["cover", "inline"]},
                             },
-                            "required": ["kind", "src", "slides"],
+                            "required": ["kind", "src"],  # OVC: pptx - slides больше не обязательное
                             "additionalProperties": False,
                         },
                     }

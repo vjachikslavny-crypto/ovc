@@ -12,6 +12,7 @@ export function initSlidesViewers(container, onBlockUpdate) {
 function setupSlidesBlock(block, onBlockUpdate) {
   const cover = block.querySelector('.slides-cover');
   const inline = block.querySelector('.slides-inline');
+  const slidesContainer = block.querySelector('.slides-pages');
   const toggleBtn = block.querySelector('[data-action="toggle-view"]');
   const fullBtn = block.querySelector('[data-action="fullscreen"]');
   const prevBtn = block.querySelector('[data-action="prev"]');
@@ -41,9 +42,18 @@ function setupSlidesBlock(block, onBlockUpdate) {
       toggleBtn.textContent = nextView === 'inline' ? 'Свернуть' : 'Просмотр';
       cover.hidden = nextView === 'inline';
       inline.hidden = nextView !== 'inline';
-      if (nextView === 'inline') {
-        ensureMeta().then(() => showSlide(current)).catch(showError);
+      
+      // OVC: slides - показываем контейнер со всеми слайдами в режиме inline
+      if (slidesContainer) {
+        slidesContainer.hidden = nextView !== 'inline';
+        if (nextView === 'inline' && meta.count && slidesContainer.children.length === 0) {
+          // Если слайды еще не загружены, загружаем метаданные и рендерим
+          ensureMeta().then(() => {
+            if (meta.count) renderAllSlides();
+          }).catch(showError);
+        }
       }
+      
       if (typeof onBlockUpdate === 'function' && block.dataset.blockId) {
         onBlockUpdate(block.dataset.blockId, { view: nextView });
       }
@@ -72,13 +82,25 @@ function setupSlidesBlock(block, onBlockUpdate) {
   });
 
   if (block.dataset.view === 'inline') {
-    ensureMeta().then(() => showSlide(current)).catch(showError);
+    // OVC: slides - в режиме inline показываем все слайды
+    ensureMeta().then(() => {
+      if (slidesContainer && meta.count) {
+        renderAllSlides();
+      } else if (imageEl) {
+        // Fallback на старый режим, если контейнер отсутствует
+        showSlide(current);
+      }
+    }).catch(showError);
   } else if (preview && imageEl) {
     imageEl.src = preview;
   }
 
   function ensureMeta() {
-    if (!slidesMetaUrl) return Promise.reject(new Error('Нет данных по слайдам'));
+    // OVC: pptx - если слайды не были сгенерированы (LibreOffice не установлен), показываем сообщение
+    if (!slidesMetaUrl) {
+      if (placeholder) placeholder.textContent = 'Слайды не были сгенерированы. Установите LibreOffice для конвертации презентаций.';
+      return Promise.reject(new Error('Нет данных по слайдам'));
+    }
     if (slidesMetaCache.has(slidesMetaUrl)) {
       meta = slidesMetaCache.get(slidesMetaUrl);
       updateThumbs();
@@ -98,6 +120,10 @@ function setupSlidesBlock(block, onBlockUpdate) {
         if (indexTotal && meta.count) indexTotal.textContent = String(meta.count);
         updateThumbs();
         placeholder.hidden = true;
+        // OVC: slides - если в режиме inline и есть контейнер, рендерим все слайды
+        if (block.dataset.view === 'inline' && slidesContainer && meta.count) {
+          renderAllSlides();
+        }
       })
       .finally(() => {
         loadingMeta = false;
@@ -150,6 +176,47 @@ function setupSlidesBlock(block, onBlockUpdate) {
         thumb.classList.remove('active');
       }
     });
+  }
+
+  function renderAllSlides() {
+    if (!slidesContainer || !meta.count || !fileId) return;
+    
+    // Очищаем контейнер
+    slidesContainer.innerHTML = '';
+    
+    // Создаем все слайды
+    for (let i = 1; i <= meta.count; i++) {
+      const slideWrapper = document.createElement('div');
+      slideWrapper.className = 'slides-page';
+      
+      const img = document.createElement('img');
+      img.className = 'slides-page-img';
+      img.alt = `Слайд ${i}`;
+      img.loading = 'lazy';
+      img.dataset.slideNum = String(i);
+      img.dataset.src = `/files/${fileId}/slide/${i}`;
+      
+      // Lazy loading - загружаем только видимые слайды
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const img = entry.target;
+            if (!img.src && img.dataset.src) {
+              img.src = img.dataset.src;
+            }
+            observer.unobserve(img);
+          }
+        });
+      }, {
+        rootMargin: '200px', // Предзагрузка за 200px до появления
+        threshold: 0.1
+      });
+      
+      observer.observe(img);
+      
+      slideWrapper.appendChild(img);
+      slidesContainer.appendChild(slideWrapper);
+    }
   }
 
   function showError(error) {
