@@ -228,6 +228,24 @@ BLOCK_SCHEMA: dict = {
                 },
                 {
                     "properties": {
+                        "type": {"const": "slides"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": ["pptx"]},
+                                "src": {"type": "string"},
+                                "slides": {"type": "string"},
+                                "preview": {"type": ["string", "null"]},
+                                "count": {"type": ["integer", "null"], "minimum": 0},
+                                "view": {"type": "string", "enum": ["cover", "inline"]},
+                            },
+                            "required": ["kind", "src", "slides"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
                         "type": {"const": "sheet"},
                         "data": {
                             "type": "object",

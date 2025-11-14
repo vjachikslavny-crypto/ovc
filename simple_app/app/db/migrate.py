@@ -9,14 +9,21 @@ def upgrade() -> None:
         # Проверяем, существует ли колонка path_waveform
         result = conn.execute(text("PRAGMA table_info(files)"))
         columns = [row[1] for row in result.fetchall()]
-        
+
         if 'path_waveform' not in columns:
             try:
                 conn.execute(text("ALTER TABLE files ADD COLUMN path_waveform VARCHAR"))
                 print("Added path_waveform column to files table")
             except Exception as e:
                 print(f"Error adding path_waveform column: {e}")
-        
+
+        if 'path_doc_html' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_doc_html VARCHAR"))
+                print("Added path_doc_html column to files table")
+            except Exception as e:
+                print(f"Error adding path_doc_html column: {e}")
+
         # Проверяем, существует ли колонка duration (для аудио)
         if 'duration' not in columns:
             try:
@@ -24,7 +31,14 @@ def upgrade() -> None:
                 print("Added duration column to files table")
             except Exception as e:
                 print(f"Error adding duration column: {e}")
-        
+
+        if 'words' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN words INTEGER"))
+                print("Added words column to files table")
+            except Exception as e:
+                print(f"Error adding words column: {e}")
+
         # Если таблицы не существует, создаем все таблицы
         try:
             Base.metadata.create_all(bind=conn)

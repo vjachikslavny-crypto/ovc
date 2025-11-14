@@ -126,6 +126,18 @@ class SheetData(BaseModel):
         extra = "forbid"
 
 
+class SlidesData(BaseModel):
+    kind: Literal["pptx"]
+    src: str
+    slides: str
+    preview: Optional[str] = None
+    count: Optional[int] = Field(default=None, ge=0)
+    view: Literal["cover", "inline"] = "cover"
+
+    class Config:
+        extra = "forbid"
+
+
 class CodeData(BaseModel):
     language: Optional[str] = None
     src: str
@@ -266,6 +278,11 @@ class SheetBlock(BlockBase):
     data: SheetData
 
 
+class SlidesBlock(BlockBase):
+    type: Literal["slides"]
+    data: SlidesData
+
+
 class CodeBlock(BlockBase):
     type: Literal["code"]
     data: CodeData
@@ -316,6 +333,7 @@ BlockModel = Union[
     AudioBlock,
     VideoBlock,
     DocBlock,
+    SlidesBlock,
     SheetBlock,
     CodeBlock,
     ArchiveBlock,
