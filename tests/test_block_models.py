@@ -53,6 +53,24 @@ class BlockModelParsingTests(unittest.TestCase):
         parsed = parse_blocks(blocks)
         self.assertEqual(parsed[0].data.view, "expanded")
 
+    def test_parse_slides_block(self):
+        blocks = [
+            {
+                "type": "slides",
+                "data": {
+                    "kind": "pptx",
+                    "src": "/files/s1/original",
+                    "slides": "/files/s1/slides.json",
+                    "preview": "/files/s1/slide/1",
+                    "count": 5,
+                    "view": "inline",
+                },
+            }
+        ]
+
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].data.count, 5)
+
     def test_parse_doc_block_with_view(self):
         blocks = [
             {

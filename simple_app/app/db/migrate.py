@@ -6,7 +6,6 @@ from sqlalchemy import text
 def upgrade() -> None:
     # OVC: audio - добавляем колонку path_waveform в таблицу files, если её нет
     with engine.begin() as conn:
-        # Проверяем, существует ли колонка path_waveform
         result = conn.execute(text("PRAGMA table_info(files)"))
         columns = [row[1] for row in result.fetchall()]
 
@@ -24,6 +23,20 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding path_doc_html column: {e}")
 
+        if 'path_slides_json' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_slides_json VARCHAR"))
+                print("Added path_slides_json column to files table")
+            except Exception as e:
+                print(f"Error adding path_slides_json column: {e}")
+
+        if 'path_slides_dir' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_slides_dir VARCHAR"))
+                print("Added path_slides_dir column to files table")
+            except Exception as e:
+                print(f"Error adding path_slides_dir column: {e}")
+
         # Проверяем, существует ли колонка duration (для аудио)
         if 'duration' not in columns:
             try:
@@ -38,6 +51,13 @@ def upgrade() -> None:
                 print("Added words column to files table")
             except Exception as e:
                 print(f"Error adding words column: {e}")
+
+        if 'slides_count' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN slides_count INTEGER"))
+                print("Added slides_count column to files table")
+            except Exception as e:
+                print(f"Error adding slides_count column: {e}")
 
         # Если таблицы не существует, создаем все таблицы
         try:

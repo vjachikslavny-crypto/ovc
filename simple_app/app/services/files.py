@@ -5,6 +5,8 @@ import hashlib
 import json
 import mimetypes
 import logging
+import subprocess
+import tempfile
 import wave
 import html as html_module
 from dataclasses import dataclass
@@ -23,6 +25,8 @@ from app.agent.block_models import (
     DocBlock,
     DocData,
     DocMeta,
+    SlidesBlock,
+    SlidesData,
     ImageBlock,
     ImageData,
     dump_block,
@@ -79,8 +83,10 @@ PREVIEW_DIR = UPLOAD_ROOT / "preview"
 PAGES_DIR = UPLOAD_ROOT / "pages"  # OVC: pdf - кэш страниц PDF
 DOC_HTML_DIR = UPLOAD_ROOT / "doc_html"
 WAVEFORM_DIR = UPLOAD_ROOT / "waveform"
+SLIDES_DIR = UPLOAD_ROOT / "slides"
+SLIDES_META_DIR = UPLOAD_ROOT / "slides_meta"
 
-for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR, DOC_HTML_DIR, WAVEFORM_DIR):
+for directory in (ORIGINAL_DIR, PREVIEW_DIR, PAGES_DIR, DOC_HTML_DIR, WAVEFORM_DIR, SLIDES_DIR, SLIDES_META_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -95,6 +101,9 @@ DOCX_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 RTF_MIME_TYPES = {"application/rtf", "text/rtf"}
+PPTX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 AUDIO_MIME_TYPES = {
     "audio/webm",
     "audio/webm;codecs=opus",
@@ -115,6 +124,8 @@ PDF_MAX_BYTES = 50 * 1024 * 1024
 DOC_MAX_BYTES = 30 * 1024 * 1024
 AUDIO_MAX_BYTES = 50 * 1024 * 1024
 AUDIO_WAVE_POINTS = 256
+SLIDES_MAX_BYTES = 50 * 1024 * 1024
+SLIDES_TARGET_WIDTH = 1600
 
 ALLOWED_HTML_TAGS = [
     "p",
@@ -187,6 +198,8 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         return FileMetadata(kind="docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension=".docx", max_bytes=DOC_MAX_BYTES)
     if mime in RTF_MIME_TYPES or filename.lower().endswith(".rtf"):
         return FileMetadata(kind="rtf", mime="application/rtf", extension=".rtf", max_bytes=DOC_MAX_BYTES)
+    if mime in PPTX_MIME_TYPES or filename.lower().endswith(".pptx"):
+        return FileMetadata(kind="pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation", extension=".pptx", max_bytes=SLIDES_MAX_BYTES)
     if mime in AUDIO_MIME_TYPES or filename.lower().endswith(AUDIO_EXTENSIONS):
         audio_mime = mime if mime in AUDIO_MIME_TYPES else "audio/webm"
         extension = _guess_extension(filename, audio_mime) or ".webm"
@@ -199,6 +212,14 @@ def _write_file(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
         handle.write(data)
+
+
+def _slides_dir_path(file_id: str) -> Path:
+    return SLIDES_DIR / file_id
+
+
+def _slides_json_path(file_id: str) -> Path:
+    return SLIDES_META_DIR / f"{file_id}.json"
 
 
 def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
@@ -436,12 +457,86 @@ def _write_waveform(file_id: str, values: list[float]) -> Path:
     return path
 
 
+def _render_slide_images(pdf_bytes: bytes, file_id: str, pages: int) -> tuple[Path, Path, int, Path]:
+    logger = logging.getLogger(__name__)
+    slides_dir = _slides_dir_path(file_id)
+    slides_dir.mkdir(parents=True, exist_ok=True)
+    preview_path: Optional[Path] = None
+    width = height = None
+    for page in range(1, pages + 1):
+        slide_bytes = _render_pdf_page(pdf_bytes, page, scale=1.2)
+        if not slide_bytes:
+            raise HTTPException(status_code=500, detail="Failed to render PPTX slide")
+        image = Image.open(BytesIO(slide_bytes))
+        if SLIDES_TARGET_WIDTH and image.width > SLIDES_TARGET_WIDTH:
+            image.thumbnail((SLIDES_TARGET_WIDTH, SLIDES_TARGET_WIDTH * 2), Image.Resampling.LANCZOS)
+            buffer = BytesIO()
+            image.save(buffer, format="WEBP", quality=85)
+            slide_bytes = buffer.getvalue()
+        slide_path = slides_dir / f"{page}.webp"
+        _write_file(slide_path, slide_bytes)
+        if preview_path is None:
+            preview_path = slide_path
+            width, height = image.size
+    if preview_path is None:
+        raise HTTPException(status_code=500, detail="No slides rendered from PPTX")
+    meta = {
+        "count": pages,
+        "format": "webp",
+        "width": width,
+        "height": height,
+    }
+    json_path = _slides_json_path(file_id)
+    json_path.write_text(json.dumps(meta), encoding="utf-8")
+    logger.info("Generated %s slides for %s", pages, file_id)
+    return preview_path, json_path, pages, slides_dir
+
+
+def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Path, int, Path]:
+    logger = logging.getLogger(__name__)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            cmd = [
+                "soffice",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(tmp_path),
+                str(original_path),
+            ]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            logger.info("LibreOffice output: %s", result.stdout.decode(errors="ignore").strip())
+            pdf_path = tmp_path / f"{original_path.stem}.pdf"
+            if not pdf_path.exists():
+                raise HTTPException(status_code=500, detail="Failed to convert PPTX to PDF")
+            pdf_bytes = pdf_path.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="LibreOffice (soffice) is not installed on the server")
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=500, detail=f"LibreOffice failed: {exc.stderr.decode(errors='ignore')}")
+
+    pages = _pdf_page_count(pdf_bytes)
+    if not pages:
+        raise HTTPException(status_code=500, detail="PPTX contains no slides")
+    return _render_slide_images(pdf_bytes, file_id, pages)
+
+
 def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
 def _file_url(file_id: str, variant: str) -> str:
     return f"/files/{file_id}/{variant}"
+
+
+def _slides_json_url(file_id: str) -> str:
+    return f"/files/{file_id}/slides.json"
+
+
+def _slide_image_url(file_id: str, index: int) -> str:
+    return f"/files/{file_id}/slide/{index}"
 
 
 def _build_block(asset: FileAsset) -> dict:
@@ -498,6 +593,18 @@ def _build_block(asset: FileAsset) -> dict:
         block = AudioBlock(type="audio", id=generate_uuid(), data=audio_data)
         return dump_block(block)
 
+    if asset.kind == "pptx":
+        slides_data = SlidesData(
+            kind="pptx",
+            src=_file_url(asset.id, "original"),
+            slides=_slides_json_url(asset.id),
+            preview=_slide_image_url(asset.id, 1) if asset.path_preview else None,
+            count=asset.slides_count,
+            view="cover",
+        )
+        block = SlidesBlock(type="slides", id=generate_uuid(), data=slides_data)
+        return dump_block(block)
+
     raise HTTPException(status_code=500, detail=f"Unknown asset kind: {asset.kind}")
 
 
@@ -521,14 +628,17 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
     _write_file(original_path, data)
 
-    preview_path = None
-    doc_html_path = None
-    waveform_path = None
+    preview_path: Optional[Path] = None
+    doc_html_path: Optional[Path] = None
+    waveform_path: Optional[Path] = None
+    slides_json_path: Optional[Path] = None
+    slides_dir_path: Optional[Path] = None
     width = None
     height = None
     pages = None
     words = None
     duration = None
+    slides_count = None
 
     if meta.kind == "image":
         preview_bytes, width, height = _generate_image_preview(data)
@@ -557,6 +667,10 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         except Exception as e:
             logger.error(f"Error processing {meta.kind} file: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error processing {meta.kind} file: {str(e)}")
+    elif meta.kind == "pptx":
+        preview_path, slides_json_path, slides_count, slides_dir_path = _convert_pptx_to_slides(original_path, file_id)
+        doc_html_path = None
+    elif meta.kind == "audio":
     elif meta.kind == "audio":
         duration, waveform_values = _extract_audio_metadata(data, meta.mime)
         waveform_path = _write_waveform(file_id, waveform_values)
@@ -571,6 +685,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_original=str(original_path),
         path_preview=str(preview_path) if preview_path else None,
         path_doc_html=str(doc_html_path) if doc_html_path else None,
+        path_slides_json=str(slides_json_path) if slides_json_path else None,
+        path_slides_dir=str(slides_dir_path) if slides_dir_path else None,
         path_waveform=str(waveform_path) if waveform_path else None,
         hash_sha256=_hash_bytes(data),
         width=width,
@@ -578,6 +694,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         pages=pages,
         duration=duration,
         words=words,
+        slides_count=slides_count,
     )
     session.add(asset)
     session.flush()

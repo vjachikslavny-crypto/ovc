@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse, JSONResponse
 
 from app.db.models import FileAsset
 from app.db.session import get_session
@@ -51,6 +52,34 @@ def download_doc_html(file_id: str):
         raise HTTPException(status_code=404, detail="Document preview file is missing on disk")
     content = path.read_text(encoding="utf-8")
     return HTMLResponse(content=content, media_type="text/html; charset=utf-8")
+
+
+@router.get("/files/{file_id}/slides.json")
+def slides_metadata(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "pptx" or not asset.path_slides_json:
+        raise HTTPException(status_code=404, detail="Slides metadata unavailable")
+    path = Path(asset.path_slides_json)
+    if not path.exists():
+        return JSONResponse(status_code=202, content={"status": "processing"})
+    return FileResponse(path, media_type="application/json")
+
+
+@router.get("/files/{file_id}/slide/{slide_index}")
+def slide_image(file_id: str, slide_index: int):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "pptx":
+        raise HTTPException(status_code=400, detail="File is not a PPTX")
+    if slide_index < 1:
+        raise HTTPException(status_code=400, detail="Invalid slide index")
+    if asset.path_slides_dir:
+        slides_dir = Path(asset.path_slides_dir)
+    else:
+        slides_dir = Path(asset.path_slides_json).parent if asset.path_slides_json else Path()
+    slide_path = slides_dir / f"{slide_index}.webp"
+    if not slide_path.exists():
+        raise HTTPException(status_code=404, detail="Slide not found")
+    return FileResponse(slide_path, media_type="image/webp")
 
 
 @router.get("/files/{file_id}/waveform")
