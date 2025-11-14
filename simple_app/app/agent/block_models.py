@@ -175,10 +175,16 @@ class LinkData(BaseModel):
 
 
 class TableData(BaseModel):
-    rows: List[List[str]]
+    rows: Optional[List[List[str]]] = None
+    kind: Optional[Literal["xlsx", "xls", "csv"]] = None
+    src: Optional[str] = None
+    summary: Optional[str] = None
+    view: Literal["cover", "inline"] = "cover"
+    active_sheet: Optional[str] = Field(default=None, alias="activeSheet")
 
     class Config:
         extra = "forbid"
+        allow_population_by_field_name = True
 
 
 class SourceData(BaseModel):

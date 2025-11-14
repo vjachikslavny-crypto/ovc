@@ -325,17 +325,38 @@ BLOCK_SCHEMA: dict = {
                         "type": {"const": "table"},
                         "data": {
                             "type": "object",
-                            "properties": {
-                                "rows": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "rows": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        }
                                     },
-                                }
-                            },
-                            "required": ["rows"],
-                            "additionalProperties": False,
+                                    "required": ["rows"],
+                                    "additionalProperties": False,
+                                },
+                                {
+                                    "properties": {
+                                        "kind": {
+                                            "type": "string",
+                                            "enum": ["xlsx", "xls", "csv"],
+                                        },
+                                        "src": {"type": "string"},
+                                        "summary": {"type": "string"},
+                                        "view": {
+                                            "type": "string",
+                                            "enum": ["cover", "inline"],
+                                        },
+                                        "activeSheet": {"type": ["string", "null"]},
+                                    },
+                                    "required": ["kind", "src", "summary"],
+                                    "additionalProperties": False,
+                                },
+                            ],
                         },
                     }
                 },
