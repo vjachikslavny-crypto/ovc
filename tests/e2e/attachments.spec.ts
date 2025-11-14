@@ -29,4 +29,10 @@ test.describe.skip('Attachments flow (skeleton)', () => {
     // TODO: simulate microphone recording or mock endpoint.
     expect(true).toBeTruthy();
   });
+
+  test('uploading a PPTX shows slides inline', async ({ page }) => {
+    await page.goto('/notes');
+    // TODO: drop pptx, switch to inline, paginate slides.
+    expect(true).toBeTruthy();
+  });
 });

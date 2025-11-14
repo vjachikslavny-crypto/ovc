@@ -11,6 +11,7 @@ import { initPdfViewers } from './pdf_viewer.js';  // OVC: pdf - импорт PD
 import { initAudioPlayers } from './audio_player.js';
 import { initAudioRecorder } from './audio_recorder.js';
 import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмотр DOCX/RTF
+import { initSlidesViewers } from './slides_viewer.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -206,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const focusedBlockEl = activeElement.closest('[data-block-id]');
         if (focusedBlockEl) {
           // OVC: pdf - не сохраняем фокус для PDF блоков, чтобы не вызывать прокрутку при восстановлении
-          if (focusedBlockEl.closest('.doc-block--pdf, .doc-block--word')) {
+          if (focusedBlockEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
             // Не сохраняем фокус для PDF блоков
           } else {
             const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
@@ -300,6 +301,10 @@ document.addEventListener('DOMContentLoaded', () => {
       block.dataset.wordViewerInitialized = 'false';
     });
     initWordViewers(canvas, handleBlockUpdate);
+    canvas.querySelectorAll('.slides-block').forEach(block => {
+      block.dataset.slidesReady = 'false';
+    });
+    initSlidesViewers(canvas, handleBlockUpdate);
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
     // Не сбрасываем флаг tableHydrated, чтобы не терять фокус
@@ -351,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (pendingEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (pendingEl.closest('.doc-block--pdf, .doc-block--word')) {
+        if (pendingEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
           pendingCaretBlockId = null;
           return;
         }
@@ -366,7 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (targetBlockEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (targetBlockEl.closest('.doc-block--pdf, .doc-block--word')) {
+        if (targetBlockEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
           return;
         }
         const editable = getEditableElement(targetBlockEl) || targetBlockEl;
@@ -1201,7 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Обновляем данные блока
-    if (updates.view !== undefined && (block.type === 'doc' || block.type === 'audio')) {
+    if (updates.view !== undefined && (block.type === 'doc' || block.type === 'audio' || block.type === 'slides')) {
       console.log('handleBlockUpdate: updating view', { 
         blockId, 
         oldView: block.data.view, 
@@ -1395,7 +1400,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // OVC: audio - игнорируем клики по аудио блокам и их элементам управления
     if (event.target.closest('.audio-block')) return;
     // OVC: pdf - игнорируем клики по PDF блокам и их содержимому (изображения, контейнеры страниц)
-    if (event.target.closest('.doc-block--pdf, .doc-block--word')) return;
+    if (event.target.closest('.doc-block--pdf, .doc-block--word, .slides-block')) return;
     if (event.target.closest('.pdf-pages')) return;
     if (event.target.closest('.pdf-page')) return;
     if (event.target.closest('.pdf-page img')) return;
@@ -1406,7 +1411,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lastBlock = canvas.querySelector('[data-block-id]:last-of-type');
     if (lastBlock) {
       // OVC: pdf - не фокусируем, если последний блок - это PDF блок
-      if (lastBlock.closest('.doc-block--pdf, .doc-block--word')) {
+      if (lastBlock.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
         return; // Не фокусируем PDF блоки
       }
       const editable = getEditableElement(lastBlock) || lastBlock;
@@ -1712,7 +1717,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Один обработчик на document для всех блоков
     document.addEventListener('click', (event) => {
       // OVC: pdf - игнорируем клики по PDF блокам и их содержимому, чтобы не сбрасывать состояние
-      if (event.target.closest('.doc-block--pdf, .doc-block--word')) return;
+      if (event.target.closest('.doc-block--pdf, .doc-block--word, .slides-block')) return;
       if (event.target.closest('.pdf-pages')) return;
       if (event.target.closest('.pdf-page')) return;
       if (event.target.closest('.pdf-page img')) return;

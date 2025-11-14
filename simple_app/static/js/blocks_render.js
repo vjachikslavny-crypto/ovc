@@ -43,6 +43,8 @@ export function renderBlock(block) {
       return renderImage(data);
     case 'doc':
       return renderDoc(data);
+    case 'slides':
+      return renderSlides(data);
     case 'audio':
       return renderAudio(data);
     case 'source':
@@ -358,6 +360,103 @@ function renderDoc(data) {
   card.appendChild(body);
 
   return card;
+}
+
+function renderSlides(data) {
+  const view = data.view || 'cover';
+  const block = document.createElement('article');
+  block.className = 'slides-block';
+  block.dataset.view = view;
+  const fileId = data.src ? data.src.match(/\/files\/([^/]+)/)?.[1] : null;
+  if (fileId) block.dataset.fileId = fileId;
+  if (data.slides) block.dataset.slidesMeta = data.slides;
+  if (data.count) block.dataset.count = String(data.count);
+  if (data.preview) block.dataset.preview = data.preview;
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'slides-toolbar';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'pill-button';
+  toggleBtn.dataset.action = 'toggle-view';
+  toggleBtn.textContent = view === 'inline' ? 'Свернуть' : 'Просмотр';
+  toolbar.appendChild(toggleBtn);
+  const spacer = document.createElement('div');
+  spacer.className = 'spacer';
+  toolbar.appendChild(spacer);
+  const fullBtn = document.createElement('button');
+  fullBtn.className = 'icon-button';
+  fullBtn.dataset.action = 'fullscreen';
+  fullBtn.textContent = '⛶';
+  fullBtn.setAttribute('aria-label', 'Во весь экран');
+  toolbar.appendChild(fullBtn);
+  block.appendChild(toolbar);
+
+  const cover = document.createElement('div');
+  cover.className = 'slides-cover';
+  if (view === 'inline') cover.hidden = true;
+  if (data.preview) {
+    const img = document.createElement('img');
+    img.className = 'slides-cover-img';
+    img.src = data.preview;
+    img.alt = 'Обложка презентации';
+    img.loading = 'lazy';
+    cover.appendChild(img);
+  } else {
+    const badge = document.createElement('div');
+    badge.className = 'slides-cover-placeholder';
+    badge.textContent = 'PPTX';
+    cover.appendChild(badge);
+  }
+  const countBadge = document.createElement('div');
+  countBadge.className = 'slides-count-badge';
+  countBadge.textContent = `${data.count || '?'} слайдов`;
+  cover.appendChild(countBadge);
+  block.appendChild(cover);
+
+  const inline = document.createElement('div');
+  inline.className = 'slides-inline';
+  inline.hidden = view !== 'inline';
+
+  const pager = document.createElement('div');
+  pager.className = 'slides-pager';
+  const prevBtn = document.createElement('button');
+  prevBtn.dataset.action = 'prev';
+  prevBtn.textContent = '←';
+  const indexLabel = document.createElement('span');
+  indexLabel.className = 'slides-index';
+  const cur = document.createElement('b');
+  cur.className = 'cur';
+  cur.textContent = '1';
+  const total = document.createElement('span');
+  total.className = 'total';
+  total.textContent = data.count ? String(data.count) : '?';
+  indexLabel.append(cur, document.createTextNode('/'), total);
+  const nextBtn = document.createElement('button');
+  nextBtn.dataset.action = 'next';
+  nextBtn.textContent = '→';
+  pager.append(prevBtn, indexLabel, nextBtn);
+  inline.appendChild(pager);
+
+  const viewPort = document.createElement('div');
+  viewPort.className = 'slides-view';
+  const img = document.createElement('img');
+  img.className = 'slides-image';
+  img.alt = 'Слайд презентации';
+  img.decoding = 'async';
+  viewPort.appendChild(img);
+  inline.appendChild(viewPort);
+
+  const thumbs = document.createElement('div');
+  thumbs.className = 'slides-thumbs';
+  inline.appendChild(thumbs);
+
+  const placeholder = document.createElement('div');
+  placeholder.className = 'slides-placeholder';
+  placeholder.textContent = 'Загружаем презентацию...';
+  inline.appendChild(placeholder);
+
+  block.appendChild(inline);
+  return block;
 }
 
 function renderAudio(data) {
