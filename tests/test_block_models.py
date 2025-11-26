@@ -88,6 +88,41 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[0].data.kind, "docx")
         self.assertEqual(parsed[0].data.view, "inline")
 
+    def test_parse_video_block(self):
+        blocks = [
+            {
+                "type": "video",
+                "data": {
+                    "src": "/files/v1/video/source",
+                    "poster": "/files/v1/video/poster.webp",
+                    "durationSec": 12,
+                    "width": 1280,
+                    "height": 720,
+                    "mime": "video/mp4",
+                    "view": "inline",
+                },
+            }
+        ]
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].type, "video")
+        self.assertEqual(parsed[0].data.duration_sec, 12)
+
+    def test_parse_youtube_block(self):
+        blocks = [
+            {
+                "type": "youtube",
+                "data": {
+                    "videoId": "abcdefghijk",
+                    "startSec": 47,
+                    "view": "cover",
+                },
+            }
+        ]
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].type, "youtube")
+        self.assertEqual(parsed[0].data.video_id, "abcdefghijk")
+        self.assertEqual(parsed[0].data.view, "cover")
+
     def test_parse_table_block_with_summary(self):
         blocks = [
             {

@@ -89,6 +89,29 @@ def slide_image(file_id: str, slide_index: int):
     return FileResponse(slide_path, media_type="image/webp")
 
 
+@router.get("/files/{file_id}/video/source")
+def video_source(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "video":
+        raise HTTPException(status_code=400, detail="File is not a video")
+    path = Path(asset.path_video_original or asset.path_original)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Video file is missing on disk")
+    media_type = asset.video_mime or asset.mime or "video/mp4"
+    return FileResponse(path, media_type=media_type, filename=asset.filename)
+
+
+@router.get("/files/{file_id}/video/poster.webp")
+def video_poster(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "video" or not asset.path_video_poster:
+        raise HTTPException(status_code=404, detail="Poster not available for this video")
+    path = Path(asset.path_video_poster)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Poster file is missing on disk")
+    return FileResponse(path, media_type="image/webp")
+
+
 @router.get("/files/{file_id}/excel/summary.json")
 def excel_summary(file_id: str):
     asset = _fetch_asset(file_id)

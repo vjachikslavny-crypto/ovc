@@ -155,6 +155,8 @@ class FileAsset(Base):
     path_excel_chart_sheets_json = Column(String, nullable=True)  # OVC: excel - структурная информация о листах с диаграммами
     excel_charts_pages_keep = Column(Text, nullable=True)  # OVC: excel - JSON массив выбранных страниц пользователем
     excel_default_sheet = Column(String, nullable=True)
+    path_video_original = Column(String, nullable=True)
+    path_video_poster = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
@@ -162,6 +164,10 @@ class FileAsset(Base):
     duration = Column(Float, nullable=True)
     words = Column(Integer, nullable=True)
     slides_count = Column(Integer, nullable=True)
+    video_duration = Column(Float, nullable=True)
+    video_width = Column(Integer, nullable=True)
+    video_height = Column(Integer, nullable=True)
+    video_mime = Column(String, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
     note = relationship("Note", back_populates="files")

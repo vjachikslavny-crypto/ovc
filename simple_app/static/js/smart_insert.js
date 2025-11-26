@@ -1,9 +1,10 @@
 const URL_REGEX = /(https?:\/\/[^\s]+)/i;
+const YOUTUBE_HOST_RE = /(youtu\.be|youtube\.com|youtube-nocookie\.com)/i;
 
 export function initSmartInsert(canvas, { onTransform }) {
   if (!canvas || typeof onTransform !== 'function') return;
 
-  canvas.addEventListener('input', (event) => {
+  canvas.addEventListener('input', async (event) => {
     const blockEl = event.target.closest('[data-block-id]');
     if (!blockEl) return;
     const blockId = blockEl.dataset.blockId;
@@ -28,18 +29,42 @@ export function initSmartInsert(canvas, { onTransform }) {
     }
 
     const urlMatch = text.match(URL_REGEX);
-    if (urlMatch && confirm('Оформить как источник?')) {
+    if (!urlMatch) return;
+
+    const url = urlMatch[0];
+
+    if (YOUTUBE_HOST_RE.test(url)) {
+      try {
+        const res = await fetch('/api/resolve/youtube', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+        const payload = await res.json();
+        if (payload?.block) {
+          onTransform(blockId, { type: payload.block.type, data: payload.block.data });
+          return;
+        }
+      } catch (error) {
+        console.warn('YouTube resolve failed', error);
+      }
+    }
+
+    if (window.confirm('Оформить как источник?')) {
       let domain = '';
       try {
-        domain = new URL(urlMatch[0]).hostname;
+        domain = new URL(url).hostname;
       } catch (error) {
         domain = '';
       }
       onTransform(blockId, {
         type: 'source',
         data: {
-          url: urlMatch[0],
-          title: text.replace(urlMatch[0], '').trim() || 'Источник',
+          url,
+          title: text.replace(url, '').trim() || 'Источник',
           domain,
           published_at: null,
           summary: '',

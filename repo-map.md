@@ -49,7 +49,8 @@ simple_app/
 | `summary` | `{ "dateISO": "2025-01-01", "text": "..." }` |
 | `image` | `{ "src": "/files/<id>/preview.webp", "full": "/files/<id>/original", "alt": "", "w": 1600, "h": 900 }` |
 | `audio` | `{ "src": "/files/<id>/audio.mp3", "duration": 123.4, "waveform": "/files/<id>/wave.json" }` |
-| `video` | `{ "src": "/files/<id>/video.mp4", "poster": "/files/<id>/poster.jpg", "duration": 42.0, "w": 1280, "h": 720 }` |
+| `video` | `{ "src": "/files/<id>/video/source", "poster": "/files/<id>/video/poster.webp", "durationSec": 42.0, "width": 1280, "height": 720, "mime": "video/mp4", "view": "inline|cover|compact" }` |
+| `youtube` | `{ "videoId": "abcdefghijk", "startSec": 47, "view": "inline|cover|compact" }` |
 | `doc` | `{ "kind": "pdf|docx|rtf|pptx|txt", "src": "/files/<id>/original", "preview": "/files/<id>/preview.webp", "meta": { "pages": 10, "slides": 10, "size": 1048576 } }` |
 | `sheet` | `{ "kind": "xlsx|csv", "src": "/files/<id>/original", "sheets": ["Лист1"], "rows": 2500 }` |
 | `code` | `{ "language": "python", "src": "/files/<id>/original", "lines": 1200, "sha256": "..." }` |

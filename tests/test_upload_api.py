@@ -17,8 +17,10 @@ sys.path.insert(0, str(ROOT / "simple_app"))
 
 try:
     from app.main import app  # noqa: E402
+    from app.db import migrate as db_migrate  # noqa: E402
 
     _APP_IMPORT_ERROR = None
+    db_migrate.upgrade()
     client = TestClient(app)
 except ModuleNotFoundError as exc:  # pragma: no cover - dependency missing on CI
     _APP_IMPORT_ERROR = exc
@@ -109,6 +111,13 @@ def make_wav(duration: float = 0.4) -> bytes:
     return buffer.getvalue()
 
 
+def make_fake_mp4() -> bytes:
+    # Минимальный контейнер MP4 с заголовком ftyp и пустым mdat
+    header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
+    mdat = b"\x00\x00\x00\x08mdat\x00\x00\x00\x00"
+    return header + mdat
+
+
 @unittest.skipIf(client is None, f"FastAPI app unavailable: {_APP_IMPORT_ERROR}")
 class UploadApiTests(unittest.TestCase):
     def test_upload_image_returns_block(self):
@@ -168,6 +177,20 @@ class UploadApiTests(unittest.TestCase):
         file_id = payload["files"][0]["id"]
         waveform = client.get(f"/files/{file_id}/waveform")
         self.assertEqual(waveform.status_code, 200)
+
+    def test_upload_video_creates_block(self):
+        video_bytes = make_fake_mp4()
+        response = client.post(
+            "/api/upload",
+            files={"files": ("clip.mp4", video_bytes, "video/mp4")},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        block = payload["blocks"][0]
+        self.assertEqual(block["type"], "video")
+        self.assertTrue(block["data"]["src"].endswith("/video/source"))
+        poster_url = block["data"].get("poster")
+        self.assertTrue(poster_url is None or poster_url.endswith(".webp"))
 
     @unittest.skipUnless(MAMMOTH_AVAILABLE, "mammoth dependency is missing")
     def test_upload_docx_exposes_inline_preview(self):
@@ -236,7 +259,7 @@ class UploadApiTests(unittest.TestCase):
 
         download = client.get(f"/files/{file_id}/excel/sheet/{sheet_name}.csv")
         self.assertEqual(download.status_code, 200)
-        self.assertEqual(download.headers["content-type"], "text/csv")
+        self.assertTrue(download.headers["content-type"].startswith("text/csv"))
 
 
 if __name__ == "__main__":

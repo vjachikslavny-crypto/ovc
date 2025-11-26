@@ -184,11 +184,36 @@ BLOCK_SCHEMA: dict = {
                             "properties": {
                                 "src": {"type": "string"},
                                 "poster": {"type": ["string", "null"]},
-                                "duration": {"type": ["number", "null"]},
-                                "w": {"type": ["integer", "null"]},
-                                "h": {"type": ["integer", "null"]},
+                                "durationSec": {"type": ["number", "null"]},
+                                "width": {"type": ["integer", "null"]},
+                                "height": {"type": ["integer", "null"]},
+                                "mime": {"type": ["string", "null"]},
+                                "caption": {"type": ["string", "null"]},
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["inline", "cover", "compact"],
+                                },
                             },
                             "required": ["src"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "youtube"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "videoId": {"type": "string"},
+                                "title": {"type": ["string", "null"]},
+                                "startSec": {"type": ["number", "null"]},
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["inline", "cover", "compact"],
+                                },
+                            },
+                            "required": ["videoId"],
                             "additionalProperties": False,
                         },
                     }

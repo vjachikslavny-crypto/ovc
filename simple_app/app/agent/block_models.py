@@ -87,12 +87,19 @@ class AudioData(BaseModel):
 class VideoData(BaseModel):
     src: str
     poster: Optional[str] = None
-    duration: Optional[float] = Field(default=None, ge=0.0)
-    w: Optional[int] = Field(default=None, ge=1)
-    h: Optional[int] = Field(default=None, ge=1)
+    duration_sec: Optional[float] = Field(default=None, alias="durationSec", ge=0.0)
+    width: Optional[int] = Field(default=None, ge=1)
+    height: Optional[int] = Field(default=None, ge=1)
+    mime: Optional[str] = None
+    caption: Optional[str] = None
+    view: Literal["inline", "cover", "compact"] = "inline"
 
-    class Config:
-        extra = "forbid"
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
 
 
 class DocMeta(BaseModel):
@@ -187,6 +194,20 @@ class TableData(BaseModel):
     if ConfigDict is not None:  # Pydantic v2
         model_config = ConfigDict(extra="forbid", populate_by_name=True)
     else:  # Pydantic v1
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
+
+
+class YouTubeData(BaseModel):
+    video_id: str = Field(alias="videoId")
+    title: Optional[str] = None
+    start_sec: Optional[float] = Field(default=None, alias="startSec", ge=0.0)
+    view: Literal["inline", "cover", "compact"] = "inline"
+
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:
         class Config:
             extra = "forbid"
             allow_population_by_field_name = True
@@ -314,6 +335,11 @@ class TableBlock(BlockBase):
     data: TableData
 
 
+class YouTubeBlock(BlockBase):
+    type: Literal["youtube"]
+    data: YouTubeData
+
+
 class SourceBlock(BlockBase):
     type: Literal["source"]
     data: SourceData
@@ -350,6 +376,7 @@ BlockModel = Union[
     ArchiveBlock,
     LinkBlock,
     TableBlock,
+    YouTubeBlock,
     SourceBlock,
     SummaryBlock,
     TodoBlock,

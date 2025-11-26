@@ -45,6 +45,10 @@ export function renderBlock(block) {
       return renderDoc(data);
     case 'slides':
       return renderSlides(data);
+    case 'video':
+      return renderVideoBlock(data);
+    case 'youtube':
+      return renderYouTubeBlock(data);
     case 'audio':
       return renderAudio(data);
     case 'source':
@@ -367,6 +371,190 @@ function renderImage(data) {
     figure.appendChild(figcaption);
   }
   return figure;
+}
+
+function renderVideoBlock(data = {}) {
+  const view = data.view || 'cover';
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--video';
+  block.dataset.view = view;
+
+  // Компактная обложка
+  const cover = document.createElement('div');
+  cover.className = 'video-cover-compact';
+  cover.dataset.role = 'video-cover';
+  if (view === 'inline') cover.hidden = true;
+  
+  const iconWrap = document.createElement('div');
+  iconWrap.className = 'video-cover-compact__icon';
+  if (data.poster) {
+    const posterImg = document.createElement('img');
+    posterImg.src = data.poster;
+    posterImg.alt = '';
+    posterImg.loading = 'lazy';
+    posterImg.draggable = false;
+    iconWrap.appendChild(posterImg);
+  } else {
+    iconWrap.textContent = '🎬';
+  }
+  cover.appendChild(iconWrap);
+  
+  const info = document.createElement('div');
+  info.className = 'video-cover-compact__info';
+  
+  const title = document.createElement('input');
+  title.type = 'text';
+  title.className = 'video-cover-compact__title';
+  title.dataset.role = 'video-title';
+  const defaultTitle = data.mime ? `Видео (${data.mime.split('/')[1]?.toUpperCase() || ''})` : 'Видео';
+  title.value = data.title || defaultTitle;
+  title.placeholder = 'Название видео...';
+  info.appendChild(title);
+  
+  const metaParts = [];
+  const durationLabel = formatMediaDuration(data.durationSec);
+  if (durationLabel) metaParts.push(durationLabel);
+  if (data.width && data.height) metaParts.push(`${data.width}×${data.height}`);
+  if (metaParts.length) {
+    const metaLine = document.createElement('div');
+    metaLine.className = 'video-cover-compact__meta';
+    metaLine.textContent = metaParts.join(' • ');
+    info.appendChild(metaLine);
+  }
+  cover.appendChild(info);
+  
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'pill-button';
+  toggleBtn.dataset.action = 'toggle-video-view';
+  toggleBtn.textContent = 'Просмотр';
+  cover.appendChild(toggleBtn);
+  
+  block.appendChild(cover);
+
+  // Плеер (скрыт по умолчанию)
+  const playerWrap = document.createElement('div');
+  playerWrap.className = 'video-player';
+  playerWrap.dataset.role = 'video-player';
+  if (view !== 'inline') playerWrap.hidden = true;
+  
+  const playerToolbar = document.createElement('div');
+  playerToolbar.className = 'media-toolbar';
+  const collapseBtn = document.createElement('button');
+  collapseBtn.type = 'button';
+  collapseBtn.className = 'pill-button pill-button--ghost';
+  collapseBtn.dataset.action = 'toggle-video-view';
+  collapseBtn.textContent = 'Свернуть';
+  playerToolbar.appendChild(collapseBtn);
+  playerWrap.appendChild(playerToolbar);
+  
+  const videoEl = document.createElement('video');
+  videoEl.controls = true;
+  videoEl.preload = 'none';
+  videoEl.playsInline = true;
+  if (data.poster) videoEl.poster = data.poster;
+  if (data.src) {
+    const source = document.createElement('source');
+    source.src = data.src;
+    if (data.mime) source.type = data.mime;
+    videoEl.appendChild(source);
+  }
+  playerWrap.appendChild(videoEl);
+  block.appendChild(playerWrap);
+
+  return block;
+}
+
+function renderYouTubeBlock(data = {}) {
+  const view = data.view || 'inline';
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--youtube';
+  block.dataset.view = view;
+  const videoId = data.videoId || '';
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'media-toolbar';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'pill-button pill-button--ghost';
+  toggleBtn.dataset.action = 'toggle-youtube-view';
+  toggleBtn.textContent = view === 'inline' ? 'Свернуть' : 'Просмотр';
+  toolbar.appendChild(toggleBtn);
+  block.appendChild(toolbar);
+
+  const cover = document.createElement('div');
+  cover.className = 'youtube-cover';
+  cover.dataset.role = 'youtube-cover';
+  if (view === 'inline') cover.hidden = true;
+  if (videoId) {
+    const thumb = document.createElement('img');
+    thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    thumb.alt = 'Обложка YouTube';
+    thumb.loading = 'lazy';
+    cover.appendChild(thumb);
+  }
+  const badge = document.createElement('span');
+  badge.className = 'youtube-cover__badge';
+  badge.textContent = '▶';
+  cover.appendChild(badge);
+  block.appendChild(cover);
+
+  const frameWrap = document.createElement('div');
+  frameWrap.className = 'youtube-frame';
+  frameWrap.dataset.role = 'youtube-player';
+  if (view !== 'inline') frameWrap.hidden = true;
+  if (videoId) {
+    const iframe = document.createElement('iframe');
+    const start = Number.isFinite(data.startSec) ? Math.max(0, data.startSec || 0) : 0;
+    iframe.src = `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1&start=${start}`;
+    iframe.title = data.title || 'YouTube video player';
+    iframe.loading = 'lazy';
+    iframe.allow =
+      'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+    iframe.allowFullscreen = true;
+    frameWrap.appendChild(iframe);
+  } else {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'Ссылка на YouTube не задана';
+    frameWrap.appendChild(placeholder);
+  }
+  block.appendChild(frameWrap);
+
+  const meta = document.createElement('div');
+  meta.className = 'media-meta';
+  const metaParts = [];
+  if (videoId) {
+    metaParts.push(`youtu.be/${videoId}`);
+  }
+  if (data.startSec) {
+    metaParts.push(`старт ${formatMediaDuration(data.startSec)}`);
+  }
+  meta.textContent = metaParts.join(' • ');
+  block.appendChild(meta);
+
+  if (data.title) {
+    const caption = document.createElement('p');
+    caption.className = 'media-caption';
+    caption.textContent = data.title;
+    block.appendChild(caption);
+  }
+
+  return block;
+}
+
+function formatMediaDuration(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '';
+  }
+  const totalSeconds = Math.max(0, Math.floor(Number(value)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function renderDoc(data) {

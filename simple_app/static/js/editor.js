@@ -69,6 +69,30 @@ document.addEventListener('DOMContentLoaded', () => {
     onReady: () => hints.push('Аудиозапись добавлена в заметку.'),
   });
 
+  canvas.addEventListener('click', (event) => {
+    const actionTarget = event.target?.closest?.('[data-action]');
+    if (!actionTarget) return;
+    const action = actionTarget.dataset.action;
+    if (action === 'toggle-video-view') {
+      const blockEl = actionTarget.closest('.note-block--video');
+      toggleMediaBlockView(blockEl, 'video');
+    } else if (action === 'toggle-youtube-view') {
+      const blockEl = actionTarget.closest('.note-block--youtube');
+      toggleMediaBlockView(blockEl, 'youtube');
+    }
+  });
+
+  // Обработчик изменения названия видео
+  canvas.addEventListener('input', (event) => {
+    const titleInput = event.target.closest('[data-role="video-title"]');
+    if (!titleInput) return;
+    const blockEl = titleInput.closest('.note-block--video');
+    if (!blockEl) return;
+    const blockId = blockEl.dataset.blockId;
+    if (!blockId) return;
+    handleBlockUpdate(blockId, { title: titleInput.value });
+  });
+
   let noteState = {
     id: editorEl.dataset.noteId || '',
     title: 'Без названия',
@@ -1212,6 +1236,8 @@ document.addEventListener('DOMContentLoaded', () => {
       block.type === 'doc' ||
       block.type === 'audio' ||
       block.type === 'slides' ||
+      block.type === 'video' ||
+      block.type === 'youtube' ||
       (block.type === 'table' && block.data?.kind);
 
     if (updates.view !== undefined && isMediaBlock) {
@@ -1246,6 +1272,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Сохраняем изменения (но НЕ перерисовываем, чтобы не потерять состояние PDF viewer)
     scheduleSave();
+  }
+
+  function toggleMediaBlockView(blockEl, kind) {
+    if (!blockEl) return;
+    const blockId = blockEl.dataset.blockId;
+    if (!blockId) return;
+    const nextView = blockEl.dataset.view === 'inline' ? 'cover' : 'inline';
+    blockEl.dataset.view = nextView;
+    const playerSelector = kind === 'video' ? '[data-role="video-player"]' : '[data-role="youtube-player"]';
+    const coverSelector = kind === 'video' ? '[data-role="video-cover"]' : '[data-role="youtube-cover"]';
+
+    const player = blockEl.querySelector(playerSelector);
+    if (player) player.hidden = nextView !== 'inline';
+    const cover = blockEl.querySelector(coverSelector);
+    if (cover) cover.hidden = nextView === 'inline';
+    
+    // Для видео: при открытии плеера начинаем загрузку
+    if (kind === 'video' && nextView === 'inline') {
+      const video = player?.querySelector('video');
+      if (video && video.preload === 'none') {
+        video.preload = 'metadata';
+        video.load();
+      }
+    }
+
+    handleBlockUpdate(blockId, { view: nextView });
   }
 
   // ---- SAVE ----

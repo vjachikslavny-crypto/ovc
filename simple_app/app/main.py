@@ -2,6 +2,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import ClientDisconnect
 
 from app.api.chat import router as chat_router
 from app.api.commit import router as commit_router
@@ -10,11 +12,15 @@ from app.api.files import router as files_router
 from app.api.graph import router as graph_router
 from app.api.notes import router as notes_router
 from app.api.upload import router as upload_router
+from app.api.resolve import router as resolve_router
 
 # OVC: pdf - проверяем доступность библиотек при старте
 from app.services.files import HAS_PYMUPDF, HAS_PDF2IMAGE
 
 logger = logging.getLogger(__name__)
+
+# OVC: video - увеличиваем лимит размера запроса до 500MB
+MAX_REQUEST_SIZE = 500 * 1024 * 1024  # 500MB
 
 app = FastAPI(title="OVC Simple App", version="0.1.0")
 
@@ -31,6 +37,7 @@ app.include_router(notes_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
+app.include_router(resolve_router, prefix="/api")
 app.include_router(files_router)
 
 app.mount("/static", StaticFiles(directory="simple_app/static"), name="static")

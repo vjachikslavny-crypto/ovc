@@ -13,6 +13,7 @@ import wave
 import html as html_module
 import zipfile
 import xml.etree.ElementTree as ET
+import shutil
 from dataclasses import dataclass
 from io import BytesIO
 import io
@@ -33,6 +34,8 @@ from app.agent.block_models import (
     DocBlock,
     DocData,
     DocMeta,
+    VideoBlock,
+    VideoData,
     TableBlock,
     TableData,
     SlidesBlock,
@@ -98,6 +101,7 @@ SLIDES_META_DIR = UPLOAD_ROOT / "slides_meta"
 EXCEL_SUMMARY_DIR = UPLOAD_ROOT / "excel_summary"
 EXCEL_CHARTS_DIR = UPLOAD_ROOT / "excel_charts"  # OVC: excel - диаграммы
 EXCEL_CHARTS_META_DIR = UPLOAD_ROOT / "excel_charts_meta"  # OVC: excel - метаданные диаграмм
+VIDEO_DIR = UPLOAD_ROOT / "videos"
 
 for directory in (
     ORIGINAL_DIR,
@@ -110,6 +114,7 @@ for directory in (
     EXCEL_SUMMARY_DIR,
     EXCEL_CHARTS_DIR,
     EXCEL_CHARTS_META_DIR,
+    VIDEO_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -146,6 +151,14 @@ AUDIO_MIME_TYPES = {
     "audio/aac",
 }
 AUDIO_EXTENSIONS = (".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac")
+VIDEO_MIME_TYPES = {
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+    "video/x-msvideo",
+}
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".avi")
 
 IMAGE_MAX_BYTES = 15 * 1024 * 1024
 PDF_MAX_BYTES = 50 * 1024 * 1024
@@ -158,6 +171,17 @@ EXCEL_MAX_BYTES = 40 * 1024 * 1024
 EXCEL_PREVIEW_ROWS = 5
 EXCEL_WINDOW_LIMIT = 1000
 EXCEL_CHARTS_TARGET_WIDTH = 1600
+VIDEO_MAX_BYTES = 500 * 1024 * 1024  # 500MB
+_FFMPEG_PATH = shutil.which("ffmpeg")
+_FFPROBE_PATH = shutil.which("ffprobe")
+
+
+def ffmpeg_available() -> bool:
+    return _FFMPEG_PATH is not None
+
+
+def _ffprobe_available() -> bool:
+    return _FFPROBE_PATH is not None
 
 ALLOWED_HTML_TAGS = [
     "p",
@@ -251,10 +275,14 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         audio_mime = mime if mime in AUDIO_MIME_TYPES else "audio/webm"
         extension = _guess_extension(filename, audio_mime) or ".webm"
         return FileMetadata(kind="audio", mime=audio_mime, extension=extension, max_bytes=AUDIO_MAX_BYTES)
+    if mime in VIDEO_MIME_TYPES or filename.lower().endswith(VIDEO_EXTENSIONS):
+        video_mime = mime if mime in VIDEO_MIME_TYPES else "video/mp4"
+        extension = _guess_extension(filename, video_mime) or ".mp4"
+        return FileMetadata(kind="video", mime=video_mime, extension=extension, max_bytes=VIDEO_MAX_BYTES)
 
     raise HTTPException(
         status_code=415,
-        detail="Unsupported file type for this prototype (only images, PDF, Word/RTF, PPTX, Excel/CSV, and audio are allowed).",
+        detail="Unsupported file type for this prototype (only images, PDF, Word/RTF, PPTX, Excel/CSV, audio, and video are allowed).",
     )
 
 
@@ -280,6 +308,29 @@ def _excel_charts_json_path(file_id: str) -> Path:
     return EXCEL_CHARTS_META_DIR / f"{file_id}.json"
 
 
+VIDEO_POSTER_NAME = "poster.webp"
+
+
+def _video_dir(file_id: str) -> Path:
+    return VIDEO_DIR / file_id
+
+
+def _video_original_path(file_id: str, extension: str) -> Path:
+    return _video_dir(file_id) / f"original{extension}"
+
+
+def _video_poster_path(file_id: str) -> Path:
+    return _video_dir(file_id) / VIDEO_POSTER_NAME
+
+
+def _video_source_url(file_id: str) -> str:
+    return f"/files/{file_id}/video/source"
+
+
+def _video_poster_url(file_id: str) -> str:
+    return f"/files/{file_id}/video/poster.webp"
+
+
 def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
     buffer = BytesIO(data)
     with Image.open(buffer) as img:
@@ -291,6 +342,85 @@ def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
         preview.save(out, format="WEBP", quality=85)
         preview_bytes = out.getvalue()
     return preview_bytes, width, height
+
+
+def extract_video_meta(path: Path) -> dict:
+    meta = {"duration": None, "width": None, "height": None}
+    if not _ffprobe_available():
+        return meta
+    try:
+        result = subprocess.run(
+            [
+                _FFPROBE_PATH,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height,duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        payload = json.loads(result.stdout or "{}")
+        stream = (payload.get("streams") or [{}])[0]
+        duration = stream.get("duration")
+        width = stream.get("width")
+        height = stream.get("height")
+        if duration is not None:
+            try:
+                meta["duration"] = float(duration)
+            except (ValueError, TypeError):
+                meta["duration"] = None
+        if width is not None:
+            try:
+                meta["width"] = int(width)
+            except (ValueError, TypeError):
+                meta["width"] = None
+        if height is not None:
+            try:
+                meta["height"] = int(height)
+            except (ValueError, TypeError):
+                meta["height"] = None
+        return meta
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"ffprobe failed for video {path.name}: {exc}")
+        return meta
+
+
+def render_video_poster(video_path: Path, out_path: Path, *, at_percent: float = 0.2, duration: Optional[float] = None) -> bool:
+    if not ffmpeg_available():
+        return False
+    seek = duration * at_percent if duration and duration > 0 else 1.0
+    try:
+        subprocess.run(
+            [
+                _FFMPEG_PATH,
+                "-y",
+                "-v",
+                "error",
+                "-ss",
+                str(max(seek, 0.01)),
+                "-i",
+                str(video_path),
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale='min(1280,iw)':-2",
+                str(out_path),
+            ],
+            check=True,
+        )
+        return True
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"ffmpeg poster generation failed for {video_path.name}: {exc}")
+        return False
 
 
 def _render_pdf_page(data: bytes, page_num: int, scale: float = 1.0) -> Optional[bytes]:
@@ -2632,6 +2762,19 @@ def _build_block(asset: FileAsset) -> dict:
         )
         block = AudioBlock(type="audio", id=generate_uuid(), data=audio_data)
         return dump_block(block)
+    if asset.kind == "video":
+        video_data = VideoData(
+            src=_video_source_url(asset.id),
+            poster=_video_poster_url(asset.id) if asset.path_video_poster else None,
+            duration_sec=asset.video_duration,
+            width=asset.video_width,
+            height=asset.video_height,
+            mime=asset.video_mime or asset.mime,
+            caption="",
+            view="cover",
+        )
+        block = VideoBlock(type="video", id=generate_uuid(), data=video_data)
+        return dump_block(block)
 
     if asset.kind == "pptx":
         # OVC: pptx - если слайды не были сгенерированы (LibreOffice не установлен), все равно создаем блок
@@ -2679,7 +2822,10 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
 
     file_id = generate_uuid()
     original_name = upload.filename or f"{file_id}{meta.extension}"
-    original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
+    if meta.kind == "video":
+        original_path = _video_original_path(file_id, meta.extension)
+    else:
+        original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
     _write_file(original_path, data)
 
     preview_path: Optional[Path] = None
@@ -2695,6 +2841,11 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     words = None
     duration = None
     slides_count = None
+    video_poster_path: Optional[Path] = None
+    video_duration = None
+    video_width = None
+    video_height = None
+    video_mime = None
     # OVC: excel - инициализируем переменные для диаграмм (нужны для всех типов файлов)
     charts_json_path: Optional[str] = None
     charts_dir_path: Optional[str] = None
@@ -2702,9 +2853,13 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     charts_count: Optional[int] = None
 
     if meta.kind == "image":
-        preview_bytes, width, height = _generate_image_preview(data)
-        preview_path = PREVIEW_DIR / f"{file_id}.webp"
-        _write_file(preview_path, preview_bytes)
+        try:
+            preview_bytes, width, height = _generate_image_preview(data)
+            preview_path = PREVIEW_DIR / f"{file_id}.webp"
+            _write_file(preview_path, preview_bytes)
+        except Exception as exc:
+            logger.warning(f"Image preview generation failed for {file_id}: {exc}")
+            preview_path = None
     elif meta.kind == "pdf":
         pages = _pdf_page_count(data)
         preview_bytes = _generate_pdf_preview(data, file_id, pages)  # OVC: pdf - передаем data для рендеринга
@@ -2748,6 +2903,15 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     elif meta.kind == "audio":
         duration, waveform_values = _extract_audio_metadata(data, meta.mime)
         waveform_path = _write_waveform(file_id, waveform_values)
+    elif meta.kind == "video":
+        video_mime = meta.mime
+        meta_info = extract_video_meta(original_path)
+        video_duration = meta_info.get("duration")
+        video_width = meta_info.get("width")
+        video_height = meta_info.get("height")
+        poster_candidate = _video_poster_path(file_id)
+        if render_video_poster(original_path, poster_candidate, duration=video_duration):
+            video_poster_path = poster_candidate
 
     asset = FileAsset(
         id=file_id,
@@ -2763,6 +2927,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_slides_dir=str(slides_dir_path) if slides_dir_path else None,
         path_waveform=str(waveform_path) if waveform_path else None,
         path_excel_summary=str(summary_path) if summary_path else None,
+        path_video_original=str(original_path) if meta.kind == "video" else None,
+        path_video_poster=str(video_poster_path) if video_poster_path else None,
         path_excel_charts_json=charts_json_path,
         path_excel_charts_dir=charts_dir_path,
         path_excel_chart_sheets_json=charts_sheets_json_path,
@@ -2774,6 +2940,10 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         duration=duration,
         words=words,
         slides_count=slides_count,
+        video_duration=video_duration,
+        video_width=video_width,
+        video_height=video_height,
+        video_mime=video_mime,
     )
     session.add(asset)
     session.flush()

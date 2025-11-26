@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Request
 from pydantic import BaseModel, Field
 
 from app.db.models import Note
 from app.db.session import get_session
 from app.services import files as file_service
+
+# OVC: video - увеличиваем лимит размера файла
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
 
 router = APIRouter(tags=["files"])
 
@@ -51,6 +54,11 @@ async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> U
             for upload in uploads:
                 stored = await file_service.save_upload(session, upload, note_id)
                 asset = stored.asset
+                original_url = f"/files/{asset.id}/original"
+                preview_url = f"/files/{asset.id}/preview" if asset.path_preview else None
+                if asset.kind == "video":
+                    original_url = f"/files/{asset.id}/video/source"
+                    preview_url = f"/files/{asset.id}/video/poster.webp" if asset.path_video_poster else preview_url
                 response_blocks.append(stored.block)
                 response_files.append(
                     UploadedFilePayload(
@@ -59,8 +67,8 @@ async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> U
                         mime=asset.mime,
                         size=asset.size,
                         filename=asset.filename,
-                        originalUrl=f"/files/{asset.id}/original",
-                        previewUrl=f"/files/{asset.id}/preview" if asset.path_preview else None,
+                        originalUrl=original_url,
+                        previewUrl=preview_url,
                     )
                 )
 

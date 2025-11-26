@@ -103,6 +103,48 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding excel_charts_pages_keep column: {e}")
 
+        if 'path_video_original' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_video_original VARCHAR"))
+                print("Added path_video_original column to files table")
+            except Exception as e:
+                print(f"Error adding path_video_original column: {e}")
+
+        if 'path_video_poster' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_video_poster VARCHAR"))
+                print("Added path_video_poster column to files table")
+            except Exception as e:
+                print(f"Error adding path_video_poster column: {e}")
+
+        if 'video_duration' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN video_duration FLOAT"))
+                print("Added video_duration column to files table")
+            except Exception as e:
+                print(f"Error adding video_duration column: {e}")
+
+        if 'video_width' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN video_width INTEGER"))
+                print("Added video_width column to files table")
+            except Exception as e:
+                print(f"Error adding video_width column: {e}")
+
+        if 'video_height' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN video_height INTEGER"))
+                print("Added video_height column to files table")
+            except Exception as e:
+                print(f"Error adding video_height column: {e}")
+
+        if 'video_mime' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN video_mime VARCHAR"))
+                print("Added video_mime column to files table")
+            except Exception as e:
+                print(f"Error adding video_mime column: {e}")
+
         # Если таблицы не существует, создаем все таблицы
         try:
             Base.metadata.create_all(bind=conn)
