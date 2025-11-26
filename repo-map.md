@@ -44,7 +44,7 @@ simple_app/
 | `paragraph` | `{ "parts": [{ "text": "...", "annotations": { "bold": true, ... } }] }` |
 | `bulletList` / `numberList` | `{ "items": [richText, ...] }` |
 | `quote` | `{ "text": "...", "cite": "..." }` |
-| `table` | `{ "rows": [[ "cell", ...], ... ] }` |
+| `table` | Режим 1 (ручной): `{ "rows": [["cell", ...], ...] }`. Режим 2 (файлы): `{ "kind": "xlsx|xls|csv", "src": "/files/<id>/original", "summary": "/files/<id>/excel/summary.json", "view": "cover|inline", "activeSheet": "Лист1" }` |
 | `todo` | `{ "items": [{ "id": "uuid", "text": "...", "done": false }, ...] }` |
 | `summary` | `{ "dateISO": "2025-01-01", "text": "..." }` |
 | `image` | `{ "src": "/files/<id>/preview.webp", "full": "/files/<id>/original", "alt": "", "w": 1600, "h": 900 }` |

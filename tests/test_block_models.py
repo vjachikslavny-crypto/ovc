@@ -88,6 +88,38 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[0].data.kind, "docx")
         self.assertEqual(parsed[0].data.view, "inline")
 
+    def test_parse_table_block_with_summary(self):
+        blocks = [
+            {
+                "type": "table",
+                "data": {
+                    "kind": "xlsx",
+                    "src": "/files/t1/original",
+                    "summary": "/files/t1/excel/summary.json",
+                    "view": "cover",
+                    "activeSheet": "Sheet1",
+                },
+            }
+        ]
+
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].type, "table")
+        self.assertEqual(parsed[0].data.summary, "/files/t1/excel/summary.json")
+
+    def test_table_block_requires_summary(self):
+        with self.assertRaises(ValidationError):
+            parse_blocks(
+                [
+                    {
+                        "type": "table",
+                        "data": {
+                            "kind": "csv",
+                            "src": "/files/t2/original",
+                        },
+                    }
+                ]
+            )
+
     def test_parse_invalid_block_type(self):
         blocks = [{"type": "unknown", "data": {}}]
         with self.assertRaises(ValidationError):

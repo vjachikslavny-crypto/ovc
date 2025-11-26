@@ -37,6 +37,20 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding path_slides_dir column: {e}")
 
+        if 'path_excel_summary' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_excel_summary VARCHAR"))
+                print("Added path_excel_summary column to files table")
+            except Exception as e:
+                print(f"Error adding path_excel_summary column: {e}")
+
+        if 'excel_default_sheet' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN excel_default_sheet VARCHAR"))
+                print("Added excel_default_sheet column to files table")
+            except Exception as e:
+                print(f"Error adding excel_default_sheet column: {e}")
+
         # Проверяем, существует ли колонка duration (для аудио)
         if 'duration' not in columns:
             try:
@@ -58,6 +72,36 @@ def upgrade() -> None:
                 print("Added slides_count column to files table")
             except Exception as e:
                 print(f"Error adding slides_count column: {e}")
+
+        # OVC: excel - добавляем поля для диаграмм Excel
+        if 'path_excel_charts_json' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_excel_charts_json VARCHAR"))
+                print("Added path_excel_charts_json column to files table")
+            except Exception as e:
+                print(f"Error adding path_excel_charts_json column: {e}")
+
+        if 'path_excel_charts_dir' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_excel_charts_dir VARCHAR"))
+                print("Added path_excel_charts_dir column to files table")
+            except Exception as e:
+                print(f"Error adding path_excel_charts_dir column: {e}")
+
+        # OVC: excel - добавляем поля для структурного обнаружения диаграмм и ручного выбора страниц
+        if 'path_excel_chart_sheets_json' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_excel_chart_sheets_json VARCHAR"))
+                print("Added path_excel_chart_sheets_json column to files table")
+            except Exception as e:
+                print(f"Error adding path_excel_chart_sheets_json column: {e}")
+
+        if 'excel_charts_pages_keep' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN excel_charts_pages_keep TEXT"))
+                print("Added excel_charts_pages_keep column to files table")
+            except Exception as e:
+                print(f"Error adding excel_charts_pages_keep column: {e}")
 
         # Если таблицы не существует, создаем все таблицы
         try:

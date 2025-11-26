@@ -5,9 +5,10 @@ from typing import Any, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, parse_obj_as
 
 try:
-    from pydantic import TypeAdapter
+    from pydantic import TypeAdapter, ConfigDict
 except ImportError:  # Pydantic v1
     TypeAdapter = None
+    ConfigDict = None
 
 
 class Annotations(BaseModel):
@@ -175,16 +176,20 @@ class LinkData(BaseModel):
 
 
 class TableData(BaseModel):
-    rows: Optional[List[List[str]]] = None
-    kind: Optional[Literal["xlsx", "xls", "csv"]] = None
-    src: Optional[str] = None
-    summary: Optional[str] = None
+    kind: Literal["xlsx", "xls", "csv"]
+    src: str
+    summary: str
     view: Literal["cover", "inline"] = "cover"
     active_sheet: Optional[str] = Field(default=None, alias="activeSheet")
+    charts: Optional[str] = None  # OVC: excel - URL к JSON с метаданными диаграмм
+    rows: Optional[List[List[str]]] = None  # legacy inline payload
 
-    class Config:
-        extra = "forbid"
-        allow_population_by_field_name = True
+    if ConfigDict is not None:  # Pydantic v2
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:  # Pydantic v1
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
 
 
 class SourceData(BaseModel):
@@ -354,7 +359,8 @@ BlockModel = Union[
 
 def dump_block(block: BlockModel) -> dict:
     """Return JSON-serializable dict for a typed block."""
-    return block.dict(exclude_none=True)
+    # OVC: table - используем by_alias=True для правильной сериализации полей с alias
+    return block.dict(exclude_none=True, by_alias=True)
 
 
 def dump_blocks(blocks: List[BlockModel]) -> List[dict]:

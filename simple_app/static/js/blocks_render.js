@@ -160,7 +160,11 @@ function renderQuote(data) {
   return markEditable(figure);
 }
 
-function renderTable(data) {
+function renderTable(data = {}) {
+  if (data.kind && data.summary) {
+    return renderExcelTable(data);
+  }
+
   const table = document.createElement('table');
   table.className = 'note-block note-block--table ovc-block';
   table.setAttribute('data-block-role', 'table');
@@ -182,6 +186,170 @@ function renderTable(data) {
   });
 
   return table;
+}
+
+const TABLE_KIND_LABELS = {
+  xlsx: 'Excel (.xlsx)',
+  xls: 'Excel (.xls)',
+  csv: 'CSV',
+};
+
+function renderExcelTable(data) {
+  const wrapper = document.createElement('section');
+  wrapper.className = 'note-block table-block table-block--excel';
+  const view = data.view || 'cover';
+  wrapper.dataset.view = view;
+  if (data.kind) wrapper.dataset.kind = data.kind;
+  if (data.summary) wrapper.dataset.summaryUrl = data.summary;
+  if (data.src) wrapper.dataset.src = data.src;
+  const activeSheet = data.activeSheet || data.active_sheet;
+  if (activeSheet) wrapper.dataset.activeSheet = activeSheet;
+  const fileIdMatch = data.src?.match(/\/files\/([^/]+)/);
+  if (fileIdMatch) wrapper.dataset.fileId = fileIdMatch[1];
+  // OVC: excel - диаграммы отключены, фокус на предпросмотре таблиц
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'table-toolbar';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'pill-button';
+  toggleBtn.dataset.action = 'toggle-view';
+  toggleBtn.textContent = view === 'inline' ? 'Свернуть' : 'Просмотр';
+  toolbar.appendChild(toggleBtn);
+  const spacer = document.createElement('div');
+  spacer.className = 'spacer';
+  toolbar.appendChild(spacer);
+  if (data.src) {
+    const downloadOriginal = document.createElement('a');
+    downloadOriginal.className = 'pill-button pill-button--ghost';
+    downloadOriginal.href = data.src;
+    downloadOriginal.target = '_blank';
+    downloadOriginal.rel = 'noopener';
+    downloadOriginal.dataset.role = 'download-original';
+    downloadOriginal.textContent = 'Скачать файл';
+    toolbar.appendChild(downloadOriginal);
+  }
+  wrapper.appendChild(toolbar);
+
+  const cover = document.createElement('div');
+  cover.className = 'table-cover';
+  cover.dataset.role = 'cover';
+  if (view === 'inline') cover.hidden = true;
+
+  const coverIcon = document.createElement('div');
+  coverIcon.className = 'table-cover-icon';
+  coverIcon.textContent = data.kind === 'csv' ? '🧾' : '📊';
+  cover.appendChild(coverIcon);
+
+  const coverBody = document.createElement('div');
+  coverBody.className = 'table-cover-body';
+
+  const kindLabel = document.createElement('p');
+  kindLabel.className = 'table-cover-kind';
+  kindLabel.textContent = TABLE_KIND_LABELS[data.kind] || 'Таблица';
+  coverBody.appendChild(kindLabel);
+
+  const info = document.createElement('p');
+  info.className = 'table-cover-info';
+  info.dataset.role = 'cover-info';
+  info.textContent = 'Загружаем метаданные…';
+  coverBody.appendChild(info);
+
+  const preview = document.createElement('div');
+  preview.className = 'table-cover-preview';
+  preview.dataset.role = 'preview-table';
+  coverBody.appendChild(preview);
+
+  cover.appendChild(coverBody);
+  wrapper.appendChild(cover);
+
+  const inline = document.createElement('div');
+  inline.className = 'table-inline';
+  inline.dataset.role = 'inline';
+  if (view !== 'inline') inline.hidden = true;
+
+  const inlineToolbar = document.createElement('div');
+  inlineToolbar.className = 'table-inline-toolbar';
+
+  // Кнопки переключения листов
+  const sheetNav = document.createElement('div');
+  sheetNav.className = 'table-sheet-nav';
+  const prevSheetBtn = document.createElement('button');
+  prevSheetBtn.type = 'button';
+  prevSheetBtn.className = 'pill-button pill-button--ghost';
+  prevSheetBtn.dataset.action = 'prev-sheet';
+  prevSheetBtn.textContent = '◀';
+  prevSheetBtn.setAttribute('aria-label', 'Предыдущий лист');
+  prevSheetBtn.disabled = true;
+  sheetNav.appendChild(prevSheetBtn);
+
+  const sheetSelect = document.createElement('select');
+  sheetSelect.dataset.role = 'sheet-select';
+  sheetSelect.disabled = true;
+  sheetSelect.setAttribute('aria-label', 'Выбор листа');
+  const loadingOption = document.createElement('option');
+  loadingOption.textContent = 'Загрузка…';
+  sheetSelect.appendChild(loadingOption);
+  sheetNav.appendChild(sheetSelect);
+
+  const nextSheetBtn = document.createElement('button');
+  nextSheetBtn.type = 'button';
+  nextSheetBtn.className = 'pill-button pill-button--ghost';
+  nextSheetBtn.dataset.action = 'next-sheet';
+  nextSheetBtn.textContent = '▶';
+  nextSheetBtn.setAttribute('aria-label', 'Следующий лист');
+  nextSheetBtn.disabled = true;
+  sheetNav.appendChild(nextSheetBtn);
+
+  inlineToolbar.appendChild(sheetNav);
+  // OVC: excel - поиск по окну убран (работал только для загруженных 200 строк, путал пользователей)
+
+  // OVC: excel - кнопка переноса убрана
+
+  const downloadSheet = document.createElement('a');
+  downloadSheet.className = 'pill-button pill-button--ghost';
+  downloadSheet.dataset.role = 'download-sheet';
+  downloadSheet.href = '#';
+  downloadSheet.download = '';  // Подсказка браузеру, что это скачивание
+  downloadSheet.textContent = 'Скачать CSV';
+  inlineToolbar.appendChild(downloadSheet);
+
+  inline.appendChild(inlineToolbar);
+
+  const inlineBody = document.createElement('div');
+  inlineBody.className = 'table-inline-body';
+  const tableScroll = document.createElement('div');
+  tableScroll.className = 'table-scroll';
+  const dataTable = document.createElement('table');
+  dataTable.className = 'data-grid';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  headRow.dataset.role = 'columns';
+  thead.appendChild(headRow);
+  const tbody = document.createElement('tbody');
+  tbody.dataset.role = 'rows';
+  dataTable.appendChild(thead);
+  dataTable.appendChild(tbody);
+  tableScroll.appendChild(dataTable);
+  inlineBody.appendChild(tableScroll);
+
+  const emptyState = document.createElement('div');
+  emptyState.className = 'table-empty';
+  emptyState.dataset.role = 'empty-state';
+  emptyState.hidden = true;
+  const emptyText = document.createElement('p');
+  emptyText.textContent = 'Нет данных для отображения';
+  emptyState.appendChild(emptyText);
+  inlineBody.appendChild(emptyState);
+
+  inline.appendChild(inlineBody);
+
+  // OVC: excel - footer с пагинацией полностью убран (не нужен для большинства файлов)
+
+  // OVC: excel - диаграммы отключены, фокус на предпросмотре таблиц
+
+  wrapper.appendChild(inline);
+  return wrapper;
 }
 
 function renderImage(data) {

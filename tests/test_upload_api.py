@@ -87,6 +87,10 @@ def make_simple_rtf() -> bytes:
     return b"{\\rtf1\\ansi Hello RTF!}"
 
 
+def make_csv() -> bytes:
+    return b"col1,col2\n1,alpha\n2,beta\n3,gamma\n"
+
+
 def make_wav(duration: float = 0.4) -> bytes:
     buffer = io.BytesIO()
     sample_rate = 16000
@@ -198,6 +202,41 @@ class UploadApiTests(unittest.TestCase):
         html_response = client.get(f"/files/{file_id}/doc.html")
         self.assertEqual(html_response.status_code, 200)
         self.assertIn("Hello RTF", html_response.text)
+
+    def test_upload_csv_provides_table_summary_and_window(self):
+        csv_bytes = make_csv()
+        response = client.post(
+            "/api/upload",
+            files={"files": ("data.csv", csv_bytes, "text/csv")},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        block = payload["blocks"][0]
+        self.assertEqual(block["type"], "table")
+        self.assertEqual(block["data"]["kind"], "csv")
+        summary_url = block["data"]["summary"]
+        self.assertTrue(summary_url.startswith("/files/"))
+        file_id = payload["files"][0]["id"]
+
+        summary_response = client.get(summary_url)
+        self.assertEqual(summary_response.status_code, 200)
+        summary = summary_response.json()
+        self.assertIn("sheets", summary)
+        self.assertGreaterEqual(len(summary["sheets"]), 1)
+        sheet_name = summary["sheets"][0]["name"]
+
+        window = client.get(f"/files/{file_id}/excel/sheet/{sheet_name}.json?offset=0&limit=2")
+        self.assertEqual(window.status_code, 200)
+        window_json = window.json()
+        self.assertEqual(window_json["offset"], 0)
+        self.assertEqual(window_json["limit"], 2)
+        self.assertEqual(window_json["columns"], ["col1", "col2"])
+        self.assertEqual(len(window_json["rows"]), 2)
+        self.assertEqual(window_json["rows"][0], ["1", "alpha"])
+
+        download = client.get(f"/files/{file_id}/excel/sheet/{sheet_name}.csv")
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.headers["content-type"], "text/csv")
 
 
 if __name__ == "__main__":

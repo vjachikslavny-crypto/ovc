@@ -8,7 +8,14 @@ from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingRes
 
 from app.db.models import FileAsset
 from app.db.session import get_session
-from app.services.files import PAGES_DIR, _render_pdf_page
+from app.services.files import (
+    EXCEL_WINDOW_LIMIT,
+    PAGES_DIR,
+    _iter_sheet_csv,
+    _load_excel_summary,
+    _read_excel_window,
+    _render_pdf_page,
+)
 
 router = APIRouter(tags=["files"])
 
@@ -80,6 +87,193 @@ def slide_image(file_id: str, slide_index: int):
     if not slide_path.exists():
         raise HTTPException(status_code=404, detail="Slide not found")
     return FileResponse(slide_path, media_type="image/webp")
+
+
+@router.get("/files/{file_id}/excel/summary.json")
+def excel_summary(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls", "csv"}:
+        raise HTTPException(status_code=400, detail="File is not a table")
+    summary = _load_excel_summary(asset)
+    return JSONResponse(summary)
+
+
+@router.get("/files/{file_id}/excel/sheet/{sheet_name}.json")
+def excel_window(
+    file_id: str,
+    sheet_name: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=EXCEL_WINDOW_LIMIT),
+):
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls", "csv"}:
+        raise HTTPException(status_code=400, detail="File is not a table")
+    window = _read_excel_window(asset, sheet_name, offset, limit)
+    return JSONResponse(window)
+
+
+@router.get("/files/{file_id}/excel/sheet/{sheet_name}.csv")
+def excel_sheet_csv(file_id: str, sheet_name: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls", "csv"}:
+        raise HTTPException(status_code=400, detail="File is not a table")
+    return _iter_sheet_csv(asset, sheet_name)
+
+
+@router.get("/files/{file_id}/excel/charts.json")
+def excel_charts_meta(file_id: str):
+    """Возвращает метаданные диаграмм Excel (аналогично slides.json для PPTX).
+    
+    Если есть excel_charts_pages_keep (ручной выбор страниц), возвращает только выбранные страницы.
+    Иначе возвращает автоматически выбранные страницы.
+    """
+    from app.services.files import _excel_charts_json_path, _excel_chart_sheets_json_path
+    
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls"}:
+        raise HTTPException(status_code=400, detail="File is not an Excel file")
+    
+    # Загружаем базовые метаданные
+    charts_json_path = Path(asset.path_excel_charts_json) if asset.path_excel_charts_json else None
+    if not charts_json_path or not charts_json_path.exists():
+        # Проверяем потенциальный путь
+        potential_path = _excel_charts_json_path(file_id)
+        if potential_path.exists():
+            charts_json_path = potential_path
+        else:
+            raise HTTPException(status_code=404, detail="Charts metadata not available")
+    
+    with charts_json_path.open('r', encoding='utf-8') as f:
+        meta = json.load(f)
+    
+    # Если есть ручной выбор страниц, фильтруем только выбранные
+    if asset.excel_charts_pages_keep:
+        try:
+            pages_keep = json.loads(asset.excel_charts_pages_keep)
+            if isinstance(pages_keep, list) and pages_keep:
+                # Фильтруем charts, оставляя только те, чья страница в списке выбранных
+                original_charts = meta.get("charts", [])
+                filtered_charts = [
+                    chart for chart in original_charts
+                    if chart.get("page") in pages_keep
+                ]
+                meta["charts"] = filtered_charts
+                meta["count"] = len(filtered_charts)
+                meta["mode"] = "manual"
+                meta["pages"] = sorted(pages_keep)
+        except Exception as e:
+            # Если ошибка парсинга - используем автоматический выбор
+            pass
+    
+    return JSONResponse(meta)
+
+
+@router.get("/files/{file_id}/excel/charts/sheets.json")
+def excel_charts_sheets_meta(file_id: str):
+    """Возвращает информацию о листах, содержащих диаграммы (структурное обнаружение)."""
+    from app.services.files import _excel_chart_sheets_json_path
+    
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls"}:
+        raise HTTPException(status_code=400, detail="File is not an Excel file")
+    
+    # Проверяем путь из БД
+    sheets_json_path = Path(asset.path_excel_chart_sheets_json) if asset.path_excel_chart_sheets_json else None
+    if not sheets_json_path or not sheets_json_path.exists():
+        # Проверяем потенциальный путь
+        potential_path = _excel_chart_sheets_json_path(file_id)
+        if potential_path.exists():
+            sheets_json_path = potential_path
+        else:
+            # Возвращаем пустой результат
+            return JSONResponse({"hasCharts": False, "sheets": []})
+    
+    with sheets_json_path.open('r', encoding='utf-8') as f:
+        return JSONResponse(json.load(f))
+
+
+@router.get("/files/{file_id}/excel/charts-anchors.json")
+def excel_charts_anchors_meta(file_id: str):
+    """Возвращает якоря диаграмм (DrawingML anchors) для точного вырезания."""
+    from app.services.files import _excel_chart_anchors_json_path
+    
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls"}:
+        raise HTTPException(status_code=400, detail="File is not an Excel file")
+    
+    # Проверяем потенциальный путь (не храним в БД, используем конвенцию)
+    anchors_json_path = _excel_chart_anchors_json_path(file_id)
+    if not anchors_json_path.exists():
+        # Возвращаем пустой результат
+        return JSONResponse({"sheets": []})
+    
+    with anchors_json_path.open('r', encoding='utf-8') as f:
+        return JSONResponse(json.load(f))
+
+
+@router.post("/files/{file_id}/excel/charts/pages")
+async def save_excel_charts_pages(file_id: str, request: Request):
+    """Сохраняет ручной выбор страниц диаграмм пользователем."""
+    from app.db.session import get_session
+    from app.db.models import FileAsset
+    
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls"}:
+        raise HTTPException(status_code=400, detail="File is not an Excel file")
+    
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or "keep" not in body:
+            raise HTTPException(status_code=400, detail="Expected JSON body with 'keep' array")
+        
+        pages_keep = body["keep"]
+        if not isinstance(pages_keep, list):
+            raise HTTPException(status_code=400, detail="'keep' must be an array")
+        
+        # Валидируем, что все страницы - целые числа
+        try:
+            pages_keep = [int(p) for p in pages_keep]
+            pages_keep = sorted(set(pages_keep))  # Убираем дубликаты и сортируем
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="All page numbers must be integers")
+        
+        # Сохраняем в БД
+        with get_session() as session:
+            db_asset = session.get(FileAsset, file_id)
+            if not db_asset:
+                raise HTTPException(status_code=404, detail="File not found")
+            
+            db_asset.excel_charts_pages_keep = json.dumps(pages_keep)
+            session.commit()
+        
+        return JSONResponse({"success": True, "pages": pages_keep})
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error saving chart pages selection for {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/files/{file_id}/excel/chart/{chart_index}")
+def excel_chart_image(file_id: str, chart_index: int):
+    """Возвращает изображение диаграммы Excel по индексу (аналогично slide/{index} для PPTX)."""
+    asset = _fetch_asset(file_id)
+    if asset.kind not in {"xlsx", "xls"}:
+        raise HTTPException(status_code=400, detail="File is not an Excel file")
+    if not asset.path_excel_charts_dir:
+        raise HTTPException(status_code=404, detail="Charts directory not available")
+    charts_dir = Path(asset.path_excel_charts_dir)
+    if not charts_dir.exists():
+        raise HTTPException(status_code=404, detail="Charts directory is missing on disk")
+    if chart_index < 1:
+        raise HTTPException(status_code=400, detail="Invalid chart index")
+    chart_path = charts_dir / f"{chart_index}.webp"
+    if not chart_path.exists():
+        raise HTTPException(status_code=404, detail=f"Chart {chart_index} not found")
+    return FileResponse(chart_path, media_type="image/webp", filename=f"chart_{chart_index}.webp")
 
 
 @router.get("/files/{file_id}/waveform")

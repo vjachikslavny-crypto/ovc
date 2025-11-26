@@ -352,6 +352,7 @@ BLOCK_SCHEMA: dict = {
                                             "enum": ["cover", "inline"],
                                         },
                                         "activeSheet": {"type": ["string", "null"]},
+                                        "charts": {"type": ["string", "null"]},  # OVC: excel - URL к JSON с метаданными диаграмм
                                     },
                                     "required": ["kind", "src", "summary"],
                                     "additionalProperties": False,

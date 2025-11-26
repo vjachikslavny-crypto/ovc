@@ -149,6 +149,12 @@ class FileAsset(Base):
     path_waveform = Column(String, nullable=True)
     path_slides_json = Column(String, nullable=True)
     path_slides_dir = Column(String, nullable=True)
+    path_excel_summary = Column(String, nullable=True)
+    path_excel_charts_json = Column(String, nullable=True)
+    path_excel_charts_dir = Column(String, nullable=True)
+    path_excel_chart_sheets_json = Column(String, nullable=True)  # OVC: excel - структурная информация о листах с диаграммами
+    excel_charts_pages_keep = Column(Text, nullable=True)  # OVC: excel - JSON массив выбранных страниц пользователем
+    excel_default_sheet = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)

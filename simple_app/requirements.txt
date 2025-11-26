@@ -13,3 +13,7 @@ mammoth
 striprtf
 bleach
 mutagen
+pandas
+openpyxl
+xlrd==1.2.0
+httpx

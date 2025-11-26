@@ -12,6 +12,7 @@ import { initAudioPlayers } from './audio_player.js';
 import { initAudioRecorder } from './audio_recorder.js';
 import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмотр DOCX/RTF
 import { initSlidesViewers } from './slides_viewer.js';
+import { initTableViewers } from './table_viewer.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -206,8 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Обычная логика для других блоков
         const focusedBlockEl = activeElement.closest('[data-block-id]');
         if (focusedBlockEl) {
-          // OVC: pdf - не сохраняем фокус для PDF блоков, чтобы не вызывать прокрутку при восстановлении
-          if (focusedBlockEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
+          // OVC: files - не сохраняем фокус для файловых блоков, чтобы не вызывать прокрутку при восстановлении
+          if (focusedBlockEl.closest('.audio-block, .doc-block--pdf, .doc-block--word, .slides-block, .table-block, .note-block--image')) {
             // Не сохраняем фокус для PDF блоков
           } else {
             const editable = getEditableElement(focusedBlockEl) || focusedBlockEl;
@@ -305,6 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
       block.dataset.slidesReady = 'false';
     });
     initSlidesViewers(canvas, handleBlockUpdate);
+    initTableViewers(canvas, handleBlockUpdate);
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
     // Не сбрасываем флаг tableHydrated, чтобы не терять фокус
@@ -356,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (pendingEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (pendingEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
+        if (pendingEl.closest('.audio-block, .doc-block--pdf, .doc-block--word, .slides-block, .table-block, .note-block--image')) {
           pendingCaretBlockId = null;
           return;
         }
@@ -371,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       if (targetBlockEl) {
         // OVC: pdf - не восстанавливаем фокус для PDF блоков, чтобы не вызывать прокрутку
-        if (targetBlockEl.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
+        if (targetBlockEl.closest('.audio-block, .doc-block--pdf, .doc-block--word, .slides-block, .table-block, .note-block--image')) {
           return;
         }
         const editable = getEditableElement(targetBlockEl) || targetBlockEl;
@@ -1197,7 +1199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   }
 
-  // OVC: pdf - обновление блока (например, изменение view)
+  // OVC: pdf/table - обновление блока (например, изменение view)
   function handleBlockUpdate(blockId, updates) {
     const block = noteState.blocks.find((item) => item.id === blockId);
     if (!block) {
@@ -1206,16 +1208,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Обновляем данные блока
-    if (updates.view !== undefined && (block.type === 'doc' || block.type === 'audio' || block.type === 'slides')) {
-      console.log('handleBlockUpdate: updating view', { 
-        blockId, 
-        oldView: block.data.view, 
+    const isMediaBlock =
+      block.type === 'doc' ||
+      block.type === 'audio' ||
+      block.type === 'slides' ||
+      (block.type === 'table' && block.data?.kind);
+
+    if (updates.view !== undefined && isMediaBlock) {
+      console.log('handleBlockUpdate: updating view', {
+        blockId,
+        oldView: block.data.view,
         newView: updates.view,
         blockType: block.type,
         blockData: block.data
       });
       block.data = { ...block.data, view: updates.view };
-      
+
       // OVC: pdf - обновляем dataset в DOM, чтобы при следующем render() использовалось правильное значение
       const blockEl = canvas.querySelector(`[data-block-id="${blockId}"]`);
       if (blockEl && blockEl.dataset.view !== updates.view) {
@@ -1226,6 +1234,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (updates.duration !== undefined && block.type === 'audio') {
       block.data = { ...block.data, duration: updates.duration };
+    }
+
+    if (updates.activeSheet !== undefined && block.type === 'table' && block.data?.kind) {
+      block.data = { ...block.data, activeSheet: updates.activeSheet };
+      const blockEl = canvas.querySelector(`[data-block-id="${blockId}"]`);
+      if (blockEl) {
+        blockEl.dataset.activeSheet = updates.activeSheet || '';
+      }
     }
 
     // Сохраняем изменения (но НЕ перерисовываем, чтобы не потерять состояние PDF viewer)
@@ -1397,10 +1413,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Игнорируем клики по кнопкам и их дочерним элементам
     if (event.target.closest('.floating-actions')) return;
     if (event.target.closest('[data-block-id]')) return;
-    // OVC: audio - игнорируем клики по аудио блокам и их элементам управления
-    if (event.target.closest('.audio-block')) return;
-    // OVC: pdf - игнорируем клики по PDF блокам и их содержимому (изображения, контейнеры страниц)
-    if (event.target.closest('.doc-block--pdf, .doc-block--word, .slides-block')) return;
+    // OVC: files - игнорируем клики по файловым блокам
+    if (event.target.closest('.audio-block, .doc-block--pdf, .doc-block--word, .slides-block, .table-block, .note-block--image')) return;
     if (event.target.closest('.pdf-pages')) return;
     if (event.target.closest('.pdf-page')) return;
     if (event.target.closest('.pdf-page img')) return;
@@ -1411,7 +1425,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lastBlock = canvas.querySelector('[data-block-id]:last-of-type');
     if (lastBlock) {
       // OVC: pdf - не фокусируем, если последний блок - это PDF блок
-      if (lastBlock.closest('.doc-block--pdf, .doc-block--word, .slides-block')) {
+      if (lastBlock.closest('.audio-block, .doc-block--pdf, .doc-block--word, .slides-block, .table-block, .note-block--image')) {
         return; // Не фокусируем PDF блоки
       }
       const editable = getEditableElement(lastBlock) || lastBlock;
@@ -1487,7 +1501,7 @@ document.addEventListener('DOMContentLoaded', () => {
       shell.dataset.actionsBound = 'true';
       return shell;
     }
-
+    
     const actions = document.createElement('div');
     actions.className = 'block-actions';
     const buttons = [
@@ -1547,68 +1561,67 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Функция для управления видимостью кнопок при выделении блока
   function setupBlockSelectionHandlers(shell, blockEl) {
-    if (!shell || !blockEl) return;
+    // Пустая функция - вся логика теперь в initGlobalBlockHandlers
+  }
+  
+  // Глобальный обработчик для выделения блоков - добавляется один раз на canvas
+  let globalBlockHandlersAdded = false;
+  function initGlobalBlockHandlers() {
+    if (globalBlockHandlersAdded || !canvas) return;
+    globalBlockHandlersAdded = true;
     
-    // Проверяем, не настроены ли уже обработчики
-    if (shell.dataset.selectionHandlersBound === 'true') return;
-    shell.dataset.selectionHandlersBound = 'true';
-    
-    // Функция для показа кнопок
-    const showActions = () => {
+    // Функция выделения блока
+    function selectBlock(shell) {
+      if (!shell) return;
+      // Снимаем выделение со всех других блоков
+      canvas.querySelectorAll('.note-block-shell.selected').forEach(s => {
+        if (s !== shell) {
+          s.classList.remove('selected');
+          s.dataset.selected = 'false';
+        }
+      });
+      // Выделяем текущий блок
       shell.classList.add('selected');
       shell.dataset.selected = 'true';
-    };
-    
-    // Функция для скрытия кнопок
-    const hideActions = () => {
-      // Не скрываем, если кнопки или блок в фокусе
-      const actions = shell.querySelector('.block-actions');
-      const editableEl = getEditableElement(blockEl) || blockEl;
-      
-      if (actions && actions.contains(document.activeElement)) {
-        return; // Кнопки в фокусе - не скрываем
-      }
-      
-      if (editableEl && (editableEl === document.activeElement || editableEl.contains(document.activeElement))) {
-        return; // Блок в фокусе - не скрываем
-      }
-      
-      shell.classList.remove('selected');
-      shell.dataset.selected = 'false';
-    };
-    
-    // Показываем кнопки при фокусе на блоке
-    const editableEl = getEditableElement(blockEl) || blockEl;
-    if (editableEl) {
-      // Используем capture phase, чтобы перехватить событие до других обработчиков
-      editableEl.addEventListener('focus', showActions, { capture: true, passive: true });
-      
-      editableEl.addEventListener('blur', () => {
-        // Даем небольшую задержку, чтобы проверить, куда перешел фокус
-        setTimeout(hideActions, 150);
-      }, { capture: true, passive: true });
     }
     
-    // Показываем кнопки при клике на блок
-    shell.addEventListener('click', (event) => {
-      // Если клик не на кнопках, показываем их
-      if (!event.target.closest('.block-actions')) {
-        showActions();
-      }
-    }, { passive: true });
-    
-    // Держим кнопки видимыми при фокусе на них
-    const actions = shell.querySelector('.block-actions');
-    if (actions) {
-      actions.addEventListener('focusin', showActions, { passive: true });
-      
-      actions.addEventListener('focusout', () => {
-        setTimeout(hideActions, 150);
-      }, { passive: true });
+    // Функция снятия выделения со всех блоков
+    function deselectAllBlocks() {
+      canvas.querySelectorAll('.note-block-shell.selected').forEach(s => {
+        s.classList.remove('selected');
+        s.dataset.selected = 'false';
+      });
     }
     
-    // Обработчик клика вне блока будет добавлен один раз для всех блоков
-    // См. initBlockSelectionHandlers ниже
+    // Обработчик на canvas - делегирование событий
+    canvas.addEventListener('mousedown', (event) => {
+      const shell = event.target.closest('.note-block-shell');
+      if (shell && !event.target.closest('.block-actions')) {
+        selectBlock(shell);
+      }
+    }, { capture: true });
+    
+    canvas.addEventListener('click', (event) => {
+      const shell = event.target.closest('.note-block-shell');
+      if (shell && !event.target.closest('.block-actions')) {
+        selectBlock(shell);
+      }
+    }, { capture: true });
+    
+    // Обработчик фокуса для текстовых блоков
+    canvas.addEventListener('focusin', (event) => {
+      const shell = event.target.closest('.note-block-shell');
+      if (shell) {
+        selectBlock(shell);
+      }
+    }, { capture: true });
+    
+    // Снимаем выделение при клике вне canvas
+    document.addEventListener('mousedown', (event) => {
+      if (!canvas.contains(event.target)) {
+        deselectAllBlocks();
+      }
+    });
   }
 
   function setupDragAndDrop(shell, blockId) {
@@ -1706,33 +1719,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  
-  // Инициализация глобального обработчика для скрытия кнопок при клике вне блоков
-  let blockSelectionHandlerInitialized = false;
-  
-  function initBlockSelectionHandlers() {
-    if (blockSelectionHandlerInitialized) return;
-    blockSelectionHandlerInitialized = true;
-    
-    // Один обработчик на document для всех блоков
-    document.addEventListener('click', (event) => {
-      // OVC: pdf - игнорируем клики по PDF блокам и их содержимому, чтобы не сбрасывать состояние
-      if (event.target.closest('.doc-block--pdf, .doc-block--word, .slides-block')) return;
-      if (event.target.closest('.pdf-pages')) return;
-      if (event.target.closest('.pdf-page')) return;
-      if (event.target.closest('.pdf-page img')) return;
-      
-      // Находим все обертки с кнопками
-      const allShells = document.querySelectorAll('.note-block-shell[data-selected="true"]');
-      allShells.forEach((shell) => {
-        // Если клик не внутри этого блока, скрываем кнопки
-        if (!shell.contains(event.target)) {
-          shell.classList.remove('selected');
-          shell.dataset.selected = 'false';
-        }
-      });
-    }, { capture: true, passive: true });
-  }
 
   function handleBlockAction(blockId, action) {
     if (!blockId) return;
@@ -2206,8 +2192,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- INIT ----
   
-  // Инициализируем глобальные обработчики для управления кнопками блоков
-  initBlockSelectionHandlers();
+  // Инициализируем глобальные обработчики для выделения блоков
+  initGlobalBlockHandlers();
 
   loadNote().catch((error) =>
     console.error('Unable to load note', error),
