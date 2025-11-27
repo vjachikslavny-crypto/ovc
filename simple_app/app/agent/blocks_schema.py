@@ -294,12 +294,18 @@ BLOCK_SCHEMA: dict = {
                         "data": {
                             "type": "object",
                             "properties": {
-                                "language": {"type": ["string", "null"]},
                                 "src": {"type": "string"},
-                                "lines": {"type": ["integer", "null"]},
-                                "sha256": {"type": ["string", "null"]},
+                                "previewUrl": {"type": ["string", "null"]},
+                                "filename": {"type": "string"},
+                                "language": {"type": "string"},
+                                "sizeBytes": {"type": ["integer", "null"]},
+                                "lineCount": {"type": ["integer", "null"]},
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["inline", "cover", "compact"],
+                                },
                             },
-                            "required": ["src"],
+                            "required": ["src", "filename", "language"],
                             "additionalProperties": False,
                         },
                     }

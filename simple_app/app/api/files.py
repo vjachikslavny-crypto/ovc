@@ -11,6 +11,12 @@ from app.db.session import get_session
 from app.services.files import (
     EXCEL_WINDOW_LIMIT,
     PAGES_DIR,
+    MAX_CODE_LINES,
+    CODE_PREVIEW_LINES,
+    count_file_lines,
+    read_code_segment,
+    prepare_code_bytes,
+    _get_code_file_path,
     _iter_sheet_csv,
     _load_excel_summary,
     _read_excel_window,
@@ -110,6 +116,65 @@ def video_poster(file_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Poster file is missing on disk")
     return FileResponse(path, media_type="image/webp")
+
+
+@router.get("/files/{file_id}/code/meta")
+def code_meta(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "code":
+        raise HTTPException(status_code=400, detail="File is not code")
+    language = asset.code_language or "plaintext"
+    line_count = asset.code_line_count
+    if line_count is None:
+        path = _get_code_file_path(asset)
+        line_count = count_file_lines(path)
+        with get_session() as session:
+            db_asset = session.get(FileAsset, asset.id)
+            if db_asset:
+                db_asset.code_line_count = line_count
+                if not db_asset.code_language:
+                    db_asset.code_language = language
+                session.commit()
+    return {
+        "filename": asset.filename,
+        "language": language,
+        "sizeBytes": asset.size,
+        "lineCount": line_count,
+    }
+
+
+@router.get("/files/{file_id}/code/preview")
+def code_preview(file_id: str, max_lines: int = Query(CODE_PREVIEW_LINES, ge=1, le=MAX_CODE_LINES)):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "code":
+        raise HTTPException(status_code=400, detail="File is not code")
+    requested = max(1, min(max_lines, MAX_CODE_LINES))
+    text, truncated = read_code_segment(asset, 0, requested)
+    body, extra_headers = prepare_code_bytes(text, asset)
+    headers = {"Content-Type": "text/plain; charset=utf-8"}
+    if truncated:
+        headers["X-OVC-Code-Truncated"] = "true"
+    headers.update(extra_headers)
+    return Response(content=body, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.get("/files/{file_id}/code/raw")
+def code_raw(
+    file_id: str,
+    start: int = Query(0, ge=0),
+    max_lines: int = Query(MAX_CODE_LINES, ge=1),
+):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "code":
+        raise HTTPException(status_code=400, detail="File is not code")
+    requested = max(1, min(max_lines, MAX_CODE_LINES))
+    text, truncated = read_code_segment(asset, start, requested)
+    body, extra_headers = prepare_code_bytes(text, asset)
+    headers = {"Content-Type": "text/plain; charset=utf-8"}
+    if truncated:
+        headers["X-OVC-Code-Truncated"] = "true"
+    headers.update(extra_headers)
+    return Response(content=body, media_type="text/plain; charset=utf-8", headers=headers)
 
 
 @router.get("/files/{file_id}/excel/summary.json")

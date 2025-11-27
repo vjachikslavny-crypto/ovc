@@ -145,6 +145,27 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding video_mime column: {e}")
 
+        if 'path_code_original' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_code_original VARCHAR"))
+                print("Added path_code_original column to files table")
+            except Exception as e:
+                print(f"Error adding path_code_original column: {e}")
+
+        if 'code_language' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN code_language VARCHAR"))
+                print("Added code_language column to files table")
+            except Exception as e:
+                print(f"Error adding code_language column: {e}")
+
+        if 'code_line_count' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN code_line_count INTEGER"))
+                print("Added code_line_count column to files table")
+            except Exception as e:
+                print(f"Error adding code_line_count column: {e}")
+
         # Если таблицы не существует, создаем все таблицы
         try:
             Base.metadata.create_all(bind=conn)

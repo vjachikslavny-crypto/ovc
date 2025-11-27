@@ -147,13 +147,20 @@ class SlidesData(BaseModel):
 
 
 class CodeData(BaseModel):
-    language: Optional[str] = None
     src: str
-    lines: Optional[int] = Field(default=None, ge=0)
-    sha256: Optional[str] = None
+    preview_url: Optional[str] = Field(default=None, alias="previewUrl")
+    filename: str
+    language: str
+    size_bytes: Optional[int] = Field(default=None, alias="sizeBytes", ge=0)
+    line_count: Optional[int] = Field(default=None, alias="lineCount", ge=0)
+    view: Literal["inline", "cover", "compact"] = "inline"
 
-    class Config:
-        extra = "forbid"
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
 
 
 class ArchiveEntry(BaseModel):

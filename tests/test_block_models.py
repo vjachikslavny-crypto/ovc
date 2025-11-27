@@ -141,6 +141,26 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[0].type, "table")
         self.assertEqual(parsed[0].data.summary, "/files/t1/excel/summary.json")
 
+    def test_parse_code_block(self):
+        blocks = [
+            {
+                "type": "code",
+                "data": {
+                    "src": "/files/c1/code/raw",
+                    "previewUrl": "/files/c1/code/preview?maxLines=300",
+                    "filename": "demo.py",
+                    "language": "python",
+                    "sizeBytes": 120,
+                    "lineCount": 10,
+                    "view": "inline",
+                },
+            }
+        ]
+
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].type, "code")
+        self.assertEqual(parsed[0].data.language, "python")
+
     def test_table_block_requires_summary(self):
         with self.assertRaises(ValidationError):
             parse_blocks(
@@ -173,7 +193,12 @@ class NoteRequestValidationTests(unittest.TestCase):
                 },
                 {
                     "type": "code",
-                    "data": {"language": "python", "src": "/files/code.py"},
+                    "data": {
+                        "src": "/files/code/raw",
+                        "previewUrl": "/files/code/preview?maxLines=300",
+                        "filename": "demo.py",
+                        "language": "python",
+                    },
                 },
             ],
         )

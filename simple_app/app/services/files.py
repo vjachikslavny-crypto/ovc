@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import audioop
 import csv
+import gzip
 import hashlib
 import json
 import mimetypes
@@ -38,6 +39,8 @@ from app.agent.block_models import (
     VideoData,
     TableBlock,
     TableData,
+    CodeBlock,
+    CodeData,
     SlidesBlock,
     SlidesData,
     ImageBlock,
@@ -102,6 +105,7 @@ EXCEL_SUMMARY_DIR = UPLOAD_ROOT / "excel_summary"
 EXCEL_CHARTS_DIR = UPLOAD_ROOT / "excel_charts"  # OVC: excel - диаграммы
 EXCEL_CHARTS_META_DIR = UPLOAD_ROOT / "excel_charts_meta"  # OVC: excel - метаданные диаграмм
 VIDEO_DIR = UPLOAD_ROOT / "videos"
+CODE_DIR = UPLOAD_ROOT / "code"
 
 for directory in (
     ORIGINAL_DIR,
@@ -115,6 +119,7 @@ for directory in (
     EXCEL_CHARTS_DIR,
     EXCEL_CHARTS_META_DIR,
     VIDEO_DIR,
+    CODE_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -159,6 +164,44 @@ VIDEO_MIME_TYPES = {
     "video/x-msvideo",
 }
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".avi")
+CODE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".json",
+    ".md",
+    ".markdown",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".yml",
+    ".yaml",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".sql",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".java",
+    ".kt",
+    ".go",
+    ".rs",
+    ".php",
+    ".rb",
+    ".lua",
+    ".r",
+    ".tex",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".pl",
+    ".cs",
+}
 
 IMAGE_MAX_BYTES = 15 * 1024 * 1024
 PDF_MAX_BYTES = 50 * 1024 * 1024
@@ -171,7 +214,11 @@ EXCEL_MAX_BYTES = 40 * 1024 * 1024
 EXCEL_PREVIEW_ROWS = 5
 EXCEL_WINDOW_LIMIT = 1000
 EXCEL_CHARTS_TARGET_WIDTH = 1600
-VIDEO_MAX_BYTES = 500 * 1024 * 1024  # 500MB
+VIDEO_MAX_BYTES = 200 * 1024 * 1024
+MAX_CODE_LINES = 10_000
+CODE_PREVIEW_LINES = 300
+CODE_MAX_BYTES = 5 * 1024 * 1024
+CODE_GZIP_THRESHOLD = 10 * 1024 * 1024
 _FFMPEG_PATH = shutil.which("ffmpeg")
 _FFPROBE_PATH = shutil.which("ffprobe")
 
@@ -182,6 +229,58 @@ def ffmpeg_available() -> bool:
 
 def _ffprobe_available() -> bool:
     return _FFPROBE_PATH is not None
+
+
+CODE_LANGUAGE_MAP = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".jsx": "jsx",
+    ".json": "json",
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".html": "markup",
+    ".htm": "markup",
+    ".css": "css",
+    ".scss": "css",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+    ".sql": "sql",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".go": "go",
+    ".rs": "rust",
+    ".php": "php",
+    ".rb": "ruby",
+    ".lua": "lua",
+    ".r": "r",
+    ".tex": "latex",
+    ".toml": "toml",
+    ".ini": "ini",
+    ".cfg": "ini",
+    ".pl": "perl",
+    ".cs": "csharp",
+}
+
+
+def _detect_code_language(extension: str) -> str:
+    return CODE_LANGUAGE_MAP.get(extension.lower(), "plaintext")
+
+
+def count_file_lines(path: Path) -> int:
+    count = 0
+    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+        for _ in handle:
+            count += 1
+    return count
 
 ALLOWED_HTML_TAGS = [
     "p",
@@ -279,6 +378,11 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         video_mime = mime if mime in VIDEO_MIME_TYPES else "video/mp4"
         extension = _guess_extension(filename, video_mime) or ".mp4"
         return FileMetadata(kind="video", mime=video_mime, extension=extension, max_bytes=VIDEO_MAX_BYTES)
+    suffix = Path(filename or "").suffix.lower()
+    if suffix in CODE_EXTENSIONS:
+        code_mime = mime if mime.startswith("text/") else "text/plain"
+        extension = suffix or ".txt"
+        return FileMetadata(kind="code", mime=code_mime, extension=extension, max_bytes=CODE_MAX_BYTES)
 
     raise HTTPException(
         status_code=415,
@@ -329,6 +433,26 @@ def _video_source_url(file_id: str) -> str:
 
 def _video_poster_url(file_id: str) -> str:
     return f"/files/{file_id}/video/poster.webp"
+
+
+def _code_dir(file_id: str) -> Path:
+    return CODE_DIR / file_id
+
+
+def _code_original_path(file_id: str, extension: str) -> Path:
+    return _code_dir(file_id) / f"original{extension}"
+
+
+def _code_preview_url(file_id: str, max_lines: int = CODE_PREVIEW_LINES) -> str:
+    return f"/files/{file_id}/code/preview?maxLines={max_lines}"
+
+
+def _code_raw_url(file_id: str) -> str:
+    return f"/files/{file_id}/code/raw"
+
+
+def _code_meta_url(file_id: str) -> str:
+    return f"/files/{file_id}/code/meta"
 
 
 def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
@@ -996,6 +1120,42 @@ def _stream_rows_as_csv(rows_iter, sheet_name: str) -> StreamingResponse:
     return StreamingResponse(generator(), media_type="text/csv", headers=headers)
 
 
+def read_code_segment(asset: FileAsset, start: int, max_lines: int) -> tuple[str, bool]:
+    path = _get_code_file_path(asset)
+    start = max(0, start)
+    max_lines = max(1, min(max_lines, MAX_CODE_LINES))
+    lines: list[str] = []
+    truncated = False
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for _ in range(start):
+            if handle.readline() == "":
+                return "", False
+        for _ in range(max_lines):
+            chunk = handle.readline()
+            if chunk == "":
+                break
+            lines.append(chunk)
+        else:
+            if handle.readline():
+                truncated = True
+    if not truncated and asset.code_line_count is not None:
+        truncated = start + len(lines) < asset.code_line_count
+    return "".join(lines), truncated
+
+
+def prepare_code_bytes(text: str, asset: FileAsset) -> tuple[bytes, dict]:
+    data = text.encode("utf-8")
+    headers: dict[str, str] = {}
+    size_hint = asset.size or len(data)
+    if size_hint > CODE_GZIP_THRESHOLD:
+        buffer = BytesIO()
+        with gzip.GzipFile(fileobj=buffer, mode="wb") as gz:
+            gz.write(data)
+        data = buffer.getvalue()
+        headers["Content-Encoding"] = "gzip"
+    return data, headers
+
+
 def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -1036,6 +1196,16 @@ def _excel_chart_sheets_json_path(file_id: str) -> Path:
 def _excel_chart_anchors_json_path(file_id: str) -> Path:
     """Возвращает путь к JSON файлу с якорями диаграмм."""
     return EXCEL_CHARTS_META_DIR / f"{file_id}_anchors.json"
+
+
+def _get_code_file_path(asset: FileAsset) -> Path:
+    path_str = asset.path_code_original or asset.path_original
+    if not path_str:
+        raise HTTPException(status_code=404, detail="Code file not available")
+    path = Path(path_str)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Code file missing on disk")
+    return path
 
 
 def _parse_xlsx_chart_anchors(path: Path) -> dict:
@@ -2801,6 +2971,18 @@ def _build_block(asset: FileAsset) -> dict:
         )
         block = TableBlock(type="table", id=generate_uuid(), data=table_data)
         return dump_block(block)
+    if asset.kind == "code":
+        code_data = CodeData(
+            src=_code_raw_url(asset.id),
+            previewUrl=_code_preview_url(asset.id),
+            filename=asset.filename,
+            language=asset.code_language or "plaintext",
+            sizeBytes=asset.size,
+            lineCount=asset.code_line_count,
+            view="inline",
+        )
+        block = CodeBlock(type="code", id=generate_uuid(), data=code_data)
+        return dump_block(block)
 
     raise HTTPException(status_code=500, detail=f"Unknown asset kind: {asset.kind}")
 
@@ -2824,6 +3006,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     original_name = upload.filename or f"{file_id}{meta.extension}"
     if meta.kind == "video":
         original_path = _video_original_path(file_id, meta.extension)
+    elif meta.kind == "code":
+        original_path = _code_original_path(file_id, meta.extension)
     else:
         original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
     _write_file(original_path, data)
@@ -2846,6 +3030,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     video_width = None
     video_height = None
     video_mime = None
+    code_language = None
+    code_line_count = None
     # OVC: excel - инициализируем переменные для диаграмм (нужны для всех типов файлов)
     charts_json_path: Optional[str] = None
     charts_dir_path: Optional[str] = None
@@ -2912,6 +3098,12 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         poster_candidate = _video_poster_path(file_id)
         if render_video_poster(original_path, poster_candidate, duration=video_duration):
             video_poster_path = poster_candidate
+    elif meta.kind == "code":
+        code_language = _detect_code_language(meta.extension)
+        try:
+            code_line_count = count_file_lines(original_path)
+        except Exception:
+            code_line_count = None
 
     asset = FileAsset(
         id=file_id,
@@ -2929,6 +3121,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_excel_summary=str(summary_path) if summary_path else None,
         path_video_original=str(original_path) if meta.kind == "video" else None,
         path_video_poster=str(video_poster_path) if video_poster_path else None,
+        path_code_original=str(original_path) if meta.kind == "code" else None,
         path_excel_charts_json=charts_json_path,
         path_excel_charts_dir=charts_dir_path,
         path_excel_chart_sheets_json=charts_sheets_json_path,
@@ -2944,6 +3137,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         video_width=video_width,
         video_height=video_height,
         video_mime=video_mime,
+        code_language=code_language,
+        code_line_count=code_line_count,
     )
     session.add(asset)
     session.flush()

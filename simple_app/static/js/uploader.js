@@ -2,6 +2,44 @@ import { uuid } from './utils.js';
 
 const SUCCESS_HIDE_DELAY = 3200;
 const ERROR_HIDE_DELAY = 6200;
+const CODE_FILE_EXT = new Set([
+  '.py',
+  '.js',
+  '.ts',
+  '.tsx',
+  '.jsx',
+  '.json',
+  '.md',
+  '.markdown',
+  '.html',
+  '.htm',
+  '.css',
+  '.scss',
+  '.yml',
+  '.yaml',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.sql',
+  '.c',
+  '.h',
+  '.cpp',
+  '.hpp',
+  '.java',
+  '.kt',
+  '.go',
+  '.rs',
+  '.php',
+  '.rb',
+  '.lua',
+  '.r',
+  '.tex',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.pl',
+  '.cs',
+]);
 
 export function initUploader({
   attachBtn,
@@ -162,6 +200,7 @@ export function initUploader({
       progress: 0,
       message: '',
     };
+    record.isCode = isCodeFile(file);
     uploads.set(uploadId, record);
     renderStatus();
 
@@ -289,4 +328,12 @@ export function initUploader({
   return {
     queueFiles,
   };
+
+  function isCodeFile(file) {
+    const name = (file?.name || '').toLowerCase();
+    const dot = name.lastIndexOf('.');
+    if (dot === -1) return false;
+    const ext = name.slice(dot);
+    return CODE_FILE_EXT.has(ext);
+  }
 }

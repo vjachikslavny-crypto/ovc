@@ -49,6 +49,8 @@ export function renderBlock(block) {
       return renderVideoBlock(data);
     case 'youtube':
       return renderYouTubeBlock(data);
+    case 'code':
+      return renderCodeBlock(data);
     case 'audio':
       return renderAudio(data);
     case 'source':
@@ -65,6 +67,9 @@ export function renderBlock(block) {
 }
 
 const PLACEHOLDER_TEXT = new Set(['Новый заголовок', 'Новый абзац']);
+const CODE_MAX_LINES = 10000;
+const CODE_PREVIEW_LINES = 25;
+const CODE_EXPANDED_LINES = 300;
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
@@ -131,6 +136,13 @@ function sanitizePlaceholder(value) {
     return '';
   }
   return value;
+}
+
+function escapeHtml(value = '') {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function renderList(data, tag) {
@@ -538,6 +550,115 @@ function renderYouTubeBlock(data = {}) {
     caption.className = 'media-caption';
     caption.textContent = data.title;
     block.appendChild(caption);
+  }
+
+  return block;
+}
+
+function renderCodeBlock(data = {}) {
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--code ovc-prism';
+  const language = (data.language || 'none').toLowerCase();
+  const fileIdMatch = (data.src || '').match(/\/files\/([^/]+)/);
+  const fileId = fileIdMatch ? fileIdMatch[1] : null;
+  let currentText = '';
+  let expanded = false;
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'ovc-codebar';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn';
+  copyBtn.textContent = 'Copy';
+  copyBtn.addEventListener('click', () => {
+    if (!currentText) return;
+    const markCopied = () => {
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyBtn.textContent = 'Copy';
+      }, 1500);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(currentText).then(markCopied).catch(() => {});
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = currentText;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        markCopied();
+      } catch (error) {
+        console.warn('Copy failed', error);
+      }
+      document.body.removeChild(textarea);
+    }
+  });
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'btn';
+  expandBtn.textContent = 'Просмотр';
+  if (!data.src) expandBtn.disabled = true;
+  expandBtn.addEventListener('click', () => {
+    if (!data.src) return;
+    if (!expanded) {
+      expanded = true;
+      expandBtn.textContent = 'Свернуть';
+      pre.classList.add('code-expanded');
+      fetchCode(block, `${data.src}?maxLines=${CODE_EXPANDED_LINES}`);
+    } else {
+      expanded = false;
+      expandBtn.textContent = 'Просмотр';
+      pre.classList.remove('code-expanded');
+      fetchCode(block, `${data.src}?maxLines=${CODE_PREVIEW_LINES}`);
+    }
+  });
+
+  toolbar.append(copyBtn, expandBtn);
+  block.appendChild(toolbar);
+
+  const pre = document.createElement('pre');
+  pre.className = `language-${language}`;
+  const codeEl = document.createElement('code');
+  codeEl.className = `language-${language}`;
+  pre.appendChild(codeEl);
+  block.appendChild(pre);
+
+  const cap = document.createElement('div');
+  cap.className = 'ovc-cap';
+  cap.hidden = true;
+  block.appendChild(cap);
+
+  const previewUrl = data.previewUrl || (data.src ? `${data.src}?maxLines=${CODE_PREVIEW_LINES}` : '');
+  if (previewUrl) {
+    fetchCode(block, previewUrl);
+  }
+
+  function fetchCode(container, url) {
+    fetch(url)
+      .then((response) => {
+        const truncated = response.headers.get('X-OVC-Code-Truncated') === 'true';
+        if (truncated || (data.lineCount && data.lineCount > CODE_MAX_LINES)) {
+          cap.hidden = false;
+          const total = data.lineCount ? ` (из ${Number(data.lineCount).toLocaleString('ru-RU')})` : '';
+          const downloadUrl = fileId ? `/files/${fileId}/original` : data.src || '#';
+          cap.innerHTML = `Показаны первые ${CODE_MAX_LINES.toLocaleString('ru-RU')} строк${total}. <a href="${downloadUrl}" target="_blank" rel="noreferrer">Скачать файл</a>`;
+        }
+        return response.text();
+      })
+      .then((text) => {
+        currentText = text;
+        codeEl.textContent = text;
+        if (window.Prism?.highlightElement) {
+          window.Prism.highlightElement(codeEl);
+        }
+      })
+      .catch(() => {});
   }
 
   return block;

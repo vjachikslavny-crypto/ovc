@@ -157,6 +157,7 @@ class FileAsset(Base):
     excel_default_sheet = Column(String, nullable=True)
     path_video_original = Column(String, nullable=True)
     path_video_poster = Column(String, nullable=True)
+    path_code_original = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
@@ -168,6 +169,8 @@ class FileAsset(Base):
     video_width = Column(Integer, nullable=True)
     video_height = Column(Integer, nullable=True)
     video_mime = Column(String, nullable=True)
+    code_language = Column(String, nullable=True)
+    code_line_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
     note = relationship("Note", back_populates="files")

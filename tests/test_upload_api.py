@@ -192,6 +192,20 @@ class UploadApiTests(unittest.TestCase):
         poster_url = block["data"].get("poster")
         self.assertTrue(poster_url is None or poster_url.endswith(".webp"))
 
+    def test_upload_code_creates_block(self):
+        code_bytes = b"print('hi')\n" * 5
+        response = client.post(
+            "/api/upload",
+            files={"files": ("demo.py", code_bytes, "text/x-python")},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        block = payload["blocks"][0]
+        self.assertEqual(block["type"], "code")
+        self.assertIn("previewUrl", block["data"])
+        preview = client.get(block["data"]["previewUrl"])
+        self.assertEqual(preview.status_code, 200)
+
     @unittest.skipUnless(MAMMOTH_AVAILABLE, "mammoth dependency is missing")
     def test_upload_docx_exposes_inline_preview(self):
         docx_bytes = make_simple_docx()

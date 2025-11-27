@@ -53,7 +53,7 @@ simple_app/
 | `youtube` | `{ "videoId": "abcdefghijk", "startSec": 47, "view": "inline|cover|compact" }` |
 | `doc` | `{ "kind": "pdf|docx|rtf|pptx|txt", "src": "/files/<id>/original", "preview": "/files/<id>/preview.webp", "meta": { "pages": 10, "slides": 10, "size": 1048576 } }` |
 | `sheet` | `{ "kind": "xlsx|csv", "src": "/files/<id>/original", "sheets": ["Лист1"], "rows": 2500 }` |
-| `code` | `{ "language": "python", "src": "/files/<id>/original", "lines": 1200, "sha256": "..." }` |
+| `code` | `{ "src": "/files/<id>/code/raw", "previewUrl": "/files/<id>/code/preview?maxLines=300", "filename": "demo.py", "language": "python", "sizeBytes": 5120, "lineCount": 4200, "view": "inline" }` |
 | `archive` | `{ "src": "/files/<id>/original", "tree": [{ "path": "src/app.py", "size": 2048 }, ...] }` |
 | `link` | `{ "url": "https://...", "title": "...", "desc": "...", "image": "/files/<id>/link.jpg" }` |
 

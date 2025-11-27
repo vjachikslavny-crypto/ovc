@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}OVC Human Notes{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/styles.css" />
+    <link rel="stylesheet" href="/static/vendor/prism/prism-tomorrow.css" />
+    <link rel="stylesheet" href="/static/css/prism-ovc.css" />
   </head>
   <body class="theme-clean" data-theme="clean">
     <header class="app-shell__topbar">
@@ -29,6 +31,7 @@
     <footer class="app-shell__footer">
       <small>Offline · Готово к своей модели</small>
     </footer>
+    <script defer src="/static/vendor/prism/prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/"></script>
     <script type="module" src="/static/js/theme.js"></script>
     {% block extra_scripts %}{% endblock %}
   </body>
