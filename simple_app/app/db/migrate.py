@@ -166,6 +166,20 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding code_line_count column: {e}")
 
+        if 'path_markdown_raw' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN path_markdown_raw VARCHAR"))
+                print("Added path_markdown_raw column to files table")
+            except Exception as e:
+                print(f"Error adding path_markdown_raw column: {e}")
+
+        if 'markdown_line_count' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN markdown_line_count INTEGER"))
+                print("Added markdown_line_count column to files table")
+            except Exception as e:
+                print(f"Error adding markdown_line_count column: {e}")
+
         # Если таблицы не существует, создаем все таблицы
         try:
             Base.metadata.create_all(bind=conn)

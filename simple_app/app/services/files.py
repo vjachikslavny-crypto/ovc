@@ -41,6 +41,8 @@ from app.agent.block_models import (
     TableData,
     CodeBlock,
     CodeData,
+    MarkdownBlock,
+    MarkdownData,
     SlidesBlock,
     SlidesData,
     ImageBlock,
@@ -106,6 +108,7 @@ EXCEL_CHARTS_DIR = UPLOAD_ROOT / "excel_charts"  # OVC: excel - диаграмм
 EXCEL_CHARTS_META_DIR = UPLOAD_ROOT / "excel_charts_meta"  # OVC: excel - метаданные диаграмм
 VIDEO_DIR = UPLOAD_ROOT / "videos"
 CODE_DIR = UPLOAD_ROOT / "code"
+MARKDOWN_DIR = UPLOAD_ROOT / "markdown"
 
 for directory in (
     ORIGINAL_DIR,
@@ -120,6 +123,7 @@ for directory in (
     EXCEL_CHARTS_META_DIR,
     VIDEO_DIR,
     CODE_DIR,
+    MARKDOWN_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -164,6 +168,8 @@ VIDEO_MIME_TYPES = {
     "video/x-msvideo",
 }
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".avi")
+MARKDOWN_EXTENSIONS = {".md", ".markdown"}
+MARKDOWN_MIME_TYPES = {"text/markdown", "text/x-markdown", "text/plain"}
 CODE_EXTENSIONS = {
     ".py",
     ".js",
@@ -171,8 +177,6 @@ CODE_EXTENSIONS = {
     ".tsx",
     ".jsx",
     ".json",
-    ".md",
-    ".markdown",
     ".html",
     ".htm",
     ".css",
@@ -218,6 +222,7 @@ VIDEO_MAX_BYTES = 200 * 1024 * 1024
 MAX_CODE_LINES = 10_000
 CODE_PREVIEW_LINES = 300
 CODE_MAX_BYTES = 5 * 1024 * 1024
+MARKDOWN_PREVIEW_MAX_BYTES = 200_000
 CODE_GZIP_THRESHOLD = 10 * 1024 * 1024
 _FFMPEG_PATH = shutil.which("ffmpeg")
 _FFPROBE_PATH = shutil.which("ffprobe")
@@ -383,6 +388,10 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
         code_mime = mime if mime.startswith("text/") else "text/plain"
         extension = suffix or ".txt"
         return FileMetadata(kind="code", mime=code_mime, extension=extension, max_bytes=CODE_MAX_BYTES)
+    if suffix in MARKDOWN_EXTENSIONS or mime in MARKDOWN_MIME_TYPES:
+        md_mime = "text/markdown"
+        extension = suffix or ".md"
+        return FileMetadata(kind="markdown", mime=md_mime, extension=extension, max_bytes=CODE_MAX_BYTES)
 
     raise HTTPException(
         status_code=415,
@@ -453,6 +462,22 @@ def _code_raw_url(file_id: str) -> str:
 
 def _code_meta_url(file_id: str) -> str:
     return f"/files/{file_id}/code/meta"
+
+
+def _markdown_dir(file_id: str) -> Path:
+    return MARKDOWN_DIR / file_id
+
+
+def _markdown_raw_path(file_id: str, extension: str) -> Path:
+    return _markdown_dir(file_id) / f"original{extension}"
+
+
+def _markdown_raw_url(file_id: str) -> str:
+    return f"/files/{file_id}/md/raw"
+
+
+def _markdown_preview_url(file_id: str, max_bytes: int = MARKDOWN_PREVIEW_MAX_BYTES) -> str:
+    return f"/files/{file_id}/md/preview?maxBytes={max_bytes}"
 
 
 def _generate_image_preview(data: bytes) -> Tuple[bytes, int, int]:
@@ -1120,6 +1145,23 @@ def _stream_rows_as_csv(rows_iter, sheet_name: str) -> StreamingResponse:
     return StreamingResponse(generator(), media_type="text/csv", headers=headers)
 
 
+def read_markdown_preview(asset: FileAsset, max_bytes: int) -> tuple[str, bool]:
+    path = _get_markdown_file_path(asset)
+    max_bytes = max(1, max_bytes)
+    truncated = False
+    total = 0
+    chunks: list[str] = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            encoded = line.encode("utf-8")
+            if total + len(encoded) > max_bytes:
+                truncated = True
+                break
+            chunks.append(line)
+            total += len(encoded)
+    return "".join(chunks), truncated
+
+
 def read_code_segment(asset: FileAsset, start: int, max_lines: int) -> tuple[str, bool]:
     path = _get_code_file_path(asset)
     start = max(0, start)
@@ -1205,6 +1247,16 @@ def _get_code_file_path(asset: FileAsset) -> Path:
     path = Path(path_str)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Code file missing on disk")
+    return path
+
+
+def _get_markdown_file_path(asset: FileAsset) -> Path:
+    path_str = asset.path_markdown_raw or asset.path_original
+    if not path_str:
+        raise HTTPException(status_code=404, detail="Markdown file not available")
+    path = Path(path_str)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Markdown file missing on disk")
     return path
 
 
@@ -2971,6 +3023,17 @@ def _build_block(asset: FileAsset) -> dict:
         )
         block = TableBlock(type="table", id=generate_uuid(), data=table_data)
         return dump_block(block)
+    if asset.kind == "markdown":
+        md_data = MarkdownData(
+            src=_markdown_raw_url(asset.id),
+            previewUrl=_markdown_preview_url(asset.id),
+            filename=asset.filename,
+            sizeBytes=asset.size,
+            lineCount=asset.markdown_line_count,
+            view="inline",
+        )
+        block = MarkdownBlock(type="markdown", id=generate_uuid(), data=md_data)
+        return dump_block(block)
     if asset.kind == "code":
         code_data = CodeData(
             src=_code_raw_url(asset.id),
@@ -3008,6 +3071,8 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         original_path = _video_original_path(file_id, meta.extension)
     elif meta.kind == "code":
         original_path = _code_original_path(file_id, meta.extension)
+    elif meta.kind == "markdown":
+        original_path = _markdown_raw_path(file_id, meta.extension)
     else:
         original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
     _write_file(original_path, data)
@@ -3032,6 +3097,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     video_mime = None
     code_language = None
     code_line_count = None
+    markdown_line_count = None
     # OVC: excel - инициализируем переменные для диаграмм (нужны для всех типов файлов)
     charts_json_path: Optional[str] = None
     charts_dir_path: Optional[str] = None
@@ -3104,6 +3170,11 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
             code_line_count = count_file_lines(original_path)
         except Exception:
             code_line_count = None
+    elif meta.kind == "markdown":
+        try:
+            markdown_line_count = count_file_lines(original_path)
+        except Exception:
+            markdown_line_count = None
 
     asset = FileAsset(
         id=file_id,
@@ -3122,6 +3193,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_video_original=str(original_path) if meta.kind == "video" else None,
         path_video_poster=str(video_poster_path) if video_poster_path else None,
         path_code_original=str(original_path) if meta.kind == "code" else None,
+        path_markdown_raw=str(original_path) if meta.kind == "markdown" else None,
         path_excel_charts_json=charts_json_path,
         path_excel_charts_dir=charts_dir_path,
         path_excel_chart_sheets_json=charts_sheets_json_path,
@@ -3139,6 +3211,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         video_mime=video_mime,
         code_language=code_language,
         code_line_count=code_line_count,
+        markdown_line_count=markdown_line_count,
     )
     session.add(asset)
     session.flush()

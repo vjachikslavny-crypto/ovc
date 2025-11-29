@@ -118,6 +118,20 @@ def make_fake_mp4() -> bytes:
     return header + mdat
 
 
+def make_markdown(lines: int = 12) -> bytes:
+    content = [f"# Heading {lines}"]
+    for idx in range(1, lines + 1):
+        content.append(f"- item {idx}")
+        content.append("")
+    return "\n".join(content).encode("utf-8")
+
+
+def make_large_markdown() -> bytes:
+    line = "Это очень длинная строка Markdown с **жирным** и `кодом` для теста." * 2 + "\n"
+    repeats = (210_000 // len(line)) + 20
+    return ("# Большой файл\n" + line * repeats).encode("utf-8")
+
+
 @unittest.skipIf(client is None, f"FastAPI app unavailable: {_APP_IMPORT_ERROR}")
 class UploadApiTests(unittest.TestCase):
     def test_upload_image_returns_block(self):
@@ -205,6 +219,43 @@ class UploadApiTests(unittest.TestCase):
         self.assertIn("previewUrl", block["data"])
         preview = client.get(block["data"]["previewUrl"])
         self.assertEqual(preview.status_code, 200)
+
+    def test_upload_markdown_creates_block_with_preview(self):
+        md_bytes = make_markdown()
+        response = client.post(
+            "/api/upload",
+            files={"files": ("note.md", md_bytes, "text/markdown")},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        block = payload["blocks"][0]
+        self.assertEqual(block["type"], "markdown")
+        data = block["data"]
+        self.assertTrue(data.get("src", "").startswith("/files/"))
+        self.assertTrue(data.get("previewUrl", "").startswith("/files/"))
+        preview = client.get(data["previewUrl"])
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.headers.get("X-OVC-MD-Truncated"), "false")
+        self.assertIn("# Heading", preview.text)
+        raw = client.get(data["src"])
+        self.assertEqual(raw.status_code, 200)
+        self.assertIn("# Heading", raw.text)
+
+    def test_markdown_preview_reports_truncation_for_large_files(self):
+        md_bytes = make_large_markdown()
+        response = client.post(
+            "/api/upload",
+            files={"files": ("big.md", md_bytes, "text/markdown")},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["blocks"][0]["data"]
+        preview = client.get(data["previewUrl"])
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.headers.get("X-OVC-MD-Truncated"), "true")
+        self.assertTrue(preview.text)
+        raw = client.get(data["src"])
+        self.assertEqual(raw.status_code, 200)
+        self.assertGreater(len(raw.text), len(preview.text))
 
     @unittest.skipUnless(MAMMOTH_AVAILABLE, "mammoth dependency is missing")
     def test_upload_docx_exposes_inline_preview(self):

@@ -13,6 +13,7 @@ import { initAudioRecorder } from './audio_recorder.js';
 import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмотр DOCX/RTF
 import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
+import { initMarkdownViewers } from './markdown_viewer.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -331,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     initSlidesViewers(canvas, handleBlockUpdate);
     initTableViewers(canvas, handleBlockUpdate);
+    initMarkdownViewers(canvas);
     // Повторная обработка ячеек таблиц после перерисовки
     // ВАЖНО: hydrateTableCells сама проверит, какие ячейки нужно обработать
     // Не сбрасываем флаг tableHydrated, чтобы не терять фокус

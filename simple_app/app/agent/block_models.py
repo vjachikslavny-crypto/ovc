@@ -163,6 +163,22 @@ class CodeData(BaseModel):
             allow_population_by_field_name = True
 
 
+class MarkdownData(BaseModel):
+    src: str
+    preview_url: Optional[str] = Field(default=None, alias="previewUrl")
+    filename: str
+    size_bytes: Optional[int] = Field(default=None, alias="sizeBytes", ge=0)
+    line_count: Optional[int] = Field(default=None, alias="lineCount", ge=0)
+    view: Literal["inline", "cover", "compact"] = "inline"
+
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
+
+
 class ArchiveEntry(BaseModel):
     path: str
     size: Optional[int] = Field(default=None, ge=0)
@@ -342,6 +358,11 @@ class TableBlock(BlockBase):
     data: TableData
 
 
+class MarkdownBlock(BlockBase):
+    type: Literal["markdown"]
+    data: MarkdownData
+
+
 class YouTubeBlock(BlockBase):
     type: Literal["youtube"]
     data: YouTubeData
@@ -383,6 +404,7 @@ BlockModel = Union[
     ArchiveBlock,
     LinkBlock,
     TableBlock,
+    MarkdownBlock,
     YouTubeBlock,
     SourceBlock,
     SummaryBlock,

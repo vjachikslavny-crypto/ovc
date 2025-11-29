@@ -312,6 +312,27 @@ BLOCK_SCHEMA: dict = {
                 },
                 {
                     "properties": {
+                        "type": {"const": "markdown"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "src": {"type": "string"},
+                                "previewUrl": {"type": ["string", "null"]},
+                                "filename": {"type": "string"},
+                                "sizeBytes": {"type": ["integer", "null"]},
+                                "lineCount": {"type": ["integer", "null"]},
+                                "view": {
+                                    "type": "string",
+                                    "enum": ["inline", "cover", "compact"],
+                                },
+                            },
+                            "required": ["src", "filename"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
                         "type": {"const": "archive"},
                         "data": {
                             "type": "object",

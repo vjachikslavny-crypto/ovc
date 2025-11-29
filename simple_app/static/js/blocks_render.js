@@ -51,6 +51,8 @@ export function renderBlock(block) {
       return renderYouTubeBlock(data);
     case 'code':
       return renderCodeBlock(data);
+    case 'markdown':
+      return renderMarkdownBlock(data);
     case 'audio':
       return renderAudio(data);
     case 'source':
@@ -660,6 +662,79 @@ function renderCodeBlock(data = {}) {
       })
       .catch(() => {});
   }
+
+  return block;
+}
+
+function renderMarkdownBlock(data = {}) {
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--markdown ovc-md';
+  block.dataset.view = data.view || 'inline';
+  block.dataset.src = data.src || '';
+  block.dataset.previewUrl = data.previewUrl || '';
+  block.dataset.filename = data.filename || '';
+  if (Number.isFinite(data.lineCount)) {
+    block.dataset.lineCount = String(data.lineCount);
+  }
+
+  // Заголовок с названием файла
+  if (data.filename) {
+    const title = document.createElement('div');
+    title.className = 'ovc-md-title';
+    title.textContent = data.filename;
+    block.appendChild(title);
+  }
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'ovc-codebar';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn';
+  copyBtn.dataset.action = 'copy';
+  copyBtn.textContent = 'Copy';
+  toolbar.appendChild(copyBtn);
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'btn';
+  expandBtn.dataset.action = 'expand';
+  expandBtn.textContent = 'Expand';
+  if (!data.src) {
+    expandBtn.disabled = true;
+  }
+  toolbar.appendChild(expandBtn);
+
+  const downloadLink = document.createElement('a');
+  downloadLink.className = 'btn';
+  downloadLink.dataset.role = 'download';
+  downloadLink.textContent = 'Download';
+  if (data.src) {
+    downloadLink.href = data.src;
+    downloadLink.target = '_blank';
+    downloadLink.rel = 'noopener noreferrer';
+  } else {
+    downloadLink.href = '#';
+    downloadLink.setAttribute('aria-disabled', 'true');
+  }
+  if (data.filename) {
+    downloadLink.setAttribute('download', data.filename);
+  }
+  toolbar.appendChild(downloadLink);
+
+  block.appendChild(toolbar);
+
+  const body = document.createElement('article');
+  body.className = 'md-body';
+  body.dataset.role = 'md-body';
+  body.textContent = 'Загружаем Markdown...';
+  block.appendChild(body);
+
+  const cap = document.createElement('div');
+  cap.className = 'ovc-cap';
+  cap.dataset.role = 'cap';
+  cap.hidden = true;
+  block.appendChild(cap);
 
   return block;
 }

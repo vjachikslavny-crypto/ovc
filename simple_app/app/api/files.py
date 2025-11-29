@@ -13,9 +13,12 @@ from app.services.files import (
     PAGES_DIR,
     MAX_CODE_LINES,
     CODE_PREVIEW_LINES,
+    MARKDOWN_PREVIEW_MAX_BYTES,
     count_file_lines,
     read_code_segment,
     prepare_code_bytes,
+    read_markdown_preview,
+    _get_markdown_file_path,
     _get_code_file_path,
     _iter_sheet_csv,
     _load_excel_summary,
@@ -175,6 +178,28 @@ def code_raw(
         headers["X-OVC-Code-Truncated"] = "true"
     headers.update(extra_headers)
     return Response(content=body, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.get("/files/{file_id}/md/preview")
+def markdown_preview(file_id: str, max_bytes: int = Query(MARKDOWN_PREVIEW_MAX_BYTES, ge=1)):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "markdown":
+        raise HTTPException(status_code=400, detail="File is not markdown")
+    limit = max(1, min(max_bytes, MARKDOWN_PREVIEW_MAX_BYTES))
+    text, truncated = read_markdown_preview(asset, limit)
+    headers = {"Content-Type": "text/plain; charset=utf-8"}
+    headers["X-OVC-MD-Truncated"] = "true" if truncated else "false"
+    return Response(content=text, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.get("/files/{file_id}/md/raw")
+def markdown_raw(file_id: str):
+    asset = _fetch_asset(file_id)
+    if asset.kind != "markdown":
+        raise HTTPException(status_code=400, detail="File is not markdown")
+    path = _get_markdown_file_path(asset)
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return Response(content=text, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/files/{file_id}/excel/summary.json")
