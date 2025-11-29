@@ -2941,6 +2941,52 @@ body.theme-brief .toolbar {
   --shadow: 0 10px 28px rgba(58, 103, 180, 0.12);
 }
 
+/* Применение токенов */
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.note-block,
+.editor__canvas,
+.note-inspector,
+.toolbar,
+.pill-button,
+.fab,
+.excel-charts-container,
+.pdf-viewer,
+.code-viewer,
+.table-viewer,
+.inline-bubble,
+.bottom-sheet,
+.editor__header,
+.chip-list,
+.property-list {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+a,
+.link {
+  color: var(--accent);
+}
+
+.pill-button--primary,
+.fab--primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.pill-button--primary:hover,
+.fab--primary:hover {
+  box-shadow: 0 12px 32px var(--accent-weak);
+}
+
+.muted {
+  color: var(--muted);
+}
+
 @media (max-width: 960px) {
   .graph-shell {
     grid-template-columns: 1fr;
