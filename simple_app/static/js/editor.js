@@ -110,6 +110,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sources: [],
   };
 
+  setupThemeSwitcher();
+
   const connectionsPanel = initConnectionsPanel({
     rootEl: connectionsPanelEl,
     toggleBtn: connectionsToggleBtn,
@@ -189,6 +191,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const note = await fetchNoteDetail(noteId);
     applyNote(note);
     hints.push('Нажмите ＋, чтобы добавить новый блок.');
+  }
+
+  function setupThemeSwitcher() {
+    const selectEl = document.getElementById('theme-switcher');
+    if (!selectEl) return;
+    const root = document.documentElement;
+    const STORAGE_KEY = 'ovc:theme';
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      root.setAttribute('data-theme', saved);
+      document.body.dataset.theme = saved;
+      selectEl.value = saved;
+      document.dispatchEvent(new CustomEvent('theme-change', { detail: { theme: saved } }));
+    }
+
+    selectEl.addEventListener('change', () => {
+      const theme = selectEl.value || '';
+      if (theme) {
+        root.setAttribute('data-theme', theme);
+        document.body.dataset.theme = theme;
+        localStorage.setItem(STORAGE_KEY, theme);
+      } else {
+        root.removeAttribute('data-theme');
+        document.body.dataset.theme = 'brief';
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      document.dispatchEvent(new CustomEvent('theme-change', { detail: { theme: theme || 'clean' } }));
+    });
   }
 
   // ---- RENDER ----
