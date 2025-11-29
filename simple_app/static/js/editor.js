@@ -14,6 +14,7 @@ import { initWordViewers } from './word_viewer.js'; // OVC: docx - просмо�
 import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
 import { initMarkdownViewers } from './markdown_viewer.js';
+import { initConnectionsPanel } from './connections_panel.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -42,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const hintText = document.getElementById('hint-text');
   const hintDismiss = document.getElementById('hint-dismiss');
   const llmToggle = document.getElementById('llm-toggle');
+  const connectionsPanelEl = document.getElementById('connections-panel');
+  const connectionsToggleBtn = document.getElementById('connections-toggle');
 
   const hints = initHints(hintBanner, hintText, hintDismiss);
   const inspector = initInspector(inspectorEl, {
@@ -107,6 +110,18 @@ document.addEventListener('DOMContentLoaded', () => {
     sources: [],
   };
 
+  const connectionsPanel = initConnectionsPanel({
+    rootEl: connectionsPanelEl,
+    toggleBtn: connectionsToggleBtn,
+    getNoteId: () => noteState.id,
+    onOpenNote: (noteId) => {
+      if (!noteId) return;
+      window.location.href = `/notes/${noteId}`;
+    },
+    fetchOptions: fetchLinkableNotes,
+    addLink: createManualLink,
+  });
+
   let saveTimer = null;
   let focusedBlockId = null;
   let canvasClickBound = false;
@@ -160,6 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     focusedBlockId = null;
     render();
+    connectionsPanel?.update(noteState);
   }
 
   async function refreshNoteState() {

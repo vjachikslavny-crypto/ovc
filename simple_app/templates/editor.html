@@ -7,42 +7,60 @@
     <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
     <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
     <div class="editor__header-actions">
+      <button class="icon-button icon-button--ghost" id="connections-toggle" aria-label="Связи">↔</button>
       <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>
       <button class="pill-button pill-button--compact" id="note-share">Поделиться</button>
     </div>
   </section>
 
-  <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
-    <button class="toolbar__btn" data-action="bold">B</button>
-    <button class="toolbar__btn" data-action="italic"><em>I</em></button>
-    <button class="toolbar__btn" data-action="link">Link</button>
-    <button class="toolbar__btn" data-action="list">List</button>
-    <button class="toolbar__btn" data-action="quote">Quote</button>
-    <button class="toolbar__btn" data-action="align">Align</button>
-  </section>
+  <div class="editor__body">
+    <section class="editor__main" aria-label="Редактор заметки">
+      <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
+        <button class="toolbar__btn" data-action="bold">B</button>
+        <button class="toolbar__btn" data-action="italic"><em>I</em></button>
+        <button class="toolbar__btn" data-action="link">Link</button>
+        <button class="toolbar__btn" data-action="list">List</button>
+        <button class="toolbar__btn" data-action="quote">Quote</button>
+        <button class="toolbar__btn" data-action="align">Align</button>
+      </section>
 
-  <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
-    <div id="note-blocks" class="note-blocks"></div>
-    <div class="floating-actions" aria-live="polite">
-      <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
-      <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
-      <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
-      <input
-        type="file"
-        id="file-input"
-        class="hidden"
-        accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.mkv,.avi,.pdf,.docx,.rtf,.pptx,.xls,.xlsx,.csv,.py,.js,.ts,.tsx,.jsx,.json,.md,.markdown,.html,.htm,.css,.scss,.yml,.yaml,.sh,.bash,.zsh,.sql,.c,.h,.cpp,.hpp,.java,.kt,.go,.rs,.php,.rb,.lua,.r,.tex,.toml,.ini,.cfg,.pl,.cs,text/plain,application/json,application/x-yaml"
-        multiple
-      />
-    </div>
-    <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
-    <div class="drop-overlay" id="drop-overlay" aria-hidden="true" hidden>
-      <div class="drop-overlay__content">
-        <p>Перетащите файлы сюда</p>
-        <span>Поддерживаются изображения, видео, PDF, Word, презентации, таблицы (Excel/CSV), Markdown и код</span>
-      </div>
-    </div>
-  </section>
+      <aside class="connections-panel connections-panel--compact connections-panel--open" id="connections-panel" aria-label="Связи">
+        <header class="connections-panel__header">
+          <div>
+            <p class="connections-panel__title">Связи</p>
+            <p class="connections-panel__count" id="connections-count">0</p>
+          </div>
+          <button class="icon-button connections-panel__close" type="button" aria-label="Закрыть" data-action="close-connections">×</button>
+        </header>
+        <div class="connections-panel__body" id="connections-body">
+          <p class="connections-panel__empty muted">Загрузка...</p>
+        </div>
+      </aside>
+
+      <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
+        <div id="note-blocks" class="note-blocks"></div>
+        <div class="floating-actions" aria-live="polite">
+          <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
+          <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
+          <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
+          <input
+            type="file"
+            id="file-input"
+            class="hidden"
+            accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.mkv,.avi,.pdf,.docx,.rtf,.pptx,.xls,.xlsx,.csv,.py,.js,.ts,.tsx,.jsx,.json,.md,.markdown,.html,.htm,.css,.scss,.yml,.yaml,.sh,.bash,.zsh,.sql,.c,.h,.cpp,.hpp,.java,.kt,.go,.rs,.php,.rb,.lua,.r,.tex,.toml,.ini,.cfg,.pl,.cs,.swift,text/plain,application/json,application/x-yaml"
+            multiple
+          />
+        </div>
+        <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
+        <div class="drop-overlay" id="drop-overlay" aria-hidden="true" hidden>
+          <div class="drop-overlay__content">
+            <p>Перетащите файлы сюда</p>
+            <span>Поддерживаются изображения, видео, PDF, Word, презентации, таблицы (Excel/CSV), Markdown и код</span>
+          </div>
+        </div>
+      </section>
+    </section>
+  </div>
 
   <div class="bottom-sheet" id="block-palette" aria-hidden="true">
     <div class="bottom-sheet__handle"></div>
@@ -53,8 +71,6 @@
       <button data-block="bulletList">Список</button>
       <button data-block="quote">Цитата</button>
       <button data-block="table">Таблица</button>
-      <button data-block="image">Картинка</button>
-      <button data-block="source">Источник</button>
       <button data-block="todo">Задача</button>
       <button data-block="summary">Сводка</button>
       <button data-block="divider">Разделитель</button>
