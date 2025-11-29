@@ -1,16 +1,23 @@
+/* БАЗОВЫЕ ТОКЕНЫ (дефолтная тема) */
 :root {
   color-scheme: dark;
-  --bg: radial-gradient(circle at top, #1a093b 0%, #0d031d 50%, #05000f 100%);
-  --surface: rgba(21, 10, 40, 0.92);
-  --surface-alt: rgba(33, 16, 63, 0.78);
-  --border: rgba(142, 96, 255, 0.25);
-  --border-strong: rgba(142, 96, 255, 0.55);
-  --text-primary: #f8f4ff;
-  --text-muted: #a998d3;
+  --bg: #0b0712;
+  --bg-elev: #120a1e;
+  --card: #0f0a1a;
+  --text: #f4f1ff;
+  --muted: #cfc7e9;
+  --border: rgba(139, 92, 246, 0.25);
   --accent: #8b5cf6;
-  --accent-strong: #c084fc;
+  --accent-weak: rgba(139, 92, 246, 0.12);
+  --accent-contrast: #0b0712;
+  --shadow: 0 10px 30px rgba(139, 92, 246, 0.18);
+  --surface: var(--card);
+  --surface-alt: var(--bg-elev);
+  --border-strong: var(--border);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --accent-strong: var(--accent);
   --danger: #ec4899;
-  --shadow: 0 24px 48px rgba(7, 2, 20, 0.45);
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -2876,6 +2883,62 @@ body.theme-brief .toolbar {
 .graph-canvas line.highlight {
   opacity: 1;
   stroke: #f9a8d4;
+}
+
+/* DARK (черная тема) */
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-elev: #121212;
+  --card: #141414;
+  --text: #eaeaea;
+  --muted: #bdbdbd;
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #7c3aed;
+  --accent-weak: rgba(124, 58, 237, 0.12);
+  --accent-contrast: #050505;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* MILK (светлая молочная) */
+:root[data-theme="milk"] {
+  --bg: #f6f5f2;
+  --bg-elev: #ffffff;
+  --card: #ffffff;
+  --text: #171717;
+  --muted: #5f6368;
+  --border: rgba(10, 10, 10, 0.08);
+  --accent: #6b4de6;
+  --accent-weak: rgba(107, 77, 230, 0.10);
+  --accent-contrast: #ffffff;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* WHITE (чисто белая) */
+:root[data-theme="white"] {
+  --bg: #ffffff;
+  --bg-elev: #ffffff;
+  --card: #ffffff;
+  --text: #111111;
+  --muted: #666666;
+  --border: rgba(0, 0, 0, 0.08);
+  --accent: #6b4de6;
+  --accent-weak: rgba(107, 77, 230, 0.10);
+  --accent-contrast: #ffffff;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+}
+
+/* PASTEL BLUE */
+:root[data-theme="pastel-blue"] {
+  --bg: #f0f6ff;
+  --bg-elev: #ffffff;
+  --card: #ffffff;
+  --text: #0e1b2b;
+  --muted: #476282;
+  --border: rgba(14, 27, 43, 0.08);
+  --accent: #5b8def;
+  --accent-weak: rgba(91, 141, 239, 0.12);
+  --accent-contrast: #ffffff;
+  --shadow: 0 10px 28px rgba(58, 103, 180, 0.12);
 }
 
 @media (max-width: 960px) {
