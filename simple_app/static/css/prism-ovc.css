@@ -1,8 +1,8 @@
 /* ---- OVC Prism isolation ---- */
 .ovc-prism {
-  --ovc-bg: rgba(13, 10, 20, 0.9);
-  --ovc-border: rgba(139, 92, 246, 0.22);
-  --ovc-fg: #e6e6f0;
+  --ovc-bg: var(--card);
+  --ovc-border: var(--border);
+  --ovc-fg: var(--text);
   background: var(--ovc-bg);
   border: 1px solid var(--ovc-border);
   border-radius: var(--radius-md);
@@ -109,7 +109,7 @@
   font: inherit;
   padding: 6px 10px;
   border-radius: 10px;
-  background: rgba(139, 92, 246, 0.12);
+  background: var(--accent-weak);
   border: 1px solid var(--ovc-border);
   color: var(--ovc-fg);
   cursor: pointer;

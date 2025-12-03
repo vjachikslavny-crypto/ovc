@@ -327,15 +327,15 @@ function initPdfViewer(block, onBlockUpdate) {
   function showPageError(img, pageNum, errorMessage) {
     const placeholder = img.parentElement.querySelector('.pdf-page-placeholder');
     if (placeholder) {
-      placeholder.style.background = 'rgba(239, 68, 68, 0.1)';
-      placeholder.style.borderColor = 'rgba(239, 68, 68, 0.5)';
-      placeholder.style.color = 'rgba(239, 68, 68, 0.8)';
+      placeholder.style.background = 'var(--accent-weak)';
+      placeholder.style.borderColor = 'var(--border)';
+      placeholder.style.color = 'var(--text)';
       placeholder.textContent = `❌ Ошибка загрузки страницы ${pageNum}\n${errorMessage}`;
       placeholder.style.display = 'flex';
     } else {
       // Если placeholder нет, показываем ошибку на самом изображении
       img.style.opacity = '1';
-      img.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+      img.style.background = 'var(--accent-weak)';
       img.style.minHeight = '400px';
       img.style.display = 'flex';
       img.style.alignItems = 'center';
@@ -394,7 +394,7 @@ function initPdfViewer(block, onBlockUpdate) {
       // OVC: pdf - добавляем placeholder для визуальной обратной связи
       const placeholder = document.createElement('div');
       placeholder.className = 'pdf-page-placeholder';
-      placeholder.style.cssText = 'min-height: 400px; background: rgba(139, 92, 246, 0.1); border: 2px dashed rgba(139, 92, 246, 0.3); display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.5);';
+      placeholder.style.cssText = 'min-height: 400px; background: var(--accent-weak); border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted);';
       placeholder.textContent = `Загрузка страницы ${i}...`;
       figure.appendChild(placeholder);
       
@@ -901,4 +901,3 @@ function initPdfViewer(block, onBlockUpdate) {
     console.log('PDF viewer: initializing in cover mode', { view, blockView: block.dataset.view });
   }
 }
-

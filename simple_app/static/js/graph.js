@@ -1,4 +1,4 @@
-const DEFAULT_COLOR = '#8b5cf6';
+const DEFAULT_COLOR = 'var(--accent)';
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (typeof window.d3 === 'undefined') {
@@ -88,7 +88,7 @@ function renderGraph(data) {
 
   const nodeGroup = zoomLayer
     .append('g')
-    .attr('stroke', 'rgba(9,2,20,0.85)')
+    .attr('stroke', 'var(--border)')
     .attr('stroke-width', 1.4)
     .selectAll('g')
     .data(nodes)
@@ -101,7 +101,7 @@ function renderGraph(data) {
   const node = nodeGroup
     .append('circle')
     .attr('r', (d) => 16 + Math.min(40, Math.max(0, d.sizeScore * 12)))
-    .attr('fill', (d) => d.color || '#8b5cf6')
+    .attr('fill', (d) => d.color || 'var(--accent)')
     .attr('filter', 'url(#node-glow)');
 
   nodeGroup
@@ -378,7 +378,7 @@ async function updateGroupLabel(key, label) {
 }
 
 function getLinkColor(colorA, colorB) {
-  const fallback = '#a78bfa';
+  const fallback = 'var(--accent)';
   if (!colorA && !colorB) return fallback;
   if (colorA && colorA === colorB) return colorA;
   if (!colorA) return colorB || fallback;

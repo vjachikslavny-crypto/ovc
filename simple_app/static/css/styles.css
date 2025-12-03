@@ -1,20 +1,110 @@
+/* Базовые токены */
 :root {
   color-scheme: dark;
-  --bg: radial-gradient(circle at top, #1a093b 0%, #0d031d 50%, #05000f 100%);
-  --surface: rgba(21, 10, 40, 0.92);
-  --surface-alt: rgba(33, 16, 63, 0.78);
-  --border: rgba(142, 96, 255, 0.25);
-  --border-strong: rgba(142, 96, 255, 0.55);
-  --text-primary: #f8f4ff;
-  --text-muted: #a998d3;
+  --bg: #0b0b10;
+  --surface: #0f0f16;
+  --card: #13131b;
+  --text: #f3f4f6;
+  --muted: #b6b8c2;
+  --border: rgba(255, 255, 255, 0.12);
   --accent: #8b5cf6;
-  --accent-strong: #c084fc;
+  --accent-weak: rgba(139, 92, 246, 0.14);
+  --on-accent: #0b0b10;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --surface-alt: var(--surface);
+  --border-strong: var(--border);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --accent-strong: var(--accent);
+  --neon-bg: none;
+  --neon-glow: none;
   --danger: #ec4899;
-  --shadow: 0 24px 48px rgba(7, 2, 20, 0.45);
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
   font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* default / brief / clean */
+:root[data-theme="default"],
+:root[data-theme="brief"],
+:root[data-theme="clean"] {
+  --bg: #0b0712;
+  --surface: #0f0a1a;
+  --card: #120a1f;
+  --text: #f4f1ff;
+  --muted: #cfc7e9;
+  --border: rgba(139, 92, 246, 0.22);
+  --accent: #8b5cf6;
+  --accent-weak: rgba(139, 92, 246, 0.14);
+  --on-accent: #0b0712;
+  --shadow: 0 10px 30px rgba(139, 92, 246, 0.18);
+  --neon-bg: radial-gradient(1200px 600px at 30% -10%, rgba(139, 92, 246, 0.12), transparent 55%);
+  --neon-glow: 0 0 30px rgba(139, 92, 246, 0.2);
+}
+
+/* dark */
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --surface: #111113;
+  --card: #161618;
+  --text: #e9e9eb;
+  --muted: #b1b1b6;
+  --border: rgba(255, 255, 255, 0.1);
+  --accent: #7c3aed;
+  --accent-weak: rgba(124, 58, 237, 0.14);
+  --on-accent: #0a0a0a;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --neon-bg: none;
+  --neon-glow: none;
+}
+
+/* milk */
+:root[data-theme="milk"] {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --text: #1c1c1c;
+  --muted: #62666d;
+  --border: rgba(0, 0, 0, 0.08);
+  --accent: #6b4de6;
+  --accent-weak: rgba(107, 77, 230, 0.12);
+  --on-accent: #ffffff;
+  --shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  --neon-bg: none;
+  --neon-glow: none;
+}
+
+/* white */
+:root[data-theme="white"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --text: #111111;
+  --muted: #666666;
+  --border: rgba(0, 0, 0, 0.08);
+  --accent: #5b8def;
+  --accent-weak: rgba(91, 141, 239, 0.14);
+  --on-accent: #ffffff;
+  --shadow: 0 6px 16px rgba(0, 0, 0, 0.05);
+  --neon-bg: none;
+  --neon-glow: none;
+}
+
+/* pastel-blue */
+:root[data-theme="pastel-blue"] {
+  --bg: #f2f7ff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --text: #0f1b2d;
+  --muted: #4b617d;
+  --border: rgba(14, 27, 43, 0.08);
+  --accent: #3e7be6;
+  --accent-weak: rgba(62, 123, 230, 0.14);
+  --on-accent: #ffffff;
+  --shadow: 0 8px 20px rgba(18, 38, 77, 0.08);
+  --neon-bg: none;
+  --neon-glow: none;
 }
 
 * {
@@ -25,7 +115,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: var(--bg);
-  color: var(--text-primary);
+  color: var(--text);
   display: grid;
   grid-template-rows: auto 1fr auto;
   width: 100%;
@@ -2734,8 +2824,8 @@ body.theme-brief .toolbar {
   position: relative;
   min-height: 520px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(142, 96, 255, 0.22);
-  background: rgba(19, 8, 40, 0.85);
+  border: 1px solid var(--border);
+  background: var(--card);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -2747,11 +2837,11 @@ body.theme-brief .toolbar {
 
 .graph-tooltip {
   position: absolute;
-  background: rgba(10, 4, 23, 0.92);
-  border: 1px solid rgba(142, 96, 255, 0.35);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 10px 14px;
-  color: var(--text-primary);
+  color: var(--text);
   box-shadow: var(--shadow);
   min-width: 220px;
   pointer-events: none;
@@ -2763,14 +2853,14 @@ body.theme-brief .toolbar {
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--muted);
   letter-spacing: 0.04em;
 }
 
 .graph-groups-panel {
-  background: rgba(17, 7, 32, 0.9);
+  background: var(--card);
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(142, 96, 255, 0.2);
+  border: 1px solid var(--border);
   padding: 18px;
   display: grid;
   gap: 18px;
@@ -2794,8 +2884,8 @@ body.theme-brief .toolbar {
   gap: 8px;
   border-radius: 999px;
   padding: 6px 12px;
-  background: rgba(22, 11, 48, 0.8);
-  border: 1px solid rgba(142, 96, 255, 0.25);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
 .graph-legend-swatch {
@@ -2871,6 +2961,76 @@ body.theme-brief .toolbar {
 .graph-canvas circle.dimmed,
 .graph-canvas line.dimmed {
   opacity: 0.15;
+}
+
+/* Применение токенов к общим элементам */
+.app-shell__topbar,
+.app-shell__footer,
+.editor,
+.editor__header,
+.editor__canvas,
+.note-block,
+.note-inspector,
+.toolbar,
+.inline-bubble,
+.bottom-sheet,
+.pill-button,
+.fab,
+.pdf-viewer,
+.table-viewer,
+.code-viewer,
+.slides-viewer,
+.chip-list,
+.property-list,
+.connections-panel,
+.graph-groups-panel,
+.graph-canvas {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.app-shell__body,
+.editor__body {
+  background: var(--surface);
+}
+
+.app-neon-bg {
+  background-image: var(--neon-bg);
+}
+
+a,
+.link {
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.pill-button--primary,
+.fab--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.pill-button--primary:hover,
+.fab--primary:hover {
+  box-shadow: 0 0 0 6px var(--accent-weak);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .graph-canvas line.highlight {

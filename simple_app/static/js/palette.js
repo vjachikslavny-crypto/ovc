@@ -5,6 +5,7 @@ export function initPalette({ paletteEl, triggerEl, onInsert }) {
 
   const close = () => paletteEl.setAttribute('aria-hidden', 'true');
   const open = () => paletteEl.setAttribute('aria-hidden', 'false');
+  const isOpen = () => paletteEl.getAttribute('aria-hidden') === 'false';
 
   triggerEl.addEventListener('click', (event) => {
     event.preventDefault();
@@ -41,6 +42,19 @@ export function initPalette({ paletteEl, triggerEl, onInsert }) {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') close();
   });
+
+  // Закрываем палитру при клике/тапе вне её области
+  const handleOutsidePointer = (event) => {
+    if (!isOpen()) return;
+    const target = event.target;
+    if (!target) return;
+    if (paletteEl.contains(target) || triggerEl.contains(target)) return;
+    close();
+  };
+
+  // Используем mousedown в capture-режиме, чтобы срабатывать раньше stopPropagation
+  document.addEventListener('mousedown', handleOutsidePointer, { capture: true });
+  document.addEventListener('touchstart', handleOutsidePointer, { capture: true });
 }
 
 function buildBlock(type, dataset = {}) {
@@ -58,14 +72,6 @@ function buildBlock(type, dataset = {}) {
     case 'table':
       // Этот case не должен вызываться, так как таблица обрабатывается асинхронно
       return null;
-    case 'image':
-      return { id, type: 'image', data: { src: '', alt: '', caption: '' } };
-    case 'source':
-      return {
-        id,
-        type: 'source',
-        data: { url: '', title: 'Источник', domain: '', published_at: null, summary: '' },
-      };
     case 'todo':
       return { id, type: 'todo', data: { items: [{ id: uuid(), text: 'Задача', done: false }] } };
     case 'summary':
@@ -108,16 +114,18 @@ function showTableSizePicker() {
     const picker = document.createElement('div');
     picker.className = 'table-size-picker';
     picker.style.cssText = `
-      background: white;
+      background: var(--card);
       border-radius: 8px;
       padding: 20px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
       max-width: 400px;
+      color: var(--text);
     `;
 
     const title = document.createElement('h3');
     title.textContent = 'Выберите размер таблицы';
-    title.style.cssText = 'margin: 0 0 16px 0; font-size: 18px; font-weight: 600;';
+    title.style.cssText = 'margin: 0 0 16px 0; font-size: 18px; font-weight: 600; color: var(--text);';
 
     const grid = document.createElement('div');
     grid.className = 'table-size-grid';
@@ -141,8 +149,8 @@ function showTableSizePicker() {
         cell.style.cssText = `
           width: 20px;
           height: 20px;
-          border: 1px solid #ddd;
-          background: #f5f5f5;
+          border: 1px solid var(--border);
+          background: var(--surface);
           cursor: pointer;
           transition: all 0.1s;
         `;
@@ -156,11 +164,11 @@ function showTableSizePicker() {
             const cRow = parseInt(c.dataset.row, 10);
             const cCol = parseInt(c.dataset.col, 10);
             if (cRow <= hoverRow && cCol <= hoverCol) {
-              c.style.background = '#8b5cf6';
-              c.style.borderColor = '#7c3aed';
+              c.style.background = 'var(--accent)';
+              c.style.borderColor = 'var(--accent)';
             } else {
-              c.style.background = '#f5f5f5';
-              c.style.borderColor = '#ddd';
+              c.style.background = 'var(--surface)';
+              c.style.borderColor = 'var(--border)';
             }
           });
 
@@ -178,8 +186,8 @@ function showTableSizePicker() {
       const cRow = parseInt(cell.dataset.row, 10);
       const cCol = parseInt(cell.dataset.col, 10);
       if (cRow <= 3 && cCol <= 3) {
-        cell.style.background = '#8b5cf6';
-        cell.style.borderColor = '#7c3aed';
+        cell.style.background = 'var(--accent)';
+        cell.style.borderColor = 'var(--accent)';
       }
     });
 
@@ -190,7 +198,7 @@ function showTableSizePicker() {
       font-weight: 600;
       margin-bottom: 16px;
       font-size: 16px;
-      color: #333;
+      color: var(--text);
     `;
 
     const buttons = document.createElement('div');
@@ -200,10 +208,11 @@ function showTableSizePicker() {
     cancelBtn.textContent = 'Отмена';
     cancelBtn.style.cssText = `
       padding: 8px 16px;
-      border: 1px solid #ddd;
-      background: white;
+      border: 1px solid var(--border);
+      background: var(--surface);
       border-radius: 4px;
       cursor: pointer;
+      color: var(--text);
     `;
     cancelBtn.addEventListener('click', () => {
       overlay.remove();
@@ -215,8 +224,8 @@ function showTableSizePicker() {
     confirmBtn.style.cssText = `
       padding: 8px 16px;
       border: none;
-      background: #8b5cf6;
-      color: white;
+      background: var(--accent);
+      color: var(--on-accent);
       border-radius: 4px;
       cursor: pointer;
     `;
