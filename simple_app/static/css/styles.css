@@ -764,7 +764,7 @@ header, footer {
 }
 
 .toolbar__btn:hover {
-  background: rgba(139, 92, 246, 0.25);
+  background: var(--accent-weak);
 }
 
 .note-blocks {
@@ -787,7 +787,7 @@ header, footer {
 /* Визуальная обратная связь при выделении блока */
 .note-block-shell.selected,
 .note-block-shell[data-selected="true"] {
-  background-color: rgba(139, 92, 246, 0.05);
+  background-color: var(--accent-weak);
   border-radius: 6px;
 }
 
@@ -796,10 +796,10 @@ header, footer {
 }
 
 .note-block {
-  background: rgba(24, 12, 46, 0.55);
+  background: var(--card);
   border-radius: var(--radius-md);
   padding: 12px 16px;
-  border: 1px solid rgba(148, 108, 255, 0.18);
+  border: 1px solid var(--border);
   width: 100%;
   max-width: 100%;
   min-width: 0; /* Важно для предотвращения переполнения */
@@ -812,7 +812,7 @@ header, footer {
 }
 
 .note-block[contenteditable="true"]:focus {
-  outline: 2px solid rgba(139, 92, 246, 0.4);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -1882,9 +1882,9 @@ header, footer {
 }
 
 .audio-btn:hover:not(:disabled) {
-  background: rgba(139, 92, 246, 0.25);
-  border-color: rgba(192, 132, 252, 0.6);
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.35);
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 
@@ -2051,7 +2051,7 @@ header, footer {
   font-weight: 600;
   letter-spacing: 0.08em;
   padding: 24px;
-  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border: 1px dashed var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -2059,7 +2059,7 @@ header, footer {
   position: absolute;
   right: 12px;
   bottom: 10px;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--card);
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 0.85rem;
@@ -2603,7 +2603,7 @@ header, footer {
   padding: 12px 28px;
   font-size: 0.95rem;
   min-width: 180px;
-  box-shadow: 0 18px 26px rgba(139, 92, 246, 0.35);
+  box-shadow: var(--shadow);
 }
 
 .inspector-link-form select,
@@ -2636,8 +2636,8 @@ header, footer {
   left: 50%;
   bottom: clamp(80px, 12vw, 160px);
   transform: translateX(-50%);
-  background: rgba(20, 11, 41, 0.92);
-  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 10px 18px;
   display: flex;
