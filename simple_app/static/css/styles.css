@@ -2888,7 +2888,7 @@ body.theme-brief .toolbar {
   height: 14px;
   border-radius: 50%;
   background: var(--legend-color, var(--accent));
-  box-shadow: 0 0 12px var(--legend-color, var(--accent));
+  box-shadow: var(--shadow);
 }
 
 .graph-groups-list {
@@ -2901,10 +2901,10 @@ body.theme-brief .toolbar {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  border: 1px solid rgba(142, 96, 255, 0.18);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 12px 14px;
-  background: rgba(20, 10, 44, 0.75);
+  background: var(--card);
 }
 
 .graph-group-left {
@@ -2916,9 +2916,9 @@ body.theme-brief .toolbar {
 
 .graph-group-name-input {
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(142, 96, 255, 0.25);
-  background: rgba(18, 9, 40, 0.75);
-  color: var(--text-primary);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
   padding: 8px 12px;
 }
 
@@ -2930,7 +2930,7 @@ body.theme-brief .toolbar {
   border-radius: var(--radius-sm);
   padding: 0;
   background: transparent;
-  box-shadow: 0 10px 24px rgba(142, 96, 255, 0.35);
+  box-shadow: var(--shadow);
   cursor: pointer;
 }
 
@@ -2945,10 +2945,10 @@ body.theme-brief .toolbar {
 }
 
 .graph-label {
-  fill: var(--text-primary);
+  fill: var(--text);
   font-size: 0.85rem;
   font-weight: 600;
-  text-shadow: 0 0 10px rgba(7, 2, 18, 0.75);
+  text-shadow: none;
 }
 
 .graph-label.dimmed,
@@ -3029,7 +3029,7 @@ textarea,
 
 .graph-canvas line.highlight {
   opacity: 1;
-  stroke: #f9a8d4;
+  stroke: var(--accent);
 }
 
 @media (max-width: 960px) {
