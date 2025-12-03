@@ -1889,15 +1889,15 @@ header, footer {
 }
 
 .audio-btn--play {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(192, 132, 252, 0.4));
-  border-color: rgba(192, 132, 252, 0.6);
-  box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
   font-size: 1.1em;
 }
 
 .audio-btn--play:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(192, 132, 252, 0.5));
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.7);
+  background: var(--accent);
+  box-shadow: var(--shadow);
   transform: translateY(-1px) scale(1.05);
 }
 
@@ -1929,14 +1929,11 @@ header, footer {
   transform: translateY(-50%);
   width: 0%;
   height: 6px;
-  background: linear-gradient(90deg, 
-    rgba(139, 92, 246, 0.9) 0%, 
-    rgba(192, 132, 252, 1) 50%,
-    rgba(139, 92, 246, 0.9) 100%);
+  background: var(--accent);
   pointer-events: none;
   transition: width 0.1s linear;
   border-radius: 999px;
-  box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+  box-shadow: var(--neon-glow);
   /* OVC: audio - визуально узкая полоса, но кликабельная область широкая */
 }
 
@@ -1949,7 +1946,7 @@ header, footer {
   transform: translateY(-50%);
   width: 100%;
   height: 6px;
-  background: rgba(139, 92, 246, 0.15);
+  background: var(--accent-weak);
   border-radius: 999px;
   pointer-events: none;
 }
@@ -1963,10 +1960,10 @@ header, footer {
   transform: translateY(-50%);
   width: 12px;
   height: 12px;
-  background: rgba(192, 132, 252, 1);
-  border: 2px solid rgba(139, 92, 246, 1);
+  background: var(--accent);
+  border: 2px solid var(--border);
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(139, 92, 246, 0.8), 0 0 16px rgba(192, 132, 252, 0.6);
+  box-shadow: var(--neon-glow);
   pointer-events: none;
   opacity: 1;
 }
@@ -1983,7 +1980,7 @@ header, footer {
 }
 
 .audio-timeline.dragging .audio-progress::after {
-  box-shadow: 0 0 12px rgba(139, 92, 246, 1), 0 0 20px rgba(192, 132, 252, 0.8);
+  box-shadow: var(--neon-glow);
 }
 
 .audio-time {
@@ -2011,7 +2008,7 @@ header, footer {
 }
 
 .audio-transcript {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   border-radius: var(--radius-sm);
   padding: 10px;
   font-size: 0.9rem;
@@ -2019,9 +2016,9 @@ header, footer {
 }
 
 .slides-block {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(12, 4, 28, 0.8);
+  background: var(--card);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -2038,7 +2035,7 @@ header, footer {
   position: relative;
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   min-height: 180px;
   display: grid;
   place-items: center;
