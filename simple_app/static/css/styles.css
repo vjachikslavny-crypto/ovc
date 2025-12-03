@@ -1624,8 +1624,8 @@ header, footer {
   align-items: center;
   padding: 16px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  background: rgba(18, 9, 34, 0.85);
+  border: 1px solid var(--border);
+  background: var(--card);
 }
 
 /* OVC: pdf - для PDF-блоков меняем layout на column */
@@ -1639,8 +1639,8 @@ header, footer {
   width: 120px;
   height: 150px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(8, 2, 20, 0.7);
+  border: 1px solid var(--border);
+  background: var(--surface);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -1657,7 +1657,7 @@ header, footer {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--text-muted);
-  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border: 1px dashed var(--border);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   display: inline-block;
@@ -1668,31 +1668,31 @@ header, footer {
 .doc-preview__badge .doc-badge__title {
   font-size: 20px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   margin-bottom: 12px;
   word-break: break-word;
-  text-shadow: 0 0 10px rgba(139, 92, 246, 0.5), 0 0 20px rgba(139, 92, 246, 0.3);
+  text-shadow: none;
   letter-spacing: -0.02em;
 }
 
 .doc-preview__badge .doc-badge__meta {
   font-size: 14px;
-  color: var(--accent-strong);
+  color: var(--accent);
   margin-bottom: 10px;
   font-weight: 500;
-  text-shadow: 0 0 8px rgba(192, 132, 252, 0.4);
+  text-shadow: none;
 }
 
 .doc-preview__badge .doc-badge__type {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.15em;
-  color: var(--accent-strong);
+  color: var(--accent);
   text-transform: uppercase;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 2px solid rgba(139, 92, 246, 0.4);
-  text-shadow: 0 0 10px rgba(139, 92, 246, 0.6), 0 0 15px rgba(139, 92, 246, 0.4);
+  border-top: 2px solid var(--border);
+  text-shadow: none;
   position: relative;
 }
 
@@ -1704,8 +1704,8 @@ header, footer {
   transform: translateX(-50%);
   width: 60px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent-strong), transparent);
-  box-shadow: 0 0 10px var(--accent-strong);
+  background: var(--accent);
+  box-shadow: var(--neon-glow);
 }
 
 .doc-meta {
@@ -1728,7 +1728,7 @@ header, footer {
 
 .doc-meta__info {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 0.9rem;
 }
 
@@ -1750,8 +1750,8 @@ header, footer {
   align-items: center;
   padding: 8px;
   border-radius: var(--radius-sm);
-  background: rgba(8, 2, 20, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
 .doc-toolbar .spacer {
@@ -1761,8 +1761,8 @@ header, footer {
 .doc-btn {
   padding: 6px 12px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(139, 92, 246, 0.2);
+  border: 1px solid var(--border);
+  background: var(--accent-weak);
   color: var(--text);
   font-size: 0.9rem;
   cursor: pointer;
@@ -1770,8 +1770,8 @@ header, footer {
 }
 
 .doc-btn:hover:not(:disabled) {
-  background: rgba(139, 92, 246, 0.35);
-  border-color: rgba(139, 92, 246, 0.5);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .doc-btn:disabled {
@@ -1785,8 +1785,8 @@ header, footer {
   margin: 0 auto;
   border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(8, 2, 20, 0.7);
+  border: 1px solid var(--border);
+  background: var(--card);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1810,11 +1810,9 @@ header, footer {
   flex-direction: column;
   align-items: center;
   background: transparent;
-  border: 2px solid rgba(139, 92, 246, 0.4);
+  border: 2px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 
-    0 0 20px rgba(139, 92, 246, 0.3),
-    0 0 40px rgba(139, 92, 246, 0.15);
+  box-shadow: var(--shadow);
   position: relative;
   box-sizing: border-box;
 }
@@ -1831,10 +1829,10 @@ header, footer {
   /* max-height: 70vh; - убрано, чтобы контейнер мог растягиваться по содержимому */
   /* overflow-y: auto; - убрано, чтобы не было скроллбара внутри контейнера */
   overflow-x: hidden; /* Оставляем только горизонтальный overflow для предотвращения горизонтального скролла */
-  background: rgba(8, 2, 20, 0.5);
+  background: var(--card);
   padding: 12px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   display: flex !important; /* OVC: pdf - принудительно flex для видимости */
   flex-direction: column;
   gap: 16px;
@@ -1847,21 +1845,21 @@ header, footer {
 }
 
 .audio-block {
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 14px;
-  background: rgba(21, 10, 40, 0.85);
+  background: var(--card);
   backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.15);
+  box-shadow: var(--shadow);
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .audio-block:hover {
-  border-color: rgba(139, 92, 246, 0.5);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.25);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
 }
 
 .audio-controls {
@@ -1871,16 +1869,16 @@ header, footer {
 }
 
 .audio-btn {
-  border: 1px solid rgba(139, 92, 246, 0.4);
-  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid var(--border);
+  background: var(--accent-weak);
   border-radius: var(--radius-sm);
-  color: var(--accent-strong);
+  color: var(--text);
   padding: 8px 12px;
   cursor: pointer;
   min-width: 40px;
   transition: all 0.2s ease;
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.2);
+  box-shadow: var(--shadow);
 }
 
 .audio-btn:hover:not(:disabled) {
