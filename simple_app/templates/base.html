@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/static/vendor/prism/prism-tomorrow.css" />
     <link rel="stylesheet" href="/static/css/prism-ovc.css" />
   </head>
-  <body class="theme-clean" data-theme="clean">
+  <body class="theme-brief" data-theme="brief">
     <header class="app-shell__topbar">
       <div class="app-shell__brand">
         <span class="app-shell__logo">OVC</span>
@@ -20,10 +20,6 @@
         <a href="/graph" class="nav-link">Граф</a>
         <a href="/api/dataset/export" class="nav-link" target="_blank">JSONL</a>
       </nav>
-      <div class="app-shell__actions">
-        <button class="pill-button" data-theme="clean">Clean</button>
-        <button class="pill-button" data-theme="brief">Brief</button>
-      </div>
     </header>
     <main id="app-root" class="app-shell__body">
       {% block content %}{% endblock %}

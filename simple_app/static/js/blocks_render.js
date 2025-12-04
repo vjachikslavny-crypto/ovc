@@ -55,8 +55,6 @@ export function renderBlock(block) {
       return renderMarkdownBlock(data);
     case 'audio':
       return renderAudio(data);
-    case 'source':
-      return renderSource(data);
     case 'summary':
       return renderSummary(data);
     case 'todo':
@@ -699,7 +697,7 @@ function renderMarkdownBlock(data = {}) {
   expandBtn.type = 'button';
   expandBtn.className = 'btn';
   expandBtn.dataset.action = 'expand';
-  expandBtn.textContent = 'Expand';
+  expandBtn.textContent = 'Просмотр';
   if (!data.src) {
     expandBtn.disabled = true;
   }
@@ -1118,26 +1116,6 @@ function renderAudio(data) {
   block.appendChild(expanded);
 
   return block;
-}
-
-function renderSource(data) {
-  const card = document.createElement('article');
-  card.className = 'note-block note-block--source';
-  const title = document.createElement('h4');
-  title.textContent = data.title || data.url || 'Источник';
-  const meta = document.createElement('p');
-  meta.className = 'source-meta';
-  meta.textContent = `${data.domain || ''}${data.published_at ? ' · ' + data.published_at : ''}`;
-  const summary = document.createElement('p');
-  summary.className = 'source-summary';
-  summary.textContent = data.summary || '';
-  const link = document.createElement('a');
-  link.href = data.url || '#';
-  link.textContent = 'Открыть';
-  link.target = '_blank';
-  link.rel = 'noreferrer';
-  card.append(title, meta, summary, link);
-  return card;
 }
 
 function renderSummary(data) {

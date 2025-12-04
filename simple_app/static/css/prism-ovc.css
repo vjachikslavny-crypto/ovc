@@ -3,6 +3,15 @@
   --ovc-bg: var(--card);
   --ovc-border: var(--border);
   --ovc-fg: var(--text);
+  --code-comment: color-mix(in srgb, var(--muted) 80%, var(--text) 20%);
+  --code-punctuation: color-mix(in srgb, var(--muted) 65%, var(--text) 35%);
+  --code-entity: color-mix(in srgb, var(--accent) 75%, var(--text) 25%);
+  --code-boolean: color-mix(in srgb, var(--accent) 70%, var(--on-accent) 30%);
+  --code-string: color-mix(in srgb, var(--accent) 60%, var(--muted) 40%);
+  --code-operator: color-mix(in srgb, var(--accent) 55%, var(--text) 45%);
+  --code-keyword: color-mix(in srgb, var(--accent) 65%, var(--text) 35%);
+  --code-function: color-mix(in srgb, var(--accent) 70%, var(--text) 30%);
+  --code-regex: color-mix(in srgb, var(--accent) 50%, var(--muted) 50%);
   background: var(--ovc-bg);
   border: 1px solid var(--ovc-border);
   border-radius: var(--radius-md);
@@ -45,11 +54,11 @@
 .ovc-prism .token.prolog,
 .ovc-prism .token.doctype,
 .ovc-prism .token.cdata {
-  color: #8b8fa7;
+  color: var(--code-comment);
 }
 
 .ovc-prism .token.punctuation {
-  color: #b7b9c8;
+  color: var(--code-punctuation);
 }
 
 .ovc-prism .token.property,
@@ -57,12 +66,12 @@
 .ovc-prism .token.constant,
 .ovc-prism .token.symbol,
 .ovc-prism .token.deleted {
-  color: #ff7aa2;
+  color: var(--code-entity);
 }
 
 .ovc-prism .token.boolean,
 .ovc-prism .token.number {
-  color: #ffd479;
+  color: var(--code-boolean);
 }
 
 .ovc-prism .token.selector,
@@ -71,30 +80,30 @@
 .ovc-prism .token.char,
 .ovc-prism .token.builtin,
 .ovc-prism .token.inserted {
-  color: #8affc1;
+  color: var(--code-string);
 }
 
 .ovc-prism .token.operator,
 .ovc-prism .token.entity,
 .ovc-prism .token.url {
-  color: #b0a9ff;
+  color: var(--code-operator);
 }
 
 .ovc-prism .token.atrule,
 .ovc-prism .token.attr-value,
 .ovc-prism .token.keyword {
-  color: #9fd1ff;
+  color: var(--code-keyword);
 }
 
 .ovc-prism .token.function,
 .ovc-prism .token.class-name {
-  color: #a7e0ff;
+  color: var(--code-function);
 }
 
 .ovc-prism .token.regex,
 .ovc-prism .token.important,
 .ovc-prism .token.variable {
-  color: #ffcf99;
+  color: var(--code-regex);
 }
 
 .ovc-codebar {

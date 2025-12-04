@@ -53,23 +53,5 @@ export function initSmartInsert(canvas, { onTransform }) {
       }
     }
 
-    if (window.confirm('Оформить как источник?')) {
-      let domain = '';
-      try {
-        domain = new URL(url).hostname;
-      } catch (error) {
-        domain = '';
-      }
-      onTransform(blockId, {
-        type: 'source',
-        data: {
-          url,
-          title: text.replace(url, '').trim() || 'Источник',
-          domain,
-          published_at: null,
-          summary: '',
-        },
-      });
-    }
   });
 }

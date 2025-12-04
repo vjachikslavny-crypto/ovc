@@ -319,7 +319,8 @@ function renderGroups(groups) {
     controls.className = 'graph-group-controls';
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
-    colorInput.value = group.color || '#8b5cf6';
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent')?.trim();
+    colorInput.value = group.color || accent || colorInput.value;
     colorInput.addEventListener('change', async () => {
       await updateGroupColor(group.key, colorInput.value);
     });

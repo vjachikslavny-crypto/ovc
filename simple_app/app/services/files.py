@@ -205,6 +205,7 @@ CODE_EXTENSIONS = {
     ".cfg",
     ".pl",
     ".cs",
+    ".swift",
 }
 
 IMAGE_MAX_BYTES = 15 * 1024 * 1024
@@ -273,6 +274,7 @@ CODE_LANGUAGE_MAP = {
     ".cfg": "ini",
     ".pl": "perl",
     ".cs": "csharp",
+    ".swift": "swift",
 }
 
 

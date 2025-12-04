@@ -47,10 +47,23 @@ function setupMarkdownBlock(block) {
   });
 
   expandBtn?.addEventListener('click', () => {
-    if (state.expanded || !src) return;
-    state.expanded = true;
-    expandBtn.disabled = true;
-    fetchMarkdown(block, src, bodyEl, capEl, { clamp: true, totalLines });
+    if (!src) return;
+    if (!state.expanded) {
+      // Разворачиваем - загружаем полный файл
+      state.expanded = true;
+      expandBtn.textContent = 'Свернуть';
+      bodyEl.classList.add('md-expanded');
+      fetchMarkdown(block, src, bodyEl, capEl, { clamp: true, totalLines });
+    } else {
+      // Сворачиваем - возвращаемся к превью
+      state.expanded = false;
+      expandBtn.textContent = 'Просмотр';
+      bodyEl.classList.remove('md-expanded');
+      const previewUrl = block.dataset.previewUrl || src;
+      if (previewUrl) {
+        fetchMarkdown(block, previewUrl, bodyEl, capEl, { clamp: true, preview: true, totalLines });
+      }
+    }
   });
 
   if (previewUrl) {
