@@ -51,7 +51,7 @@ function setupSlidesBlock(block, onBlockUpdate) {
           ensureMeta().then(() => {
             if (meta.count) renderAllSlides();
           }).catch(showError);
-        }
+      }
       }
       
       if (typeof onBlockUpdate === 'function' && block.dataset.blockId) {

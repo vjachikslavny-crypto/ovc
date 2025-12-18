@@ -841,19 +841,19 @@ function renderDoc(data) {
     }
     card.appendChild(cover);
   } else {
-    const preview = document.createElement('div');
-    preview.className = 'doc-preview';
-    if (data.preview) {
-      const img = document.createElement('img');
-      img.src = data.preview;
-      img.alt = 'Превью документа';
-      img.loading = 'lazy';
-      preview.appendChild(img);
-    } else {
-      const badge = document.createElement('div');
-      badge.className = 'doc-preview__badge';
+  const preview = document.createElement('div');
+  preview.className = 'doc-preview';
+  if (data.preview) {
+    const img = document.createElement('img');
+    img.src = data.preview;
+    img.alt = 'Превью документа';
+    img.loading = 'lazy';
+    preview.appendChild(img);
+  } else {
+    const badge = document.createElement('div');
+    badge.className = 'doc-preview__badge';
       badge.textContent = kind.toUpperCase();
-      preview.appendChild(badge);
+    preview.appendChild(badge);
     }
     card.appendChild(preview);
   }

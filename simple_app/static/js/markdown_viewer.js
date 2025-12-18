@@ -50,10 +50,10 @@ function setupMarkdownBlock(block) {
     if (!src) return;
     if (!state.expanded) {
       // Разворачиваем - загружаем полный файл
-      state.expanded = true;
+    state.expanded = true;
       expandBtn.textContent = 'Свернуть';
       bodyEl.classList.add('md-expanded');
-      fetchMarkdown(block, src, bodyEl, capEl, { clamp: true, totalLines });
+    fetchMarkdown(block, src, bodyEl, capEl, { clamp: true, totalLines });
     } else {
       // Сворачиваем - возвращаемся к превью
       state.expanded = false;

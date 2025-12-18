@@ -82,12 +82,26 @@ function setupTableBlock(block, onBlockUpdate) {
 
   // OVC: excel - диаграммы отключены, фокус на предпросмотре таблиц
   
-  toggleBtn?.addEventListener('click', () => {
-    const nextView = block.dataset.view === 'inline' ? 'cover' : 'inline';
+  toggleBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const currentView = block.dataset.view;
+    const nextView = currentView === 'inline' ? 'cover' : 'inline';
+    
+    console.log('[TableViewer] Toggle clicked:', {
+      currentView,
+      nextView,
+      coverHidden: coverEl?.hidden,
+      inlineHidden: inlineEl?.hidden
+    });
+    
     updateView(block, nextView, coverEl, inlineEl, toggleBtn);
+    
     if (typeof onBlockUpdate === 'function') {
       onBlockUpdate(block.dataset.blockId, { view: nextView });
     }
+    
     if (nextView === 'inline') {
       ensureSummary(summaryUrl, infoEl, previewEl, sheetSelect, block, state, onBlockUpdate).then(() => {
         if (state.sheet) {
@@ -96,6 +110,13 @@ function setupTableBlock(block, onBlockUpdate) {
         }
       });
     }
+    
+    console.log('[TableViewer] After toggle:', {
+      view: block.dataset.view,
+      coverHidden: coverEl?.hidden,
+      inlineHidden: inlineEl?.hidden,
+      toggleBtnText: toggleBtn?.textContent
+    });
   });
 
   sheetSelect?.addEventListener('change', () => {
@@ -227,10 +248,36 @@ function setupTableBlock(block, onBlockUpdate) {
 }
 
 function updateView(block, view, coverEl, inlineEl, toggleBtn) {
+  console.log('[TableViewer] updateView called:', {
+    view,
+    coverEl: !!coverEl,
+    inlineEl: !!inlineEl,
+    toggleBtn: !!toggleBtn
+  });
+  
   block.dataset.view = view;
-  if (coverEl) coverEl.hidden = view === 'inline';
-  if (inlineEl) inlineEl.hidden = view !== 'inline';
-  if (toggleBtn) toggleBtn.textContent = view === 'inline' ? 'Свернуть' : 'Просмотр';
+  
+  if (coverEl) {
+    coverEl.hidden = view === 'inline';
+    coverEl.style.display = view === 'inline' ? 'none' : '';
+  }
+  
+  if (inlineEl) {
+    inlineEl.hidden = view !== 'inline';
+    inlineEl.style.display = view === 'inline' ? '' : 'none';
+  }
+  
+  if (toggleBtn) {
+    toggleBtn.textContent = view === 'inline' ? 'Свернуть' : 'Просмотр';
+  }
+  
+  console.log('[TableViewer] updateView result:', {
+    view: block.dataset.view,
+    coverHidden: coverEl?.hidden,
+    coverDisplay: coverEl?.style.display,
+    inlineHidden: inlineEl?.hidden,
+    inlineDisplay: inlineEl?.style.display
+  });
 }
 
 function updateSheetNavButtons(block, state, prevSheetBtn, nextSheetBtn) {

@@ -2,6 +2,7 @@
 {% block title %}Редактор заметки{% endblock %}
 
 {% block content %}
+<div class="editor-layout">
 <div class="editor" data-note-id="{{ note_id or '' }}">
   <section class="editor__header">
     <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
@@ -13,8 +14,7 @@
         <option value="default">Фиолетовая</option>
         <option value="dark">Тёмная</option>
         <option value="milk">Молочная</option>
-        <option value="white">Зелёная</option>
-        <option value="pastel-blue">Пастельно-голубая</option>
+        <option value="light">Светлая</option>
       </select>
       <button class="pill-button pill-button--compact" id="note-share">Поделиться</button>
     </div>
@@ -22,14 +22,14 @@
 
   <div class="editor__body">
     <section class="editor__main" aria-label="Редактор заметки">
-      <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
-        <button class="toolbar__btn" data-action="bold">B</button>
-        <button class="toolbar__btn" data-action="italic"><em>I</em></button>
-        <button class="toolbar__btn" data-action="link">Link</button>
-        <button class="toolbar__btn" data-action="list">List</button>
-        <button class="toolbar__btn" data-action="quote">Quote</button>
-        <button class="toolbar__btn" data-action="align">Align</button>
-      </section>
+  <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
+    <button class="toolbar__btn" data-action="bold">B</button>
+    <button class="toolbar__btn" data-action="italic"><em>I</em></button>
+    <button class="toolbar__btn" data-action="link">Link</button>
+    <button class="toolbar__btn" data-action="list">List</button>
+    <button class="toolbar__btn" data-action="quote">Quote</button>
+    <button class="toolbar__btn" data-action="align">Align</button>
+  </section>
 
       <aside class="connections-panel connections-panel--compact connections-panel--open" id="connections-panel" aria-label="Связи">
         <header class="connections-panel__header">
@@ -44,12 +44,12 @@
         </div>
       </aside>
 
-      <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
-        <div id="note-blocks" class="note-blocks"></div>
-        <div class="floating-actions" aria-live="polite">
-          <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
-          <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
-          <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
+  <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
+    <div id="note-blocks" class="note-blocks"></div>
+    <div class="floating-actions" aria-live="polite">
+      <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
+      <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
+      <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
           <input
             type="file"
             id="file-input"
@@ -57,8 +57,8 @@
             accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.mkv,.avi,.pdf,.docx,.rtf,.pptx,.xls,.xlsx,.csv,.py,.js,.ts,.tsx,.jsx,.json,.md,.markdown,.html,.htm,.css,.scss,.yml,.yaml,.sh,.bash,.zsh,.sql,.c,.h,.cpp,.hpp,.java,.kt,.go,.rs,.php,.rb,.lua,.r,.tex,.toml,.ini,.cfg,.pl,.cs,.swift,text/plain,application/json,application/x-yaml"
             multiple
           />
-        </div>
-        <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
+    </div>
+    <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
         <div class="drop-overlay" id="drop-overlay" aria-hidden="true" hidden>
           <div class="drop-overlay__content">
             <p>Перетащите файлы сюда</p>
@@ -66,7 +66,7 @@
           </div>
         </div>
       </section>
-    </section>
+  </section>
   </div>
 
   <div class="bottom-sheet" id="block-palette" aria-hidden="true">
@@ -161,8 +161,37 @@
     <button class="icon-button" id="hint-dismiss">×</button>
   </div>
 </div>
+
+<aside class="graph-sidebar" id="graph-sidebar" aria-label="Граф связей">
+  <div class="graph-sidebar__content">
+    <div class="graph-sidebar__canvas" id="mini-graph-canvas">
+      <svg id="mini-graph-svg" class="mini-graph-svg"></svg>
+      <div class="graph-sidebar__empty">
+        <p class="muted">Граф загружается...</p>
+      </div>
+    </div>
+    <div class="graph-sidebar__controls">
+      <div class="graph-sidebar__control-group">
+        <label class="graph-sidebar__label">Цвет группы</label>
+        <input type="color" id="group-color-picker" class="color-picker" value="#8b5cf6" aria-label="Цвет группы заметки" />
+      </div>
+      <div class="graph-sidebar__control-group">
+        <label class="graph-sidebar__label">Масштаб заметки</label>
+        <div class="zoom-controls">
+          <button class="icon-button icon-button--compact" id="zoom-out" aria-label="Уменьшить">−</button>
+          <span class="zoom-value" id="zoom-value">100%</span>
+          <button class="icon-button icon-button--compact" id="zoom-in" aria-label="Увеличить">+</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
+  <script src="/static/js/vendor/d3.v7.min.js"></script>
   <script type="module" src="/static/js/editor.js"></script>
+  <script type="module" src="/static/js/mini-graph.js"></script>
 {% endblock %}

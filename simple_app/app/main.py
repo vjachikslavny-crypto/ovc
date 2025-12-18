@@ -45,8 +45,8 @@ templates = Jinja2Templates(directory="simple_app/templates")
 
 
 @app.get("/")
-def index(request: Request):
-    return templates.TemplateResponse("editor.html", {"request": request, "note_id": None})
+def index(request: Request, note_id: str = None):
+    return templates.TemplateResponse("editor.html", {"request": request, "note_id": note_id})
 
 
 @app.get("/notes")

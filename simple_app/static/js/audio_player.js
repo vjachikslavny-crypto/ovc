@@ -121,7 +121,7 @@ function setupAudioBlock(block, onBlockUpdate) {
           }
           
           await audioEl.play();
-          playBtn.textContent = '⏸';
+        playBtn.textContent = '⏸';
           console.log('Audio player: playback started', { 
             src: audioEl.src, 
             readyState: audioEl.readyState,
@@ -331,7 +331,7 @@ function setupAudioBlock(block, onBlockUpdate) {
       document.addEventListener('touchend', dragEndHandler);
     }
   }
-  
+
   if (timeline) {
     // Клик на timeline для быстрой перемотки
     timeline.addEventListener('click', (event) => {
@@ -350,7 +350,7 @@ function setupAudioBlock(block, onBlockUpdate) {
     timeline.addEventListener('mousedown', handleDragStart);
     timeline.addEventListener('touchstart', handleDragStart, { passive: false });
   }
-  
+
   function updateProgress() {
     if (currentLabel) currentLabel.textContent = formatTime(audioEl.currentTime);
     const percent = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
