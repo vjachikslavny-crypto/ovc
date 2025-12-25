@@ -90,8 +90,23 @@
       <button class="icon-button" data-close-inspector>×</button>
     </header>
     <section>
-      <h4>Теги</h4>
+      <h4>Теги заметки</h4>
       <div id="inspector-tags" class="chip-list"></div>
+      <h5 class="inspector-section-subtitle">Доступные теги</h5>
+      <div id="inspector-available-tags" class="chip-list chip-list--suggestions"></div>
+      <h5 class="inspector-section-subtitle">Добавить новый</h5>
+      <form id="inspector-tag-form" class="inspector-link-form inspector-tag-form">
+        <input
+          type="text"
+          id="inspector-tag-input"
+          placeholder="Введите новый тег"
+          aria-label="Добавить тег"
+        />
+        <div class="inspector-tag-actions">
+          <button type="submit" class="pill-button">Добавить тег</button>
+          <span id="inspector-tag-status" class="muted" aria-live="polite"></span>
+        </div>
+      </form>
     </section>
     <section>
       <h4>Связи</h4>

@@ -206,8 +206,12 @@ function renderMiniGraph() {
     return;
   }
   
-  const width = container.clientWidth;
-  const height = container.clientHeight;
+  let width = container.clientWidth;
+  let height = container.clientHeight;
+  
+  // Если размер нулевой, используем значения по умолчанию
+  if (width === 0) width = 430;
+  if (height === 0) height = 500;
   
   console.log('[MiniGraph] Rendering canvas:', width, 'x', height);
   
@@ -282,9 +286,10 @@ function renderMiniGraph() {
     .selectAll('line')
     .data(filteredLinks)
     .join('line')
-    .attr('stroke', 'var(--border-3)')
-    .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', 0.6);
+    .attr('stroke', d => ((d?.type || 'link') === 'tag' ? 'var(--text)' : 'var(--border-3)'))
+    .attr('stroke-width', d => ((d?.type || 'link') === 'tag' ? 1.8 : 1.5))
+    .attr('stroke-opacity', d => ((d?.type || 'link') === 'tag' ? 0.35 : 0.6))
+    .attr('stroke-dasharray', d => ((d?.type || 'link') === 'tag' ? '8 6' : null));
   
   // Рисуем узлы
   const node = miniGraphSvg.append('g')
@@ -525,4 +530,3 @@ window.addEventListener('popstate', () => {
   isInitializing = false;
   setTimeout(initMiniGraph, 100);
 });
-

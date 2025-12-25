@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["notes"])
 
 
+@router.get("/tags")
+async def list_all_tags():
+    """Возвращает список всех уникальных тегов в системе"""
+    with get_session() as session:
+        tags = session.execute(
+            select(NoteTag.tag).distinct().order_by(NoteTag.tag)
+        ).scalars().all()
+        return {"tags": list(tags)}
+
+
 @router.get("/notes", response_model=NoteListResponse)
 async def list_notes(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
     with get_session() as session:
@@ -51,10 +61,12 @@ async def list_notes(limit: int = Query(20, ge=1, le=100), offset: int = Query(0
 @router.get("/notes/{note_id}", response_model=NoteDetail)
 async def get_note(note_id: str):
     with get_session() as session:
-        note = session.get(Note, note_id)
+        note = session.execute(
+            select(Note).where(Note.id == note_id)
+        ).scalars().first()
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        return _serialize_detail(note)
+        return _serialize_detail(note, session=session)
 
 
 @router.post("/notes", response_model=NoteDetail, status_code=201)
@@ -72,7 +84,7 @@ async def create_note(payload: NoteCreateRequest):
         session.flush()
         _reindex_note(session, note)
         session.refresh(note)
-        return _serialize_detail(note)
+        return _serialize_detail(note, session=session)
 
 
 @router.patch("/notes/{note_id}", response_model=NoteDetail)
@@ -104,7 +116,7 @@ async def update_note(note_id: str, payload: NoteUpdateRequest):
             _reindex_note(session, note)
 
         session.refresh(note)
-        return _serialize_detail(note)
+        return _serialize_detail(note, session=session)
 
 
 @router.delete("/notes/{note_id}")
@@ -129,12 +141,21 @@ def _serialize_summary(note: Note) -> NoteSummary:
     )
 
 
-def _serialize_detail(note: Note) -> NoteDetail:
+def _serialize_detail(note: Note, session=None) -> NoteDetail:
     blocks = _load_blocks(note.blocks_json, note_id=note.id)
     layout_hints = parse_layout_hints(note.layout_hints)
     passport = json.loads(note.passport_json or "{}")
 
-    tags = [tag.tag for tag in note.tags]
+    # Загружаем теги отдельным запросом, если передана сессия
+    if session:
+        tags = [
+            row.tag
+            for row in session.execute(
+                select(NoteTag.tag).where(NoteTag.note_id == note.id)
+            ).all()
+        ]
+    else:
+        tags = [tag.tag for tag in note.tags]
 
     links_from = [
         LinkPayload(

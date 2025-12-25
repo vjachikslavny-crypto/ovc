@@ -79,12 +79,27 @@ function renderGraph(data) {
 
   const link = zoomLayer
     .append('g')
-    .attr('stroke-opacity', 0.6)
     .selectAll('line')
     .data(edges)
     .join('line')
-    .attr('stroke-width', (d) => 1.2 + Math.max(0, (d.confidence || 0.5) * 2))
-    .attr('stroke', (d) => getLinkColor(d.source.color, d.target.color));
+    .attr('class', (d) => (getEdgeType(d) === 'tag' ? 'edge-tag' : 'edge-link'))
+    .attr('stroke-width', (d) =>
+      getEdgeType(d) === 'tag' ? 1.8 : 1.2 + Math.max(0, (d.confidence || 0.5) * 2)
+    )
+    .attr('stroke', (d) =>
+      getEdgeType(d) === 'tag' ? 'var(--text)' : getLinkColor(d.source.color, d.target.color)
+    )
+    .attr('stroke-dasharray', (d) =>
+      getEdgeType(d) === 'tag' ? '8 6' : null
+    )
+    .attr('stroke-opacity', (d) =>
+      getEdgeType(d) === 'tag' ? 0.35 : 0.6
+    );
+
+  link
+    .filter((d) => getEdgeType(d) === 'tag')
+    .append('title')
+    .text((d) => formatSharedTags(d.shared_tags));
 
   const nodeGroup = zoomLayer
     .append('g')
@@ -351,6 +366,9 @@ async function updateGroupColor(key, color) {
       d.color = color;
     });
   store.link.each(function (d) {
+    if (getEdgeType(d) === 'tag') {
+      return;
+    }
     if (d.source.group_key === key || d.target.group_key === key) {
       d3.select(this).attr('stroke', getLinkColor(d.source.color, d.target.color));
     }
@@ -422,6 +440,17 @@ function formatWeight(value) {
   const number = typeof value === 'number' ? value : Number.parseFloat(value);
   if (Number.isNaN(number)) return '1.0';
   return (Math.round(number * 10) / 10).toFixed(1);
+}
+
+function getEdgeType(edge) {
+  return edge?.type || 'link';
+}
+
+function formatSharedTags(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return 'Общие теги: —';
+  }
+  return `Общие теги: ${tags.join(', ')}`;
 }
 
 function drag(simulation) {

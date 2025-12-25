@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.agent.draft_types import (
     AddLinkAction,
     AddTagAction,
+    RemoveTagAction,
     DraftAction,
     InsertBlockAction,
     MoveBlockAction,
@@ -94,6 +95,23 @@ async def commit_endpoint(payload: CommitRequest):
                     )
                     if not exists:
                         session.add(NoteTag(note_id=note.id, tag=action.tag))
+                        touched_notes.add(note.id)
+                        applied += 1
+
+                elif isinstance(action, RemoveTagAction):
+                    note = _require_note(session, action.note_id)
+                    tag_to_remove = (
+                        session.execute(
+                            select(NoteTag).where(
+                                NoteTag.note_id == note.id,
+                                NoteTag.tag == action.tag,
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    if tag_to_remove:
+                        session.delete(tag_to_remove)
                         touched_notes.add(note.id)
                         applied += 1
 

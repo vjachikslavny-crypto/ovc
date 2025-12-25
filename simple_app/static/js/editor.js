@@ -51,6 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
     onSetLayoutHint: handleLayoutHintUpdate,
     fetchNoteOptions: fetchLinkableNotes,
     onCreateLink: createManualLink,
+    onAddTags: addManualTags,
+    onRemoveTag: removeManualTag,
   });
 
   initToolbar(toolbarEl, canvas);
@@ -156,10 +158,16 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchNoteDetail(noteId) {
     const res = await fetch(`/api/notes/${noteId}`);
     if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    const note = await res.json();
+    console.log('[Editor] fetchNoteDetail response:', note);
+    console.log('[Editor] Tags from API:', note.tags);
+    return note;
   }
 
   function applyNote(note) {
+    console.log('[Editor] applyNote called with:', note);
+    console.log('[Editor] Tags from note:', note.tags);
+    
     noteState = {
       ...noteState,
       id: note.id,
@@ -173,9 +181,13 @@ document.addEventListener('DOMContentLoaded', () => {
       linksTo: note.linksTo || [],
       sources: note.sources || [],
     };
+    
+    console.log('[Editor] noteState.tags:', noteState.tags);
+    
     focusedBlockId = null;
     render();
     connectionsPanel?.update(noteState);
+    inspector.update(noteState);
   }
 
   async function refreshNoteState() {
@@ -1474,6 +1486,90 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     await refreshNoteState();
+  }
+
+  async function addManualTags(tags) {
+    console.log('[Editor] addManualTags called with:', tags);
+    
+    const noteId = await ensureNote();
+    console.log('[Editor] Note ID:', noteId);
+    
+    const cleaned = (Array.isArray(tags) ? tags : [])
+      .map((tag) => String(tag || '').trim().replace(/^#+/, ''))
+      .filter(Boolean);
+    const unique = Array.from(new Set(cleaned));
+    
+    console.log('[Editor] Cleaned tags:', unique);
+    
+    if (!unique.length) {
+      throw new Error('Введите тег');
+    }
+
+    const payload = {
+      draft: unique.map((tag) => ({
+        type: 'add_tag',
+        noteId,
+        tag,
+      })),
+    };
+
+    console.log('[Editor] Sending payload to /api/commit:', payload);
+
+    const res = await fetch('/api/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const error = await res.text();
+      console.error('[Editor] Commit failed:', error);
+      throw new Error(error);
+    }
+    
+    const result = await res.json();
+    console.log('[Editor] Commit result:', result);
+    
+    await refreshNoteState();
+    console.log('[Editor] State refreshed, new tags:', noteState.tags);
+    
+    return result;
+  }
+  
+  async function removeManualTag(tag) {
+    console.log('[Editor] removeManualTag called with:', tag);
+    
+    const noteId = await ensureNote();
+    
+    const payload = {
+      draft: [{
+        type: 'remove_tag',
+        noteId,
+        tag,
+      }],
+    };
+    
+    console.log('[Editor] Sending remove tag payload:', payload);
+    
+    const res = await fetch('/api/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    
+    if (!res.ok) {
+      const error = await res.text();
+      console.error('[Editor] Remove tag failed:', error);
+      throw new Error(error);
+    }
+    
+    const result = await res.json();
+    console.log('[Editor] Remove tag result:', result);
+    
+    await refreshNoteState();
+    console.log('[Editor] State refreshed after tag removal');
+    
+    return result;
   }
 
   // ---- CANVAS ----

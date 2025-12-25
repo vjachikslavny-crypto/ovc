@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import hashlib
-from typing import Dict, List, Optional, Set, Tuple
+from collections import defaultdict
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.db.models import GroupPreference, Note, NoteLink
+from app.db.models import GroupPreference, Note, NoteLink, NoteTag
 from app.db.session import get_session
 from app.utils.layout_hints import parse_layout_hints
 
@@ -17,6 +18,7 @@ router = APIRouter(tags=["graph"])
 
 DEFAULT_COLOR = "#8b5cf6"
 DEFAULT_LABEL = "Без группы"
+TAG_EDGE_MAX_NOTES = 200
 
 
 class GroupColorRequest(BaseModel):
@@ -32,7 +34,9 @@ async def graph_endpoint():
     with get_session() as session:
         notes = session.execute(select(Note)).scalars().all()
         links = session.execute(select(NoteLink)).scalars().all()
+        raw_tags = session.execute(select(NoteTag.note_id, NoteTag.tag)).all()
         groups, assignments = _build_groups(session, notes, links)
+        tags_by_note, tag_to_notes = _collect_tags(raw_tags)
 
         nodes: List[dict] = []
         for note in notes:
@@ -57,21 +61,25 @@ async def graph_endpoint():
                     "sizeScore": size_score,
                     "layoutHints": layout_hints,
                     "sizeWeight": size_weight,
-                    "tags": [tag.tag for tag in note.tags],
+                    "tags": tags_by_note.get(note.id, []),
                     "updatedAt": note.updated_at.isoformat(),
                 }
             )
 
-        edges = [
+        link_edges = [
             {
                 "id": link.id,
                 "source": link.from_id,
                 "target": link.to_id,
+                "type": "link",
                 "reason": link.reason,
                 "confidence": link.confidence,
             }
             for link in links
         ]
+        tag_edges = _build_tag_edges(tag_to_notes)
+        # Сначала теговые ребра, чтобы явные связи рисовались поверх.
+        edges = tag_edges + link_edges
 
     return {"nodes": nodes, "edges": edges}
 
@@ -240,6 +248,54 @@ def _load_json(value: Optional[str]) -> dict:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _collect_tags(
+    raw_tags: List[tuple[str, str]],
+) -> tuple[Dict[str, List[str]], Dict[str, Set[str]]]:
+    tags_by_note: DefaultDict[str, List[str]] = defaultdict(list)
+    tag_to_notes: DefaultDict[str, Set[str]] = defaultdict(set)
+
+    for note_id, tag in raw_tags:
+        if not tag:
+            continue
+        tags_by_note[note_id].append(tag)
+        tag_to_notes[tag].add(note_id)
+
+    for note_id, tags in tags_by_note.items():
+        tags_by_note[note_id] = sorted(set(tags))
+
+    return dict(tags_by_note), dict(tag_to_notes)
+
+
+def _build_tag_edges(tag_to_notes: Dict[str, Set[str]]) -> List[dict]:
+    edges_by_pair: Dict[tuple[str, str], dict] = {}
+
+    for tag, note_ids in tag_to_notes.items():
+        note_list = sorted(note_ids)
+        if len(note_list) < 2:
+            continue
+        if len(note_list) > TAG_EDGE_MAX_NOTES:
+            # Слишком популярные теги пропускаем, чтобы не взорвать граф.
+            continue
+        for idx, source_id in enumerate(note_list[:-1]):
+            for target_id in note_list[idx + 1 :]:
+                key = (source_id, target_id)
+                entry = edges_by_pair.setdefault(
+                    key,
+                    {
+                        "source": source_id,
+                        "target": target_id,
+                        "type": "tag",
+                        "shared_tags": [],
+                    },
+                )
+                entry["shared_tags"].append(tag)
+
+    for edge in edges_by_pair.values():
+        edge["shared_tags"] = sorted(edge["shared_tags"])
+
+    return list(edges_by_pair.values())
 
 
 def _blocks_to_text(blocks: List[dict]) -> str:

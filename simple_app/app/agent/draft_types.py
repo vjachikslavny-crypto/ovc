@@ -43,6 +43,11 @@ class AddTagAction(DraftActionBase):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
+class RemoveTagAction(DraftActionBase):
+    type: Literal["remove_tag"] = "remove_tag"
+    tag: str
+
+
 class AddLinkAction(DraftActionBase):
     type: Literal["add_link"] = "add_link"
     from_id: str = Field(..., alias="fromId")
@@ -62,6 +67,7 @@ DraftAction = Union[
     UpdateBlockAction,
     MoveBlockAction,
     AddTagAction,
+    RemoveTagAction,
     AddLinkAction,
     SetStyleAction,
 ]
