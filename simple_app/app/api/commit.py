@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import List, Set
+from typing import List, Optional, Set
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -23,6 +23,9 @@ from app.db.session import get_session
 from app.log import dataset_logger
 from app.api.notes import _reindex_note
 from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints
+from app.core.security import get_current_user
+from app.models.user import User
+from app.services.audit import log_event
 
 router = APIRouter(tags=["commit"])
 
@@ -37,7 +40,11 @@ class CommitResponse(BaseModel):
 
 
 @router.post("/commit", response_model=CommitResponse)
-async def commit_endpoint(payload: CommitRequest):
+async def commit_endpoint(
+    payload: CommitRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     if not payload.draft:
         raise HTTPException(status_code=400, detail="Draft is empty")
 
@@ -49,7 +56,7 @@ async def commit_endpoint(payload: CommitRequest):
         try:
             for action in payload.draft:
                 if isinstance(action, InsertBlockAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     blocks = json.loads(note.blocks_json or "[]")
                     block_dict = action.block.dict(by_alias=True)
                     if not block_dict.get("id"):
@@ -62,7 +69,7 @@ async def commit_endpoint(payload: CommitRequest):
                     applied += 1
 
                 elif isinstance(action, UpdateBlockAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     blocks = json.loads(note.blocks_json or "[]")
                     if _patch_block(blocks, action.block_id, action.patch):
                         note.blocks_json = json.dumps(blocks, ensure_ascii=False)
@@ -72,7 +79,7 @@ async def commit_endpoint(payload: CommitRequest):
                         applied += 1
 
                 elif isinstance(action, MoveBlockAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     blocks = json.loads(note.blocks_json or "[]")
                     if _move_block(blocks, action.block_id, action.after_id):
                         note.blocks_json = json.dumps(blocks, ensure_ascii=False)
@@ -82,7 +89,7 @@ async def commit_endpoint(payload: CommitRequest):
                         applied += 1
 
                 elif isinstance(action, AddTagAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     exists = (
                         session.execute(
                             select(NoteTag).where(
@@ -99,7 +106,7 @@ async def commit_endpoint(payload: CommitRequest):
                         applied += 1
 
                 elif isinstance(action, RemoveTagAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     tag_to_remove = (
                         session.execute(
                             select(NoteTag).where(
@@ -116,8 +123,8 @@ async def commit_endpoint(payload: CommitRequest):
                         applied += 1
 
                 elif isinstance(action, AddLinkAction):
-                    source = _require_note(session, action.from_id)
-                    target = _require_note(session, action.to_id)
+                    source = _require_note(session, action.from_id, current_user)
+                    target = _require_note(session, action.to_id, current_user)
                     existing = (
                         session.execute(
                             select(NoteLink).where(
@@ -142,7 +149,7 @@ async def commit_endpoint(payload: CommitRequest):
                         applied += 1
 
                 elif isinstance(action, SetStyleAction):
-                    note = _require_note(session, action.note_id)
+                    note = _require_note(session, action.note_id, current_user)
                     note.style_theme = action.style_theme
                     if action.layout_hints is not None:
                         merged_hints = merge_layout_hints(note.layout_hints, action.layout_hints)
@@ -163,6 +170,9 @@ async def commit_endpoint(payload: CommitRequest):
 
         session.flush()
 
+        for note_id in touched_notes:
+            log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note_id})
+
     dataset_logger.append(
         {
             "kind": "commit",
@@ -176,11 +186,17 @@ async def commit_endpoint(payload: CommitRequest):
     return CommitResponse(applied=applied, notes_changed=list(touched_notes))
 
 
-def _require_note(session, note_id: Optional[str]) -> Note:
+def _require_note(session, note_id: Optional[str], user: User) -> Note:
     if not note_id:
         raise HTTPException(status_code=400, detail="Draft action missing noteId")
     note = session.get(Note, note_id)
     if not note:
+        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+    if note.user_id is None:
+        note.user_id = user.id
+        session.add(note)
+        session.flush()
+    if note.user_id != user.id:
         raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
     return note
 

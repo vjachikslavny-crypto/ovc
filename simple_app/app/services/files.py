@@ -3058,7 +3058,7 @@ class StoredAsset:
     block: dict
 
 
-async def save_upload(session: Session, upload: UploadFile, note_id: Optional[str]) -> StoredAsset:
+async def save_upload(session: Session, upload: UploadFile, note_id: Optional[str], user_id: str) -> StoredAsset:
     logger = logging.getLogger(__name__)  # OVC: docx - определяем logger в начале функции
     meta = _classify_file(upload)
     data = await upload.read()
@@ -3181,6 +3181,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
     asset = FileAsset(
         id=file_id,
         note_id=note_id,
+        user_id=user_id,
         kind=meta.kind,
         mime=meta.mime,
         filename=original_name,

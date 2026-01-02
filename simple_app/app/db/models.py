@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import relationship
 
-Base = declarative_base()
+from app.db.base import Base
 
 
 def generate_uuid() -> str:
@@ -16,6 +16,7 @@ class Note(Base):
     __tablename__ = "notes"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     title = Column(String, nullable=False)
     style_theme = Column(String, nullable=False, default="clean")
     layout_hints = Column(Text, nullable=False, default="{}")
@@ -23,6 +24,10 @@ class Note(Base):
     passport_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+    revision = Column(Integer, default=0, nullable=False)
+    tombstone = Column(Boolean, default=False, nullable=False)
+    client_origin = Column(String, nullable=True)
+    last_client_ts = Column(DateTime, nullable=True)
 
     chunks = relationship("NoteChunk", back_populates="note", cascade="all, delete-orphan")
     tags = relationship("NoteTag", back_populates="note", cascade="all, delete-orphan")
@@ -40,6 +45,7 @@ class Note(Base):
         cascade="all, delete-orphan",
     )
     files = relationship("FileAsset", back_populates="note", cascade="all, delete-orphan")
+    user = relationship("User", back_populates="notes")
 
 
 class NoteChunk(Base):
@@ -139,6 +145,7 @@ class FileAsset(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     kind = Column(String, nullable=False)
     mime = Column(String, nullable=False)
     filename = Column(String, nullable=False)
@@ -176,3 +183,4 @@ class FileAsset(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
     note = relationship("Note", back_populates="files")
+    user = relationship("User", back_populates="files")

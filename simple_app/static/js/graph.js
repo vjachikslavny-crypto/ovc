@@ -87,7 +87,7 @@ function renderGraph(data) {
       getEdgeType(d) === 'tag' ? 1.8 : 1.2 + Math.max(0, (d.confidence || 0.5) * 2)
     )
     .attr('stroke', (d) =>
-      getEdgeType(d) === 'tag' ? 'var(--text)' : getLinkColor(d.source.color, d.target.color)
+      getEdgeType(d) === 'tag' ? 'var(--muted)' : getLinkColor(d.source.color, d.target.color)
     )
     .attr('stroke-dasharray', (d) =>
       getEdgeType(d) === 'tag' ? '8 6' : null

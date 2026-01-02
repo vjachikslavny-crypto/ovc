@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse, JSONResponse
 
 from app.db.models import FileAsset
 from app.db.session import get_session
+from app.core.security import get_current_user, get_current_user_or_refresh
+from app.models.user import User
 from app.services.files import (
     EXCEL_WINDOW_LIMIT,
     PAGES_DIR,
@@ -29,17 +31,23 @@ from app.services.files import (
 router = APIRouter(tags=["files"])
 
 
-def _fetch_asset(file_id: str) -> FileAsset:
+def _fetch_asset(file_id: str, user: User) -> FileAsset:
     with get_session() as session:
         asset = session.get(FileAsset, file_id)
         if not asset:
+            raise HTTPException(status_code=404, detail="File not found")
+        if asset.user_id is None:
+            asset.user_id = user.id
+            session.add(asset)
+            session.flush()
+        if asset.user_id != user.id:
             raise HTTPException(status_code=404, detail="File not found")
         return asset
 
 
 @router.get("/files/{file_id}/original")
-def download_original(file_id: str):
-    asset = _fetch_asset(file_id)
+def download_original(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     path = Path(asset.path_original)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Original file is missing on disk")
@@ -47,8 +55,8 @@ def download_original(file_id: str):
 
 
 @router.get("/files/{file_id}/preview")
-def download_preview(file_id: str):
-    asset = _fetch_asset(file_id)
+def download_preview(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if not asset.path_preview:
         raise HTTPException(status_code=404, detail="Preview not available for this file")
     path = Path(asset.path_preview)
@@ -59,8 +67,8 @@ def download_preview(file_id: str):
 
 
 @router.get("/files/{file_id}/doc.html", response_class=HTMLResponse)
-def download_doc_html(file_id: str):
-    asset = _fetch_asset(file_id)
+def download_doc_html(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if not asset.path_doc_html:
         raise HTTPException(status_code=404, detail="Document preview not available for this file")
     path = Path(asset.path_doc_html)
@@ -71,8 +79,8 @@ def download_doc_html(file_id: str):
 
 
 @router.get("/files/{file_id}/slides.json")
-def slides_metadata(file_id: str):
-    asset = _fetch_asset(file_id)
+def slides_metadata(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "pptx" or not asset.path_slides_json:
         raise HTTPException(status_code=404, detail="Slides metadata unavailable")
     path = Path(asset.path_slides_json)
@@ -82,8 +90,8 @@ def slides_metadata(file_id: str):
 
 
 @router.get("/files/{file_id}/slide/{slide_index}")
-def slide_image(file_id: str, slide_index: int):
-    asset = _fetch_asset(file_id)
+def slide_image(file_id: str, slide_index: int, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "pptx":
         raise HTTPException(status_code=400, detail="File is not a PPTX")
     if slide_index < 1:
@@ -99,8 +107,8 @@ def slide_image(file_id: str, slide_index: int):
 
 
 @router.get("/files/{file_id}/video/source")
-def video_source(file_id: str):
-    asset = _fetch_asset(file_id)
+def video_source(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "video":
         raise HTTPException(status_code=400, detail="File is not a video")
     path = Path(asset.path_video_original or asset.path_original)
@@ -111,8 +119,8 @@ def video_source(file_id: str):
 
 
 @router.get("/files/{file_id}/video/poster.webp")
-def video_poster(file_id: str):
-    asset = _fetch_asset(file_id)
+def video_poster(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "video" or not asset.path_video_poster:
         raise HTTPException(status_code=404, detail="Poster not available for this video")
     path = Path(asset.path_video_poster)
@@ -122,8 +130,8 @@ def video_poster(file_id: str):
 
 
 @router.get("/files/{file_id}/code/meta")
-def code_meta(file_id: str):
-    asset = _fetch_asset(file_id)
+def code_meta(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "code":
         raise HTTPException(status_code=400, detail="File is not code")
     language = asset.code_language or "plaintext"
@@ -147,8 +155,12 @@ def code_meta(file_id: str):
 
 
 @router.get("/files/{file_id}/code/preview")
-def code_preview(file_id: str, max_lines: int = Query(CODE_PREVIEW_LINES, ge=1, le=MAX_CODE_LINES)):
-    asset = _fetch_asset(file_id)
+def code_preview(
+    file_id: str,
+    max_lines: int = Query(CODE_PREVIEW_LINES, ge=1, le=MAX_CODE_LINES),
+    current_user: User = Depends(get_current_user_or_refresh),
+):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "code":
         raise HTTPException(status_code=400, detail="File is not code")
     requested = max(1, min(max_lines, MAX_CODE_LINES))
@@ -166,8 +178,9 @@ def code_raw(
     file_id: str,
     start: int = Query(0, ge=0),
     max_lines: int = Query(MAX_CODE_LINES, ge=1),
+    current_user: User = Depends(get_current_user_or_refresh),
 ):
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "code":
         raise HTTPException(status_code=400, detail="File is not code")
     requested = max(1, min(max_lines, MAX_CODE_LINES))
@@ -181,8 +194,12 @@ def code_raw(
 
 
 @router.get("/files/{file_id}/md/preview")
-def markdown_preview(file_id: str, max_bytes: int = Query(MARKDOWN_PREVIEW_MAX_BYTES, ge=1)):
-    asset = _fetch_asset(file_id)
+def markdown_preview(
+    file_id: str,
+    max_bytes: int = Query(MARKDOWN_PREVIEW_MAX_BYTES, ge=1),
+    current_user: User = Depends(get_current_user_or_refresh),
+):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "markdown":
         raise HTTPException(status_code=400, detail="File is not markdown")
     limit = max(1, min(max_bytes, MARKDOWN_PREVIEW_MAX_BYTES))
@@ -193,8 +210,8 @@ def markdown_preview(file_id: str, max_bytes: int = Query(MARKDOWN_PREVIEW_MAX_B
 
 
 @router.get("/files/{file_id}/md/raw")
-def markdown_raw(file_id: str):
-    asset = _fetch_asset(file_id)
+def markdown_raw(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind != "markdown":
         raise HTTPException(status_code=400, detail="File is not markdown")
     path = _get_markdown_file_path(asset)
@@ -203,8 +220,8 @@ def markdown_raw(file_id: str):
 
 
 @router.get("/files/{file_id}/excel/summary.json")
-def excel_summary(file_id: str):
-    asset = _fetch_asset(file_id)
+def excel_summary(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls", "csv"}:
         raise HTTPException(status_code=400, detail="File is not a table")
     summary = _load_excel_summary(asset)
@@ -217,8 +234,9 @@ def excel_window(
     sheet_name: str,
     offset: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=EXCEL_WINDOW_LIMIT),
+    current_user: User = Depends(get_current_user_or_refresh),
 ):
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls", "csv"}:
         raise HTTPException(status_code=400, detail="File is not a table")
     window = _read_excel_window(asset, sheet_name, offset, limit)
@@ -226,15 +244,15 @@ def excel_window(
 
 
 @router.get("/files/{file_id}/excel/sheet/{sheet_name}.csv")
-def excel_sheet_csv(file_id: str, sheet_name: str):
-    asset = _fetch_asset(file_id)
+def excel_sheet_csv(file_id: str, sheet_name: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls", "csv"}:
         raise HTTPException(status_code=400, detail="File is not a table")
     return _iter_sheet_csv(asset, sheet_name)
 
 
 @router.get("/files/{file_id}/excel/charts.json")
-def excel_charts_meta(file_id: str):
+def excel_charts_meta(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     """Возвращает метаданные диаграмм Excel (аналогично slides.json для PPTX).
     
     Если есть excel_charts_pages_keep (ручной выбор страниц), возвращает только выбранные страницы.
@@ -242,7 +260,7 @@ def excel_charts_meta(file_id: str):
     """
     from app.services.files import _excel_charts_json_path, _excel_chart_sheets_json_path
     
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls"}:
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     
@@ -282,11 +300,11 @@ def excel_charts_meta(file_id: str):
 
 
 @router.get("/files/{file_id}/excel/charts/sheets.json")
-def excel_charts_sheets_meta(file_id: str):
+def excel_charts_sheets_meta(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     """Возвращает информацию о листах, содержащих диаграммы (структурное обнаружение)."""
     from app.services.files import _excel_chart_sheets_json_path
     
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls"}:
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     
@@ -306,11 +324,11 @@ def excel_charts_sheets_meta(file_id: str):
 
 
 @router.get("/files/{file_id}/excel/charts-anchors.json")
-def excel_charts_anchors_meta(file_id: str):
+def excel_charts_anchors_meta(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     """Возвращает якоря диаграмм (DrawingML anchors) для точного вырезания."""
     from app.services.files import _excel_chart_anchors_json_path
     
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls"}:
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     
@@ -325,12 +343,16 @@ def excel_charts_anchors_meta(file_id: str):
 
 
 @router.post("/files/{file_id}/excel/charts/pages")
-async def save_excel_charts_pages(file_id: str, request: Request):
+async def save_excel_charts_pages(
+    file_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     """Сохраняет ручной выбор страниц диаграмм пользователем."""
     from app.db.session import get_session
     from app.db.models import FileAsset
     
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls"}:
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     
@@ -355,6 +377,8 @@ async def save_excel_charts_pages(file_id: str, request: Request):
             db_asset = session.get(FileAsset, file_id)
             if not db_asset:
                 raise HTTPException(status_code=404, detail="File not found")
+            if db_asset.user_id != current_user.id:
+                raise HTTPException(status_code=404, detail="File not found")
             
             db_asset.excel_charts_pages_keep = json.dumps(pages_keep)
             session.commit()
@@ -371,9 +395,9 @@ async def save_excel_charts_pages(file_id: str, request: Request):
 
 
 @router.get("/files/{file_id}/excel/chart/{chart_index}")
-def excel_chart_image(file_id: str, chart_index: int):
+def excel_chart_image(file_id: str, chart_index: int, current_user: User = Depends(get_current_user_or_refresh)):
     """Возвращает изображение диаграммы Excel по индексу (аналогично slide/{index} для PPTX)."""
-    asset = _fetch_asset(file_id)
+    asset = _fetch_asset(file_id, current_user)
     if asset.kind not in {"xlsx", "xls"}:
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     if not asset.path_excel_charts_dir:
@@ -390,8 +414,8 @@ def excel_chart_image(file_id: str, chart_index: int):
 
 
 @router.get("/files/{file_id}/waveform")
-def download_waveform(file_id: str):
-    asset = _fetch_asset(file_id)
+def download_waveform(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     if not asset.path_waveform:
         raise HTTPException(status_code=404, detail="Waveform not available for this file")
     path = Path(asset.path_waveform)
@@ -401,8 +425,8 @@ def download_waveform(file_id: str):
 
 
 @router.get("/files/{file_id}/stream")
-def stream_media(file_id: str, request: Request):
-    asset = _fetch_asset(file_id)
+def stream_media(file_id: str, request: Request, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = _fetch_asset(file_id, current_user)
     path = Path(asset.path_original)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Original file is missing on disk")
@@ -443,13 +467,18 @@ def stream_media(file_id: str, request: Request):
 
 
 @router.get("/files/{file_id}/page/{page_num}")
-def get_pdf_page(file_id: str, page_num: int, scale: float = Query(1.0, ge=0.5, le=2.0)):
+def get_pdf_page(
+    file_id: str,
+    page_num: int,
+    scale: float = Query(1.0, ge=0.5, le=2.0),
+    current_user: User = Depends(get_current_user_or_refresh),
+):
     """OVC: pdf - получение страницы PDF в виде изображения."""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        asset = _fetch_asset(file_id)
+        asset = _fetch_asset(file_id, current_user)
         if asset.kind != "pdf":
             raise HTTPException(status_code=400, detail="File is not a PDF")
         if not asset.pages or page_num < 1 or page_num > asset.pages:

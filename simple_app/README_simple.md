@@ -20,6 +20,7 @@ uvicorn app.main:app --reload --app-dir simple_app
 - `/graph` — интерактивный граф связей (явные связи + общие теги), управление цветами/названиями групп
 - `/api/dataset/export` — журнал взаимодействий в формате JSONL
 - `/api/tags` — список всех уникальных тегов
+- `/login` и `/register` — экраны авторизации
 
 > Миграция удаляет прежние таблицы (используем SQLite + демо-данные).
 
@@ -59,6 +60,26 @@ uvicorn app.main:app --reload --app-dir simple_app
 ## Экспорт
 
 - Кнопка «Поделиться» вызывает печать (PDF) или проброс на `/api/export/docx/{note_id}` (пока stub, TODO: `python-docx`).
+
+## Auth и база
+
+Для PostgreSQL используйте `DATABASE_URL` и Alembic:
+
+```bash
+export DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/ovc
+PYTHONPATH=simple_app alembic upgrade head
+```
+
+Для SQLite — прежний путь:
+
+```bash
+PYTHONPATH=simple_app python -m app.db.migrate
+```
+
+Примечания по авторизации:
+- Email подтверждение обязательно для входа.
+- При `EMAIL_BACKEND=mock` ссылка подтверждения печатается в консольных логах.
+- Refresh токен живёт в HttpOnly cookie, access передаётся как Bearer.
 
 ## Локальный поиск
 

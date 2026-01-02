@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card">
+    <h1>Войти</h1>
+    <p class="muted">Используйте username (или email) и пароль для входа.</p>
+    {% if request.query_params.get('registered') %}
+    <p class="muted" style="color: var(--accent)">✓ Регистрация завершена! Войдите.</p>
+    {% endif %}
+    <form id="login-form" class="auth-form">
+      <input 
+        type="text" 
+        name="identifier" 
+        placeholder="Username или Email" 
+        required
+        autocomplete="username"
+      />
+      <input 
+        type="password" 
+        name="password" 
+        placeholder="Пароль" 
+        required
+        autocomplete="current-password"
+      />
+      <button type="submit" class="pill-button pill-button--primary">Войти</button>
+      <span id="login-error" class="muted"></span>
+    </form>
+    <div class="auth-actions">
+      <a href="/register">Создать аккаунт</a>
+    </div>
+  </div>
+</section>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const payload = {
+    identifier: formData.get('identifier'),
+    password: formData.get('password')
+  };
+  
+  const errorEl = document.getElementById('login-error');
+  errorEl.textContent = '';
+  
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (res.ok) {
+      // Обновляем access token перед редиректом
+      if (window.refreshAccessToken) {
+        await window.refreshAccessToken();
+      }
+      window.location.href = '/';
+    } else {
+      const err = await res.json();
+      errorEl.textContent = err.detail || 'Ошибка входа';
+    }
+  } catch (err) {
+    errorEl.textContent = 'Ошибка сети';
+  }
+});
+</script>
+{% endblock %}

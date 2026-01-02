@@ -17,3 +17,8 @@ pandas
 openpyxl
 xlrd==1.2.0
 httpx
+argon2-cffi
+python-jose
+itsdangerous
+email-validator
+psycopg2-binary

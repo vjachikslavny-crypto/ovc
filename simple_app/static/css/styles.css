@@ -261,6 +261,18 @@ header, footer {
   background: var(--accent-weak);
 }
 
+.nav-link--button {
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.nav-link--user {
+  color: var(--text);
+  cursor: default;
+}
+
 .app-shell__actions {
   display: flex;
   gap: 10px;
@@ -2831,7 +2843,7 @@ select.pill-button--compact:focus {
 }
 
 .notes-page {
-  width: min(960px, 100%);
+  width: min(1200px, 100%);
   display: grid;
   gap: 24px;
 }
@@ -2859,37 +2871,90 @@ select.pill-button--compact:focus {
 
 .notes-page__list {
   display: grid;
-  gap: 18px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .notes-page__list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .notes-page__list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .note-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 18px;
+  padding: 16px;
   background: var(--card);
   box-shadow: var(--shadow);
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  cursor: pointer;
+}
+
+.note-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  border-color: var(--accent);
+}
+
+.note-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong, var(--accent)));
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.note-card:hover::before {
+  opacity: 1;
 }
 
 .note-card__title {
   margin: 0;
-  padding: 4px 8px;
+  padding: 4px 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
   border-radius: var(--radius-sm);
   cursor: text;
   transition: background-color 0.2s ease, outline 0.2s ease;
   outline: 2px solid transparent;
   outline-offset: -2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .note-card__title:hover {
   background-color: var(--accent-weak);
+  padding: 4px 8px;
+  margin: 0 -8px;
 }
 
 .note-card__title:focus {
   background-color: var(--accent-weak);
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  padding: 4px 8px;
+  margin: 0 -8px;
 }
 
 /* Светлые заголовки для светлых тем */
@@ -2911,16 +2976,55 @@ select.pill-button--compact:focus {
   color: var(--text);
 }
 
+.note-card__preview {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .note-card__meta {
   color: var(--muted);
+  font-size: 0.7rem;
 }
 
 .note-card__style {
-  justify-self: flex-start;
+  display: inline-flex;
+  align-self: flex-start;
   background: var(--accent-weak);
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.8rem;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.note-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.note-card .pill-button {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.note-card:hover .pill-button {
+  opacity: 1;
 }
 
 .notes-empty {
@@ -3166,6 +3270,11 @@ select.pill-button--compact:focus {
   opacity: 0.15;
 }
 
+.graph-canvas line.edge-tag {
+  stroke-dasharray: 5 4;
+  stroke-opacity: 0.45;
+}
+
 /* Применение токенов к общим элементам */
 .app-shell__topbar,
 .app-shell__footer,
@@ -3360,6 +3469,34 @@ textarea,
 .graph-canvas line.highlight {
   opacity: 1;
   stroke: var(--accent);
+}
+
+.auth-page {
+  display: grid;
+  place-items: center;
+  padding: 48px 16px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
 }
 
 @media (max-width: 960px) {

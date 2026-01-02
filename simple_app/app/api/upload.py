@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Request
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Request, Depends
 from pydantic import BaseModel, Field
 
 from app.db.models import Note
 from app.db.session import get_session
 from app.services import files as file_service
+from app.core.security import get_current_user
+from app.models.user import User
+from app.services.audit import log_event
 
 # OVC: video - увеличиваем лимит размера файла
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
@@ -37,7 +40,12 @@ class UploadResponse(BaseModel):
         allow_population_by_field_name = True
 
 
-async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> UploadResponse:
+async def _store_uploads(
+    note_id: Optional[str],
+    uploads: List[UploadFile],
+    user: User,
+    request: Request,
+) -> UploadResponse:
     if not uploads:
         raise HTTPException(status_code=400, detail="No files provided")
 
@@ -50,9 +58,15 @@ async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> U
                 note = session.get(Note, note_id)
                 if not note:
                     raise HTTPException(status_code=404, detail="Note not found")
+                if note.user_id is None:
+                    note.user_id = user.id
+                    session.add(note)
+                    session.flush()
+                if note.user_id != user.id:
+                    raise HTTPException(status_code=404, detail="Note not found")
 
             for upload in uploads:
-                stored = await file_service.save_upload(session, upload, note_id)
+                stored = await file_service.save_upload(session, upload, note_id, user.id)
                 asset = stored.asset
                 original_url = f"/files/{asset.id}/original"
                 preview_url = f"/files/{asset.id}/preview" if asset.path_preview else None
@@ -71,6 +85,13 @@ async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> U
                         previewUrl=preview_url,
                     )
                 )
+                log_event(
+                    session,
+                    "FILE_UPLOAD",
+                    user_id=user.id,
+                    request=request,
+                    metadata={"file_id": asset.id, "kind": asset.kind},
+                )
 
             session.commit()
         except HTTPException:
@@ -85,15 +106,19 @@ async def _store_uploads(note_id: Optional[str], uploads: List[UploadFile]) -> U
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_files(
+    request: Request,
     note_id: Optional[str] = Query(default=None, alias="noteId"),
     files: List[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
 ):
-    return await _store_uploads(note_id, files)
+    return await _store_uploads(note_id, files, current_user, request)
 
 
 @router.post("/upload/audio", response_model=UploadResponse)
 async def upload_audio(
+    request: Request,
     note_id: Optional[str] = Query(default=None, alias="noteId"),
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
 ):
-    return await _store_uploads(note_id, [file])
+    return await _store_uploads(note_id, [file], current_user, request)

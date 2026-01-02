@@ -1,4 +1,7 @@
 from app.db.models import Base
+from app.models.user import User  # noqa: F401
+from app.models.session import RefreshToken  # noqa: F401
+from app.models.audit import AuditLog  # noqa: F401
 from app.db.session import engine
 from sqlalchemy import text
 
@@ -179,6 +182,86 @@ def upgrade() -> None:
                 print("Added markdown_line_count column to files table")
             except Exception as e:
                 print(f"Error adding markdown_line_count column: {e}")
+
+        if 'user_id' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN user_id VARCHAR"))
+                print("Added user_id column to files table")
+            except Exception as e:
+                print(f"Error adding user_id column to files table: {e}")
+
+        # OVC: добавляем поля в users при необходимости
+        result = conn.execute(text("PRAGMA table_info(users)"))
+        user_columns = [row[1] for row in result.fetchall()]
+        
+        if 'username' not in user_columns:
+            try:
+                # Добавляем username колонку (сначала nullable)
+                conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
+                print("Added username column to users table")
+                
+                # Генерируем username из email для существующих пользователей
+                # Извлекаем часть до @ и заменяем . на _
+                conn.execute(text("""
+                    UPDATE users 
+                    SET username = REPLACE(LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1)), '.', '_')
+                    WHERE username IS NULL AND email IS NOT NULL
+                """))
+                print("Generated usernames from emails for existing users")
+                
+                # Создаем уникальный индекс на username
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+                print("Created unique index on username")
+            except Exception as e:
+                print(f"Error adding username column to users table: {e}")
+        
+        if 'failed_login_count' not in user_columns:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN failed_login_count INTEGER DEFAULT 0 NOT NULL"))
+                print("Added failed_login_count column to users table")
+            except Exception as e:
+                print(f"Error adding failed_login_count column to users table: {e}")
+        
+        if 'locked_until' not in user_columns:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN locked_until DATETIME"))
+                print("Added locked_until column to users table")
+            except Exception as e:
+                print(f"Error adding locked_until column to users table: {e}")
+
+        # OVC: добавляем поля в notes при необходимости
+        result = conn.execute(text("PRAGMA table_info(notes)"))
+        note_columns = [row[1] for row in result.fetchall()]
+        if 'user_id' not in note_columns:
+            try:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN user_id VARCHAR"))
+                print("Added user_id column to notes table")
+            except Exception as e:
+                print(f"Error adding user_id column to notes table: {e}")
+        if 'revision' not in note_columns:
+            try:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN revision INTEGER DEFAULT 0"))
+                print("Added revision column to notes table")
+            except Exception as e:
+                print(f"Error adding revision column to notes table: {e}")
+        if 'tombstone' not in note_columns:
+            try:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN tombstone BOOLEAN DEFAULT 0"))
+                print("Added tombstone column to notes table")
+            except Exception as e:
+                print(f"Error adding tombstone column to notes table: {e}")
+        if 'client_origin' not in note_columns:
+            try:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN client_origin VARCHAR"))
+                print("Added client_origin column to notes table")
+            except Exception as e:
+                print(f"Error adding client_origin column to notes table: {e}")
+        if 'last_client_ts' not in note_columns:
+            try:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN last_client_ts DATETIME"))
+                print("Added last_client_ts column to notes table")
+            except Exception as e:
+                print(f"Error adding last_client_ts column to notes table: {e}")
 
         # Если таблицы не существует, создаем все таблицы
         try:

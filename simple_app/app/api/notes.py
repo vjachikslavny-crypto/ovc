@@ -4,9 +4,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 
 from app.agent.block_models import BlockModel, dump_blocks, parse_blocks
 from app.api.note_models import (
@@ -22,6 +22,9 @@ from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
+from app.core.security import get_current_user
+from app.models.user import User
+from app.services.audit import log_event
 from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints, parse_layout_hints
 
 logger = logging.getLogger(__name__)
@@ -30,22 +33,42 @@ router = APIRouter(tags=["notes"])
 
 
 @router.get("/tags")
-async def list_all_tags():
+async def list_all_tags(current_user: User = Depends(get_current_user)):
     """Возвращает список всех уникальных тегов в системе"""
     with get_session() as session:
-        tags = session.execute(
-            select(NoteTag.tag).distinct().order_by(NoteTag.tag)
-        ).scalars().all()
+        tags = (
+            session.execute(
+                select(NoteTag.tag)
+                .join(Note, Note.id == NoteTag.note_id)
+                .where(or_(Note.user_id == current_user.id, Note.user_id.is_(None)))
+                .distinct()
+                .order_by(NoteTag.tag)
+            )
+            .scalars()
+            .all()
+        )
         return {"tags": list(tags)}
 
 
 @router.get("/notes", response_model=NoteListResponse)
-async def list_notes(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+async def list_notes(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+):
     with get_session() as session:
-        total = session.execute(select(func.count(Note.id))).scalar_one()
+        total = (
+            session.execute(
+                select(func.count(Note.id)).where(
+                    or_(Note.user_id == current_user.id, Note.user_id.is_(None))
+                )
+            )
+            .scalar_one()
+        )
         notes = (
             session.execute(
                 select(Note)
+                .where(or_(Note.user_id == current_user.id, Note.user_id.is_(None)))
                 .order_by(Note.updated_at.desc())
                 .limit(limit)
                 .offset(offset)
@@ -54,23 +77,30 @@ async def list_notes(limit: int = Query(20, ge=1, le=100), offset: int = Query(0
             .all()
         )
 
+        for note in notes:
+            if note.user_id is None:
+                note.user_id = current_user.id
+                session.add(note)
+
         items = [_serialize_summary(note) for note in notes]
         return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/notes/{note_id}", response_model=NoteDetail)
-async def get_note(note_id: str):
+async def get_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
     with get_session() as session:
         note = session.execute(
             select(Note).where(Note.id == note_id)
         ).scalars().first()
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        return _serialize_detail(note, session=session)
+        _ensure_note_owner(note, current_user, session)
+        log_event(session, "NOTE_READ", user_id=current_user.id, request=request, metadata={"note_id": note.id})
+        return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
 @router.post("/notes", response_model=NoteDetail, status_code=201)
-async def create_note(payload: NoteCreateRequest):
+async def create_note(payload: NoteCreateRequest, request: Request, current_user: User = Depends(get_current_user)):
     with get_session() as session:
         layout_data = merge_layout_hints(None, payload.layout_hints)
         note = Note(
@@ -79,20 +109,28 @@ async def create_note(payload: NoteCreateRequest):
             layout_hints=dumps_layout_hints(layout_data),
             blocks_json=_dumps_blocks(payload.blocks),
             passport_json=_dumps(payload.passport),
+            user_id=current_user.id,
         )
         session.add(note)
         session.flush()
         _reindex_note(session, note)
         session.refresh(note)
-        return _serialize_detail(note, session=session)
+        log_event(session, "NOTE_CREATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
+        return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
 @router.patch("/notes/{note_id}", response_model=NoteDetail)
-async def update_note(note_id: str, payload: NoteUpdateRequest):
+async def update_note(
+    note_id: str,
+    payload: NoteUpdateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     with get_session() as session:
         note = session.get(Note, note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+        _ensure_note_owner(note, current_user, session)
 
         blocks_changed = False
 
@@ -116,15 +154,18 @@ async def update_note(note_id: str, payload: NoteUpdateRequest):
             _reindex_note(session, note)
 
         session.refresh(note)
-        return _serialize_detail(note, session=session)
+        log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
+        return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: str):
+async def delete_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
     with get_session() as session:
         note = session.get(Note, note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+        _ensure_note_owner(note, current_user, session)
+        log_event(session, "NOTE_DELETE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         session.delete(note)
         session.flush()
         index.remove(note_id)
@@ -141,7 +182,7 @@ def _serialize_summary(note: Note) -> NoteSummary:
     )
 
 
-def _serialize_detail(note: Note, session=None) -> NoteDetail:
+def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -> NoteDetail:
     blocks = _load_blocks(note.blocks_json, note_id=note.id)
     layout_hints = parse_layout_hints(note.layout_hints)
     passport = json.loads(note.passport_json or "{}")
@@ -157,28 +198,34 @@ def _serialize_detail(note: Note, session=None) -> NoteDetail:
     else:
         tags = [tag.tag for tag in note.tags]
 
-    links_from = [
-        LinkPayload(
-            id=link.id,
-            fromId=link.from_id,
-            toId=link.to_id,
-            title=link.target_note.title if link.target_note else "",
-            reason=link.reason,
-            confidence=link.confidence,
+    links_from = []
+    for link in note.links_from:
+        if user_id and link.target_note and link.target_note.user_id not in {None, user_id}:
+            continue
+        links_from.append(
+            LinkPayload(
+                id=link.id,
+                fromId=link.from_id,
+                toId=link.to_id,
+                title=link.target_note.title if link.target_note else "",
+                reason=link.reason,
+                confidence=link.confidence,
+            )
         )
-        for link in note.links_from
-    ]
-    links_to = [
-        LinkPayload(
-            id=link.id,
-            fromId=link.from_id,
-            toId=link.to_id,
-            title=link.source_note.title if link.source_note else "",
-            reason=link.reason,
-            confidence=link.confidence,
+    links_to = []
+    for link in note.links_to:
+        if user_id and link.source_note and link.source_note.user_id not in {None, user_id}:
+            continue
+        links_to.append(
+            LinkPayload(
+                id=link.id,
+                fromId=link.from_id,
+                toId=link.to_id,
+                title=link.source_note.title if link.source_note else "",
+                reason=link.reason,
+                confidence=link.confidence,
+            )
         )
-        for link in note.links_to
-    ]
 
     sources = [
         SourcePayload(
@@ -206,6 +253,16 @@ def _serialize_detail(note: Note, session=None) -> NoteDetail:
         linksTo=links_to,
         sources=sources,
     )
+
+
+def _ensure_note_owner(note: Note, user: User, session) -> None:
+    if note.user_id is None:
+        note.user_id = user.id
+        session.add(note)
+        session.flush()
+        return
+    if note.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Note not found")
 
 
 def _reindex_note(session, note: Note) -> None:

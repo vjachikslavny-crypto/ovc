@@ -19,6 +19,14 @@
         <a href="/" class="nav-link">Редактор</a>
         <a href="/graph" class="nav-link">Граф</a>
         <a href="/api/dataset/export" class="nav-link" target="_blank">JSONL</a>
+        {% if user %}
+          <span class="nav-link nav-link--user">{{ user.username }}</span>
+          <a href="/change-password" class="nav-link">Пароль</a>
+          <button class="nav-link nav-link--button" id="auth-logout">Выйти</button>
+        {% else %}
+          <a href="/login" class="nav-link">Войти</a>
+          <a href="/register" class="nav-link">Регистрация</a>
+        {% endif %}
       </nav>
     </header>
     <main id="app-root" class="app-shell__body">
@@ -34,6 +42,7 @@
     <script defer src="/static/js/vendor/markdown-it-sup.min.js"></script>
     <script defer src="/static/js/vendor/markdown-it-footnote.min.js"></script>
     <script defer src="/static/js/vendor/dompurify.min.js"></script>
+    <script type="module" src="/static/js/auth.js"></script>
     <script type="module" src="/static/js/theme.js"></script>
     {% block extra_scripts %}{% endblock %}
   </body>

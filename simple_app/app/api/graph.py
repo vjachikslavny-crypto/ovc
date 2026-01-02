@@ -5,13 +5,15 @@ import hashlib
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.db.models import GroupPreference, Note, NoteLink, NoteTag
 from app.db.session import get_session
 from app.utils.layout_hints import parse_layout_hints
+from app.core.security import get_current_user
+from app.models.user import User
 
 router = APIRouter(tags=["graph"])
 
@@ -30,11 +32,36 @@ class GroupLabelRequest(BaseModel):
 
 
 @router.get("/graph")
-async def graph_endpoint():
+async def graph_endpoint(current_user: User = Depends(get_current_user)):
     with get_session() as session:
-        notes = session.execute(select(Note)).scalars().all()
-        links = session.execute(select(NoteLink)).scalars().all()
-        raw_tags = session.execute(select(NoteTag.note_id, NoteTag.tag)).all()
+        notes = (
+            session.execute(select(Note).where(Note.user_id == current_user.id))
+            .scalars()
+            .all()
+        )
+        note_ids = [note.id for note in notes]
+        if note_ids:
+            links = (
+                session.execute(
+                    select(NoteLink)
+                    .where(
+                        NoteLink.from_id.in_(note_ids),
+                        NoteLink.to_id.in_(note_ids),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        else:
+            links = []
+        raw_tags = (
+            session.execute(
+                select(NoteTag.note_id, NoteTag.tag)
+                .join(Note, Note.id == NoteTag.note_id)
+                .where(Note.user_id == current_user.id)
+            )
+            .all()
+        )
         groups, assignments = _build_groups(session, notes, links)
         tags_by_note, tag_to_notes = _collect_tags(raw_tags)
 
@@ -85,10 +112,28 @@ async def graph_endpoint():
 
 
 @router.get("/graph/groups")
-async def graph_groups():
+async def graph_groups(current_user: User = Depends(get_current_user)):
     with get_session() as session:
-        notes = session.execute(select(Note)).scalars().all()
-        links = session.execute(select(NoteLink)).scalars().all()
+        notes = (
+            session.execute(select(Note).where(Note.user_id == current_user.id))
+            .scalars()
+            .all()
+        )
+        note_ids = [note.id for note in notes]
+        if note_ids:
+            links = (
+                session.execute(
+                    select(NoteLink)
+                    .where(
+                        NoteLink.from_id.in_(note_ids),
+                        NoteLink.to_id.in_(note_ids),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        else:
+            links = []
         groups, _ = _build_groups(session, notes, links)
 
     payload = [
@@ -105,7 +150,11 @@ async def graph_groups():
 
 
 @router.post("/graph/groups/{cluster}")
-async def update_group_color(cluster: str, payload: GroupColorRequest):
+async def update_group_color(
+    cluster: str,
+    payload: GroupColorRequest,
+    current_user: User = Depends(get_current_user),
+):
     key = cluster.strip() or "default"
 
     with get_session() as session:
@@ -124,7 +173,11 @@ async def update_group_color(cluster: str, payload: GroupColorRequest):
 
 
 @router.post("/graph/groups/{cluster}/label")
-async def update_group_label(cluster: str, payload: GroupLabelRequest):
+async def update_group_label(
+    cluster: str,
+    payload: GroupLabelRequest,
+    current_user: User = Depends(get_current_user),
+):
     key = cluster.strip() or "default"
     label = payload.label.strip()
     if not label:

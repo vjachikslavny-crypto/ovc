@@ -239,6 +239,16 @@ export function initUploader({
       }
       xhr.open('POST', url.toString());
       xhr.responseType = 'json';
+      // Добавляем авторизацию
+      const token = window.__accessToken || localStorage.getItem('accessToken');
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+      // Добавляем CSRF токен
+      const csrfToken = document.cookie.match(/csrf_token=([^;]+)/)?.[1];
+      if (csrfToken) {
+        xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+      }
       xhr.upload.addEventListener(
         'progress',
         (event) => {

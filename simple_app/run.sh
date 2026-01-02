@@ -1,8 +1,28 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+# OVC: pdf - скрипт для запуска сервера
 
-python -m venv .venv
+set -e
+
+# Переходим в корневую директорию проекта
+cd "$(dirname "$0")/.."
+
+# Активируем venv
+if [ ! -d ".venv" ]; then
+    echo "Создаю виртуальное окружение..."
+    python3 -m venv .venv
+fi
+
 source .venv/bin/activate
+
+# Устанавливаем зависимости
+echo "Устанавливаю зависимости..."
 pip install -r simple_app/requirements.txt
+
+# Запускаем миграцию
+echo "Запускаю миграцию базы данных..."
 PYTHONPATH=simple_app python -m app.db.migrate
-uvicorn app.main:app --reload --app-dir simple_app
+
+# Запускаем сервер
+echo "Запускаю сервер..."
+echo "Сервер будет доступен на http://127.0.0.1:8000"
+uvicorn app.main:app --app-dir simple_app --reload --host 127.0.0.1 --port 8000

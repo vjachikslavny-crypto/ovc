@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Регистрация{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card">
+    <h1>Регистрация</h1>
+    <p class="muted">Создайте аккаунт, чтобы сохранять свои заметки.</p>
+    <form id="register-form" class="auth-form">
+      <div>
+        <input 
+          type="text" 
+          name="username" 
+          placeholder="Username" 
+          required 
+          pattern="[a-zA-Z0-9._\-]{3,24}" 
+          minlength="3" 
+          maxlength="24"
+          autocomplete="username"
+        />
+        <span id="username-hint" class="muted"></span>
+      </div>
+      
+      <input 
+        type="email" 
+        name="email" 
+        placeholder="Email (необязательно)"
+        autocomplete="email"
+      />
+      
+      <input 
+        type="password" 
+        name="password" 
+        placeholder="Пароль (мин. 8 символов)" 
+        required 
+        minlength="8"
+        autocomplete="new-password"
+      />
+      
+      <button type="submit" class="pill-button pill-button--primary">Создать</button>
+      <span id="register-error" class="muted"></span>
+    </form>
+    <div class="auth-actions">
+      <a href="/login">Уже есть аккаунт</a>
+    </div>
+  </div>
+</section>
+
+<script>
+// Проверка доступности username
+const usernameInput = document.querySelector('[name="username"]');
+const usernameHint = document.getElementById('username-hint');
+
+let debounceTimer;
+usernameInput.addEventListener('input', (e) => {
+  clearTimeout(debounceTimer);
+  const username = e.target.value.trim();
+  
+  if (username.length < 3) {
+    usernameHint.textContent = '';
+    return;
+  }
+  
+  debounceTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/auth/username-available?u=${encodeURIComponent(username)}`);
+      const data = await res.json();
+      
+      if (data.available) {
+        usernameHint.textContent = '✓ Доступен';
+        usernameHint.style.color = 'var(--accent)';
+      } else {
+        usernameHint.textContent = data.reason === 'invalid_format' 
+          ? 'Только a-z, 0-9, . _ -' 
+          : '✗ Занят';
+        usernameHint.style.color = 'var(--danger)';
+      }
+    } catch (err) {
+      console.error('Username check failed:', err);
+    }
+  }, 500);
+});
+
+// Submit
+document.getElementById('register-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const email = formData.get('email')?.trim();
+  const payload = {
+    username: formData.get('username'),
+    password: formData.get('password'),
+  };
+  
+  if (email && email.length > 0) {
+    payload.email = email;
+  }
+  
+  const errorEl = document.getElementById('register-error');
+  errorEl.textContent = '';
+  
+  try {
+    console.log('Sending payload:', payload);
+    const res = await fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    console.log('Response status:', res.status);
+    
+    if (res.ok) {
+      window.location.href = '/login?registered=1';
+    } else {
+      const err = await res.json();
+      console.error('Registration error:', err);
+      errorEl.textContent = err.detail || 'Ошибка регистрации';
+    }
+  } catch (err) {
+    console.error('Network error:', err);
+    errorEl.textContent = 'Ошибка сети';
+  }
+});
+</script>
+{% endblock %}

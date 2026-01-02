@@ -13,6 +13,7 @@
 - 🔁 **DraftAction API** (`/api/commit`) — атомарно применяет действия (`insert_block`, `update_block`, `move_block`, `add_tag`, `remove_tag`, `add_link`, `set_style`).
 - 🔎 **Локальный поиск** — TF-IDF индекс по тексту блоков, обновляется при каждом изменении.
 - 🗃 **Журнал** (`/api/dataset/export`) — JSONL-лог для обучения модели.
+- 🔐 **Авторизация** — регистрация/вход, refresh-токены в HttpOnly cookie, email‑подтверждение.
 - 🤖 **LLM-интерфейсы** — `app/providers/llm_provider.py` + `structurizer.py` заготовлены под будущий Ollama/vLLM, сейчас возвращают пустой draft.
 
 ## Быстрый запуск
@@ -52,6 +53,56 @@ SIMPLE_DB_URL=sqlite:///./simple_app/ovc.db
 VECTOR_DIM=384
 OFFLINE_MODE=true
 ```
+
+## Running DB
+
+Для разработки можно использовать PostgreSQL или SQLite:
+
+- **PostgreSQL**: создайте базу, установите `DATABASE_URL` и выполните миграции Alembic.
+- **SQLite**: по умолчанию используется `sqlite:///./simple_app/ovc.db` и `python -m app.db.migrate`.
+
+## ENV
+
+Основные переменные (см. `.env.example`):
+
+- `DATABASE_URL` — строка подключения (PostgreSQL рекомендуется).
+- `SECRET_KEY` — секрет для JWT/ссылок (32+ символов).
+- `ACCESS_TOKEN_EXPIRES_MIN`, `REFRESH_TOKEN_EXPIRES_DAYS`
+- `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN`
+- `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_MAX`
+- `PASSWORD_MIN_LENGTH` и флаги классов символов
+- `EMAIL_FROM`, `EMAIL_BACKEND`
+
+## Migrations
+
+PostgreSQL (Alembic):
+
+```bash
+export DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/ovc
+PYTHONPATH=simple_app alembic upgrade head
+```
+
+SQLite (локально):
+
+```bash
+PYTHONPATH=simple_app python -m app.db.migrate
+```
+
+## База и авторизация
+
+- Таблицы авторизации: `users`, `refresh_tokens`, `audit_logs` (через Alembic).
+- Заметки и файлы теперь привязаны к пользователю через `user_id`.
+- Старые записи с пустым `user_id` автоматически закрепляются за первым зарегистрированным пользователем.
+- Вход выполняется через access‑JWT (15 минут), refresh‑токен живёт в HttpOnly cookie и ротируется.
+- Email подтверждение требуется при логине: ссылка печатается в логах при `EMAIL_BACKEND=mock`.
+
+## Security notes
+
+- Пароли хэшируются через Argon2id (`argon2-cffi`).
+- Access токен живёт 15 минут, refresh — 30 дней, refresh токены ротируются.
+- Refresh токен хранится в HttpOnly cookie, access токен передаётся как Bearer.
+- Для запросов с cookie используется CSRF токен (double-submit).
+- Ограничения частоты и блокировки логина — in-memory (для продакшна нужен Redis/DB).
 
 ## Структура
 
