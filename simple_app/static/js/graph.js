@@ -119,12 +119,7 @@ function renderGraph(data) {
     .attr('fill', (d) => d.color || 'var(--accent)')
     .attr('filter', 'url(#node-glow)');
 
-  nodeGroup
-    .append('text')
-    .attr('class', 'graph-node-score')
-    .attr('text-anchor', 'middle')
-    .attr('dy', '0.45em')
-    .text((d) => Math.round(d.sizeScore * 10) / 10);
+
 
   const labels = zoomLayer
     .append('g')
@@ -162,18 +157,23 @@ function renderGraph(data) {
     window.open(`/notes/${d.id}`, '_blank');
   });
 
+  const primaryEdges = edges.filter((edge) => getEdgeType(edge) === 'link');
+
   const simulation = d3
     .forceSimulation(nodes)
-    .force('charge', d3.forceManyBody().strength(-420))
+    .force('charge', d3.forceManyBody().strength(-260))
     .force('collision', d3.forceCollide().radius((d) => 28 + d.sizeScore * 10))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .alphaDecay(0.035);
+    .force('x', d3.forceX(width / 2).strength(0.04))
+    .force('y', d3.forceY(height / 2).strength(0.04))
+    .velocityDecay(0.45)
+    .alphaDecay(0.05);
 
-  if (edges.length) {
+  if (primaryEdges.length) {
     simulation.force(
       'link',
       d3
-        .forceLink(edges)
+        .forceLink(primaryEdges)
         .id((d) => d.id)
         .distance((d) => 200 - Math.min(100, (d.confidence || 0.4) * 60))
         .strength(0.6)

@@ -117,11 +117,7 @@ export function renderNoteCard(note) {
   const updated = new Date(note.updatedAt || note.updated_at || Date.now());
   meta.textContent = formatDate(updated);
 
-  const style = document.createElement('span');
-  style.className = 'note-card__style';
-  style.textContent = getThemeName(note.styleTheme);
-
-  footer.append(meta, style);
+  footer.append(meta);
 
   article.append(title, preview, footer);
   return article;
@@ -143,18 +139,6 @@ function formatDate(date) {
     day: 'numeric', 
     month: 'short'
   });
-}
-
-function getThemeName(theme) {
-  const themes = {
-    'dark': 'Тёмная',
-    'light': 'Светлая', 
-    'milk': 'Молочная',
-    'brief': 'Краткая',
-    'clean': 'Чистая',
-    'default': 'Стандарт'
-  };
-  return themes[theme] || theme || 'Чистая';
 }
 
 function getPreviewText(note) {

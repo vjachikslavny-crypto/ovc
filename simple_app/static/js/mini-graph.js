@@ -4,6 +4,7 @@ let miniGraphData = null;
 let miniGraphSvg = null;
 let miniGraphSimulation = null;
 let currentNoteId = null;
+let miniGraphNodeSelection = null;
 let controlsInitialized = false;
 let isInitializing = false;
 let initTimeout = null;
@@ -18,6 +19,7 @@ function resetMiniGraph() {
     miniGraphSimulation.stop();
   }
   miniGraphSimulation = null;
+  miniGraphNodeSelection = null;
   controlsInitialized = false;
   
   // Очищаем SVG
@@ -279,7 +281,7 @@ function renderMiniGraph() {
     .force('link', d3.forceLink(filteredLinks).id(d => d.id).distance(80))
     .force('charge', d3.forceManyBody().strength(-200))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide().radius(25));
+    .force('collision', d3.forceCollide().radius(d => Math.max(16, getNodeRadius(d) + 6)));
   
   // Рисуем связи
   const link = miniGraphSvg.append('g')
@@ -296,10 +298,7 @@ function renderMiniGraph() {
     .selectAll('circle')
     .data(filteredNodes)
     .join('circle')
-    .attr('r', d => {
-      if (d.id === currentNoteId) return 14;
-      return (d.size || 1) * 8;
-    })
+    .attr('r', d => getNodeRadius(d))
     .attr('fill', d => d.color || 'var(--muted)')
     .attr('stroke', d => d.id === currentNoteId ? 'var(--accent)' : 'var(--card)')
     .attr('stroke-width', d => d.id === currentNoteId ? 3 : 2)
@@ -339,6 +338,8 @@ function renderMiniGraph() {
       }
     })
     .call(drag(miniGraphSimulation));
+
+  miniGraphNodeSelection = node;
   
   // Добавляем подписи
   const label = miniGraphSvg.append('g')
@@ -400,40 +401,116 @@ function drag(simulation) {
     .on('end', dragended);
 }
 
+function getNodeRadius(node) {
+  // Базовый размер зависит от sizeWeight/size узла
+  const sizeWeight = node.size || 1;
+  const base = node.id === currentNoteId 
+    ? Math.max(10, sizeWeight * 10)  // Текущая заметка: минимум 10, масштабируется от sizeWeight
+    : Math.max(6, sizeWeight * 8);   // Другие заметки: минимум 6
+  return base;
+}
+
 // Инициализация контролов
 function initControls() {
   console.log('[MiniGraph] Initializing controls with data:', miniGraphData ? 'loaded' : 'not loaded');
   
-  // Кнопки масштабирования
+  // Кнопки размера узла на графе (sizeWeight)
   const zoomIn = document.getElementById('zoom-in');
   const zoomOut = document.getElementById('zoom-out');
   const zoomValue = document.getElementById('zoom-value');
   
-  let currentZoom = 100;
+  // Границы sizeWeight как в inspector
+  const minWeight = 0.3;
+  const maxWeight = 5;
+  const step = 0.3;
   
-  function updateZoom(delta) {
-    currentZoom = Math.max(50, Math.min(200, currentZoom + delta));
-    zoomValue.textContent = `${currentZoom}%`;
-    
-    const editor = document.querySelector('.editor');
-    if (editor) {
-      editor.style.transform = `scale(${currentZoom / 100})`;
-      editor.style.transformOrigin = 'top center';
-      
-      // Компенсируем высоту при масштабировании
-      const wrapper = editor.parentElement;
-      if (wrapper) {
-        wrapper.style.height = `${editor.offsetHeight * (currentZoom / 100)}px`;
+  // Получаем текущий sizeWeight из данных заметки
+  let currentSizeWeight = 1.0;
+  
+  function updateDisplay() {
+    if (zoomValue) {
+      zoomValue.textContent = currentSizeWeight.toFixed(1);
+    }
+  }
+  
+  // Загружаем актуальный sizeWeight из API
+  async function loadSizeWeight() {
+    try {
+      const response = await fetch(`/api/notes/${currentNoteId}`);
+      if (response.ok) {
+        const note = await response.json();
+        if (note.layoutHints && note.layoutHints.sizeWeight != null) {
+          currentSizeWeight = note.layoutHints.sizeWeight;
+        }
+        updateDisplay();
+        console.log('[MiniGraph] Loaded sizeWeight:', currentSizeWeight);
       }
+    } catch (error) {
+      console.error('[MiniGraph] Error loading sizeWeight:', error);
+    }
+  }
+  
+  loadSizeWeight();
+  
+  async function updateSizeWeight(delta) {
+    const newWeight = Math.max(minWeight, Math.min(maxWeight, currentSizeWeight + delta));
+    if (newWeight === currentSizeWeight) return;
+    
+    currentSizeWeight = Math.round(newWeight * 10) / 10; // округляем до 0.1
+    updateDisplay();
+    
+    // Обновляем размер узла в данных мини-графа
+    if (miniGraphData) {
+      const currentNode = miniGraphData.nodes.find(n => n.id === currentNoteId);
+      if (currentNode) {
+        currentNode.size = currentSizeWeight;
+      }
+    }
+    
+    // Обновляем визуально на мини-графе
+    if (miniGraphNodeSelection) {
+      miniGraphNodeSelection
+        .filter(d => d.id === currentNoteId)
+        .transition()
+        .duration(200)
+        .attr('r', getNodeRadius({ id: currentNoteId, size: currentSizeWeight }));
+    }
+    
+    // Обновляем collision force для корректного расположения узлов
+    if (miniGraphSimulation) {
+      const collision = miniGraphSimulation.force('collision');
+      if (collision) {
+        collision.radius(d => Math.max(16, getNodeRadius(d) + 6));
+      }
+      miniGraphSimulation.alpha(0.3).restart();
+    }
+    
+    // Сохраняем на сервер через PATCH
+    try {
+      const response = await fetch(`/api/notes/${currentNoteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          layoutHints: { sizeWeight: currentSizeWeight }
+        })
+      });
+      
+      if (!response.ok) {
+        console.error('[MiniGraph] Failed to update sizeWeight:', response.status);
+      } else {
+        console.log('[MiniGraph] sizeWeight updated to:', currentSizeWeight);
+      }
+    } catch (error) {
+      console.error('[MiniGraph] Error updating sizeWeight:', error);
     }
   }
   
   if (zoomIn) {
-    zoomIn.addEventListener('click', () => updateZoom(10));
+    zoomIn.addEventListener('click', () => updateSizeWeight(step));
   }
   
   if (zoomOut) {
-    zoomOut.addEventListener('click', () => updateZoom(-10));
+    zoomOut.addEventListener('click', () => updateSizeWeight(-step));
   }
   
   // Color picker для группы

@@ -990,11 +990,16 @@ select.pill-button--compact:focus {
 .note-block--quote {
   border-left: 3px solid var(--accent);
   background: var(--card);
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .note-block--quote blockquote {
   margin: 0;
   font-style: italic;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .note-block--table {
