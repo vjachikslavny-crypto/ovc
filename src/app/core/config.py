@@ -8,7 +8,7 @@ class Settings:
         self.database_url = (
             os.getenv("DATABASE_URL")
             or os.getenv("SIMPLE_DB_URL")
-            or "sqlite:///./simple_app/ovc.db"
+            or "sqlite:///./src/ovc.db"
         )
         self.secret_key = os.getenv(
             "SECRET_KEY", "CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANGE_ME"

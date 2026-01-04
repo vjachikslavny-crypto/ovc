@@ -12,19 +12,19 @@ cd ~/OVC
 source .venv/bin/activate
 
 # 3. Убедитесь, что все зависимости установлены (включая pymupdf)
-pip install -r simple_app/requirements.txt
+pip install -r src/requirements.txt
 
 # 4. Запустите миграцию базы данных
-PYTHONPATH=simple_app python -m app.db.migrate
+PYTHONPATH=src python -m app.db.migrate
 
 # 5. Запустите сервер
-uvicorn app.main:app --app-dir simple_app --reload
+uvicorn app.main:app --app-dir src --reload
 ```
 
 Или используйте скрипт:
 ```bash
 cd ~/OVC
-./START_SERVER.sh
+./scripts/start_server.sh
 ```
 
 ## Проверка установки pymupdf
@@ -64,4 +64,3 @@ python3 -c "import fitz; print('PyMuPDF version:', fitz.VersionBind)"
 1. Установите `pymupdf`: `pip install pymupdf`
 2. Перезапустите сервер
 3. Проверьте логи сервера при старте - должно быть: `PDF rendering libraries: PyMuPDF=True`
-

@@ -27,29 +27,29 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Установите зависимости
-pip install -r simple_app/requirements.txt
+pip install -r src/requirements.txt
 
 # Запустите миграцию базы данных (⚠️ очищает текущие таблицы)
-PYTHONPATH=simple_app python -m app.db.migrate
+PYTHONPATH=src python -m app.db.migrate
 
 # Запустите сервер
-uvicorn app.main:app --app-dir simple_app --reload
+uvicorn app.main:app --app-dir src --reload
 ```
 
 Или используйте скрипт запуска:
 ```bash
 cd ~/OVC
-./START_SERVER.sh
+./scripts/start_server.sh
 ```
 
-Откройте `http://localhost:8000`. Чтобы пересобрать схему, удалите `simple_app/ovc.db` и перезапустите миграцию.
+Откройте `http://localhost:8000`. Чтобы пересобрать схему, удалите `src/ovc.db` и перезапустите миграцию.
 
-**Важно:** Всегда запускайте сервер из корневой директории проекта `OVC`, а не из `simple_app`!
+**Важно:** Всегда запускайте сервер из корневой директории проекта `OVC`, а не из `src`!
 
 ## Переменные окружения
 
 ```
-SIMPLE_DB_URL=sqlite:///./simple_app/ovc.db
+SIMPLE_DB_URL=sqlite:///./src/ovc.db
 VECTOR_DIM=384
 OFFLINE_MODE=true
 ```
@@ -59,7 +59,7 @@ OFFLINE_MODE=true
 Для разработки можно использовать PostgreSQL или SQLite:
 
 - **PostgreSQL**: создайте базу, установите `DATABASE_URL` и выполните миграции Alembic.
-- **SQLite**: по умолчанию используется `sqlite:///./simple_app/ovc.db` и `python -m app.db.migrate`.
+- **SQLite**: по умолчанию используется `sqlite:///./src/ovc.db` и `python -m app.db.migrate`.
 
 ## ENV
 
@@ -79,13 +79,13 @@ PostgreSQL (Alembic):
 
 ```bash
 export DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/ovc
-PYTHONPATH=simple_app alembic upgrade head
+PYTHONPATH=src alembic upgrade head
 ```
 
 SQLite (локально):
 
 ```bash
-PYTHONPATH=simple_app python -m app.db.migrate
+PYTHONPATH=src python -m app.db.migrate
 ```
 
 ## База и авторизация
@@ -104,23 +104,44 @@ PYTHONPATH=simple_app python -m app.db.migrate
 - Для запросов с cookie используется CSRF токен (double-submit).
 - Ограничения частоты и блокировки логина — in-memory (для продакшна нужен Redis/DB).
 
+## Документация
+
+- `docs/quick_start.md` — быстрый запуск.
+- `docs/repo_map.md` — карта репозитория.
+- `docs/pdf/debug.md` — отладка PDF.
+- `docs/pdf/performance.md` — производительность PDF.
+
 ## Структура
 
 ```
-simple_app/
-├── app/
-│   ├── api/          # REST-эндпоинты (notes, commit, chat, export)
-│   ├── agent/        # JSON-схема блоков и DraftAction
-│   ├── db/           # SQLAlchemy модели и миграция
-│   ├── log/          # JSONL журнал
-│   ├── providers/    # LLM-заглушки и заготовка Ollama
-│   ├── rag/          # TF-IDF индекс
-│   └── main.py       # FastAPI приложение
-├── static/           # CSS/JS (рендер блоков, тулбары, palette, graph)
-│   └── js/graph.js            # визуализация графа (D3)
-├── templates/        # base.html, notes.html, editor.html, graph.html
-├── requirements.txt  # зависимости
-└── run.sh            # venv + миграция + запуск uvicorn
+OVC/
+├── README.md
+├── .env.example
+├── alembic.ini
+├── alembic/
+├── src/
+│   ├── app/
+│   │   ├── api/          # REST-эндпоинты (notes, commit, chat, export)
+│   │   ├── agent/        # JSON-схема блоков и DraftAction
+│   │   ├── db/           # SQLAlchemy модели и миграция
+│   │   ├── log/          # JSONL журнал
+│   │   ├── providers/    # LLM-заглушки и заготовка Ollama
+│   │   ├── rag/          # TF-IDF индекс
+│   │   └── main.py       # FastAPI приложение
+│   ├── static/           # CSS/JS (рендер блоков, тулбары, palette, graph)
+│   │   └── js/graph.js            # визуализация графа (D3)
+│   ├── templates/        # base.html, notes.html, editor.html, graph.html
+│   ├── requirements.txt  # зависимости
+│   └── run.sh            # venv + миграция + запуск uvicorn
+├── docs/
+│   ├── quick_start.md
+│   ├── repo_map.md
+│   └── pdf/
+│       ├── debug.md
+│       └── performance.md
+├── scripts/
+│   └── start_server.sh
+└── tests/
 ```
 
 ## Просмотр файлов внутри заметки

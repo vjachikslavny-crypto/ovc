@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "simple_app"))
+sys.path.insert(0, str(ROOT / "src"))
 
 from app.agent.block_models import parse_blocks  # noqa: E402
 from app.api.note_models import NoteCreateRequest  # noqa: E402

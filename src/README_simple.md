@@ -8,9 +8,9 @@
 cd ~/OVC
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r simple_app/requirements.txt
-PYTHONPATH=simple_app python -m app.db.migrate
-uvicorn app.main:app --reload --app-dir simple_app
+pip install -r src/requirements.txt
+PYTHONPATH=src python -m app.db.migrate
+uvicorn app.main:app --reload --app-dir src
 ```
 
 После запуска откройте:
@@ -67,13 +67,13 @@ uvicorn app.main:app --reload --app-dir simple_app
 
 ```bash
 export DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/ovc
-PYTHONPATH=simple_app alembic upgrade head
+PYTHONPATH=src alembic upgrade head
 ```
 
 Для SQLite — прежний путь:
 
 ```bash
-PYTHONPATH=simple_app python -m app.db.migrate
+PYTHONPATH=src python -m app.db.migrate
 ```
 
 Примечания по авторизации:

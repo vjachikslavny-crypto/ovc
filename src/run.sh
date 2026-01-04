@@ -4,7 +4,7 @@
 set -e
 
 # Переходим в корневую директорию проекта
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Активируем venv
 if [ ! -d ".venv" ]; then
@@ -16,14 +16,13 @@ source .venv/bin/activate
 
 # Устанавливаем зависимости
 echo "Устанавливаю зависимости..."
-pip install -r simple_app/requirements.txt
+pip install -r src/requirements.txt
 
 # Запускаем миграцию
 echo "Запускаю миграцию базы данных..."
-PYTHONPATH=simple_app python -m app.db.migrate
+PYTHONPATH=src python -m app.db.migrate
 
 # Запускаем сервер
 echo "Запускаю сервер..."
 echo "Сервер будет доступен на http://127.0.0.1:8000"
-uvicorn app.main:app --app-dir simple_app --reload --host 127.0.0.1 --port 8000
-
+uvicorn app.main:app --app-dir src --reload --host 127.0.0.1 --port 8000

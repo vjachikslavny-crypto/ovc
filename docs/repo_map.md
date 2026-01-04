@@ -1,7 +1,7 @@
 # Repo Map
 
 ```
-simple_app/
+src/
 ├── app/
 │   ├── api/          # notes/chat/commit/export/graph + files/upload
 │   ├── agent/        # blocks_schema + DraftAction + orchestrator
@@ -26,7 +26,7 @@ simple_app/
 Документация:
 
 - `README.md` — обзор и запуск.
-- `simple_app/README_simple.md` — детали API/блоков/экспорта.
+- `src/README_simple.md` — детали API/блоков/экспорта.
 
 ## Note Block Contract
 

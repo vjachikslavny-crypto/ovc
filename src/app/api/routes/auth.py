@@ -47,10 +47,10 @@ from pathlib import Path
 
 router = APIRouter(tags=["auth"])
 
-# Определяем путь к templates относительно корня проекта
-# auth.py -> routes -> api -> app -> simple_app -> OVC (корень)
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "simple_app" / "templates"))
+# Определяем путь к templates относительно каталога src
+# auth.py -> routes -> api -> app -> src
+BASE_DIR = Path(__file__).resolve().parents[3]
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 _rate_limiter = RateLimiter()
 _login_lock = LoginLockout()

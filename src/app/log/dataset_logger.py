@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-LOG_PATH = Path(os.getenv("SIMPLE_DATASET_LOG", "simple_app/dataset.log"))
+BASE_DIR = Path(__file__).resolve().parents[2]
+LOG_PATH = Path(os.getenv("SIMPLE_DATASET_LOG", str(BASE_DIR / "dataset.log")))
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
