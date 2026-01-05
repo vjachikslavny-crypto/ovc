@@ -3091,6 +3091,7 @@ select.pill-button--compact:focus {
   width: min(1100px, 100%);
   display: grid;
   gap: 24px;
+  min-height: calc(100vh - 180px);
 }
 
 .graph-page__header {
@@ -3130,11 +3131,12 @@ select.pill-button--compact:focus {
   display: grid;
   gap: 24px;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  align-items: stretch;
 }
 
 .graph-canvas {
   position: relative;
-  min-height: 520px;
+  height: clamp(360px, 55vh, 560px);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--card);
@@ -3177,6 +3179,9 @@ select.pill-button--compact:focus {
   display: grid;
   gap: 18px;
   align-content: start;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: clamp(360px, 55vh, 560px);
+  overflow: hidden;
   box-shadow: var(--shadow);
 }
 
@@ -3212,6 +3217,9 @@ select.pill-button--compact:focus {
 .graph-groups-list {
   display: grid;
   gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
 }
 
 .graph-group-row {

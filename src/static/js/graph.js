@@ -42,7 +42,7 @@ function renderGraph(data) {
   const svg = d3.select('#graph-svg');
   const rect = container.getBoundingClientRect();
   const width = rect.width > 0 ? rect.width : 900;
-  const height = 600;
+  const height = rect.height > 0 ? rect.height : 600;
 
   svg.attr('width', width).attr('height', height);
   svg.selectAll('*').remove();
@@ -71,10 +71,28 @@ function renderGraph(data) {
   const zoomLayer = svg.append('g');
 
   const defs = svg.append('defs');
-  const nodeGlow = defs.append('filter').attr('id', 'node-glow');
-  nodeGlow.append('feGaussianBlur').attr('stdDeviation', '6').attr('result', 'blur');
+  const nodeGlow = defs
+    .append('filter')
+    .attr('id', 'node-glow')
+    .attr('x', '-70%')
+    .attr('y', '-70%')
+    .attr('width', '240%')
+    .attr('height', '240%')
+    .attr('filterUnits', 'objectBoundingBox')
+    .attr('color-interpolation-filters', 'sRGB');
+  nodeGlow
+    .append('feGaussianBlur')
+    .attr('in', 'SourceGraphic')
+    .attr('stdDeviation', '10')
+    .attr('result', 'blur');
+  nodeGlow
+    .append('feColorMatrix')
+    .attr('in', 'blur')
+    .attr('type', 'matrix')
+    .attr('values', '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.35 0')
+    .attr('result', 'glow');
   const feMerge = nodeGlow.append('feMerge');
-  feMerge.append('feMergeNode').attr('in', 'blur');
+  feMerge.append('feMergeNode').attr('in', 'glow');
   feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
   const link = zoomLayer
@@ -113,9 +131,11 @@ function renderGraph(data) {
     .append('title')
     .text((d) => `${d.title}\n📦 Блоков: ${d.blockCount}\n✍️ Символов: ${d.textSize}`);
 
+  const getNodeRadius = (d) => 16 + Math.min(40, Math.max(0, d.sizeScore * 12));
+
   const node = nodeGroup
     .append('circle')
-    .attr('r', (d) => 16 + Math.min(40, Math.max(0, d.sizeScore * 12)))
+    .attr('r', (d) => getNodeRadius(d))
     .attr('fill', (d) => d.color || 'var(--accent)')
     .attr('filter', 'url(#node-glow)');
 
@@ -154,7 +174,7 @@ function renderGraph(data) {
   });
 
   nodeGroup.on('dblclick', (_, d) => {
-    window.open(`/notes/${d.id}`, '_blank');
+    window.location.href = `/notes/${d.id}`;
   });
 
   const primaryEdges = edges.filter((edge) => getEdgeType(edge) === 'link');
@@ -193,12 +213,49 @@ function renderGraph(data) {
 
   nodeGroup.call(drag(simulation));
 
+  simulation.on('end', () => {
+    fitToView({ animate: true });
+  });
+
   const zoomBehaviour = d3
     .zoom()
     .scaleExtent([0.2, 3])
     .on('zoom', (event) => zoomLayer.attr('transform', event.transform));
 
   svg.call(zoomBehaviour);
+
+  function fitToView({ animate = true } = {}) {
+    if (!nodes.length) return;
+    const pad = Math.max(60, Math.min(width, height) * 0.08);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    nodes.forEach((d) => {
+      const r = getNodeRadius(d);
+      minX = Math.min(minX, d.x - r);
+      maxX = Math.max(maxX, d.x + r);
+      minY = Math.min(minY, d.y - r);
+      maxY = Math.max(maxY, d.y + r);
+    });
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return;
+    }
+
+    const boundsWidth = Math.max(1, maxX - minX + pad * 2);
+    const boundsHeight = Math.max(1, maxY - minY + pad * 2);
+    const scale = Math.max(0.2, Math.min(1, Math.min(width / boundsWidth, height / boundsHeight)));
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const transform = d3.zoomIdentity
+      .translate(width / 2 - scale * midX, height / 2 - scale * midY)
+      .scale(scale);
+
+    const target = animate ? svg.transition().duration(450) : svg;
+    target.call(zoomBehaviour.transform, transform);
+  }
 
   function highlightNode(payload) {
     const target = payload?.target;
@@ -218,6 +275,7 @@ function renderGraph(data) {
     svg,
     zoomBehaviour,
     simulation,
+    fitToView,
     clusterColors: new Map(nodes.map((n) => [n.group_key, n.color ?? DEFAULT_COLOR])),
     clusterLabels: new Map(nodes.map((n) => [n.group_key, n.group_label])),
     renderLegend,
@@ -231,7 +289,7 @@ function renderGraph(data) {
 function initToolbar() {
   const store = window.__graph;
   if (!store) return;
-  const { node, labels, link, zoomBehaviour, svg } = store;
+  const { node, labels, link, zoomBehaviour, svg, fitToView } = store;
   const search = document.getElementById('graph-search');
   const resetBtn = document.getElementById('graph-reset');
   const toggleLabels = document.getElementById('graph-show-labels');
@@ -258,7 +316,11 @@ function initToolbar() {
     node.classed('dimmed', false);
     labels.classed('dimmed', false);
     link.classed('dimmed', false);
-    svg.transition().duration(600).call(zoomBehaviour.transform, d3.zoomIdentity);
+    if (typeof fitToView === 'function') {
+      fitToView({ animate: true });
+    } else {
+      svg.transition().duration(600).call(zoomBehaviour.transform, d3.zoomIdentity);
+    }
     window.__graph?.simulation?.alpha(1).restart();
   });
 
