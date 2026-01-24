@@ -228,6 +228,14 @@ def upgrade() -> None:
                 print("Added locked_until column to users table")
             except Exception as e:
                 print(f"Error adding locked_until column to users table: {e}")
+        
+        if 'supabase_id' not in user_columns:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN supabase_id VARCHAR"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_id ON users(supabase_id)"))
+                print("Added supabase_id column to users table")
+            except Exception as e:
+                print(f"Error adding supabase_id column to users table: {e}")
 
         # OVC: добавляем поля в notes при необходимости
         result = conn.execute(text("PRAGMA table_info(notes)"))

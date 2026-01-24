@@ -50,18 +50,33 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# Add auth_mode to global template context
+templates.env.globals["auth_mode"] = settings.auth_mode
+
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+    # Build CSP based on auth mode
+    script_src = "'self' 'unsafe-inline'"
+    connect_src = "'self'"
+    
+    # Allow Supabase CDN and API when supabase auth is enabled
+    if settings.auth_mode in ("supabase", "both"):
+        script_src += " https://cdn.jsdelivr.net"
+        if settings.supabase_url:
+            connect_src += f" {settings.supabase_url}"
+    
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "img-src 'self' data: blob:; "
-        "media-src 'self' blob:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline'"
+        f"default-src 'self'; "
+        f"img-src 'self' data: blob:; "
+        f"media-src 'self' blob:; "
+        f"style-src 'self' 'unsafe-inline'; "
+        f"script-src {script_src}; "
+        f"connect-src {connect_src}"
     )
     return response
 
@@ -73,12 +88,28 @@ def _require_user(request: Request):
         return None
 
 
+def _allow_anonymous() -> bool:
+    return settings.auth_mode in ("none", "supabase", "both")
+
+
+def _template_context(request: Request, user):
+    return {
+        "request": request,
+        "user": user,
+        "auth_mode": settings.auth_mode,
+        "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
+        "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
+    }
+
+
 @app.get("/")
 def index(request: Request, note_id: str = None):
     user = _require_user(request)
-    if not user:
+    if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    response = templates.TemplateResponse("editor.html", {"request": request, "note_id": note_id, "user": user})
+    context = _template_context(request, user)
+    context["note_id"] = note_id
+    response = templates.TemplateResponse("editor.html", context)
     _ensure_csrf_cookie(request, response)
     return response
 
@@ -86,9 +117,9 @@ def index(request: Request, note_id: str = None):
 @app.get("/notes")
 def notes_page(request: Request):
     user = _require_user(request)
-    if not user:
+    if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    response = templates.TemplateResponse("notes.html", {"request": request, "user": user})
+    response = templates.TemplateResponse("notes.html", _template_context(request, user))
     _ensure_csrf_cookie(request, response)
     return response
 
@@ -96,9 +127,11 @@ def notes_page(request: Request):
 @app.get("/notes/{note_id}")
 def note_page(request: Request, note_id: str):
     user = _require_user(request)
-    if not user:
+    if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    response = templates.TemplateResponse("editor.html", {"request": request, "note_id": note_id, "user": user})
+    context = _template_context(request, user)
+    context["note_id"] = note_id
+    response = templates.TemplateResponse("editor.html", context)
     _ensure_csrf_cookie(request, response)
     return response
 
@@ -106,9 +139,9 @@ def note_page(request: Request, note_id: str):
 @app.get("/graph")
 def graph_page(request: Request):
     user = _require_user(request)
-    if not user:
+    if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    response = templates.TemplateResponse("graph.html", {"request": request, "user": user})
+    response = templates.TemplateResponse("graph.html", _template_context(request, user))
     _ensure_csrf_cookie(request, response)
     return response
 
@@ -116,9 +149,9 @@ def graph_page(request: Request):
 @app.get("/change-password")
 def change_password_page(request: Request):
     user = _require_user(request)
-    if not user:
+    if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    response = templates.TemplateResponse("auth/change-password.html", {"request": request, "user": user})
+    response = templates.TemplateResponse("auth/change-password.html", _template_context(request, user))
     _ensure_csrf_cookie(request, response)
     return response
 

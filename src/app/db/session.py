@@ -6,7 +6,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
+# Fix postgres:// -> postgresql:// (SQLAlchemy requires postgresql://)
 DATABASE_URL = settings.database_url
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},

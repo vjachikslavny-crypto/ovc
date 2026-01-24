@@ -5,41 +5,105 @@
 <section class="auth-page">
   <div class="auth-card">
     <h1>Регистрация</h1>
-    <p class="muted">Создайте аккаунт, чтобы сохранять свои заметки.</p>
-    <form id="register-form" class="auth-form">
-      <div>
-        <input 
-          type="text" 
-          name="username" 
-          placeholder="Username" 
-          required 
-          pattern="[a-zA-Z0-9._\-]{3,24}" 
-          minlength="3" 
-          maxlength="24"
-          autocomplete="username"
-        />
-        <span id="username-hint" class="muted"></span>
+    
+    {% if auth_mode == 'both' %}
+    <!-- Step 1: Choice between registration types -->
+    <div id="register-choice" class="register-choice">
+      <p class="muted">Выберите способ регистрации:</p>
+      
+      <div class="register-options">
+        <button class="register-option" id="choose-simple">
+          <div class="register-option__icon">⚡</div>
+          <div class="register-option__title">Простая регистрация</div>
+          <div class="register-option__desc">Быстрый вход по username и паролю. Без подтверждения email.</div>
+        </button>
+        
+        <button class="register-option register-option--email" id="choose-email">
+          <div class="register-option__icon">✉️</div>
+          <div class="register-option__title">Регистрация с Email</div>
+          <div class="register-option__desc">Вход через email. Потребуется подтверждение почты.</div>
+        </button>
       </div>
+    </div>
+    {% endif %}
+    
+    {% if auth_mode in ['local', 'both'] %}
+    <!-- Local registration form -->
+    <div id="local-register-section" {% if auth_mode == 'both' %}style="display: none;"{% endif %}>
+      {% if auth_mode == 'both' %}
+      <button class="back-button" id="back-from-local">← Назад</button>
+      {% endif %}
+      <p class="muted">Создайте аккаунт, чтобы сохранять свои заметки.</p>
+      <form id="register-form" class="auth-form">
+        <div>
+          <input 
+            type="text" 
+            name="username" 
+            placeholder="Username" 
+            required 
+            pattern="[a-zA-Z0-9._\-]{3,24}" 
+            minlength="3" 
+            maxlength="24"
+            autocomplete="username"
+          />
+          <span id="username-hint" class="muted"></span>
+        </div>
+        
+        <input 
+          type="password" 
+          name="password" 
+          placeholder="Пароль (мин. 8 символов)" 
+          required 
+          minlength="8"
+          autocomplete="new-password"
+        />
+        
+        <button type="submit" class="pill-button pill-button--primary">Создать аккаунт</button>
+        <span id="register-error" class="muted"></span>
+      </form>
+    </div>
+    {% endif %}
+    
+    {% if auth_mode in ['supabase', 'both'] %}
+    <!-- Supabase registration form -->
+    <div id="supabase-register-section" {% if auth_mode == 'both' %}style="display: none;"{% endif %}>
+      {% if auth_mode == 'both' %}
+      <button class="back-button" id="back-from-supabase">← Назад</button>
+      {% endif %}
+      <p class="muted">Введите email и пароль. На почту придёт письмо для подтверждения.</p>
+      <form id="supabase-register-form" class="auth-form">
+        <input 
+          type="email" 
+          name="email" 
+          placeholder="Email" 
+          required
+          autocomplete="email"
+        />
+        
+        <input 
+          type="password" 
+          name="password" 
+          placeholder="Пароль (мин. 6 символов)" 
+          required 
+          minlength="6"
+          autocomplete="new-password"
+        />
+        
+        <button type="submit" class="pill-button pill-button--primary">Зарегистрироваться</button>
+        <span id="supabase-register-error" class="muted"></span>
+      </form>
       
-      <input 
-        type="email" 
-        name="email" 
-        placeholder="Email (необязательно)"
-        autocomplete="email"
-      />
-      
-      <input 
-        type="password" 
-        name="password" 
-        placeholder="Пароль (мин. 8 символов)" 
-        required 
-        minlength="8"
-        autocomplete="new-password"
-      />
-      
-      <button type="submit" class="pill-button pill-button--primary">Создать</button>
-      <span id="register-error" class="muted"></span>
-    </form>
+      <!-- Success message after registration -->
+      <div id="supabase-register-success" class="register-success" style="display: none;">
+        <div class="register-success__icon">📧</div>
+        <h3>Проверьте почту!</h3>
+        <p>Мы отправили письмо на <strong id="registered-email"></strong></p>
+        <p class="muted">Перейдите по ссылке в письме, чтобы подтвердить регистрацию и войти в аккаунт.</p>
+        <a href="/login" class="pill-button pill-button--secondary">Перейти ко входу</a>
+      </div>
+    </div>
+    {% endif %}
+    
     <div class="auth-actions">
       <a href="/login">Уже есть аккаунт</a>
     </div>
@@ -47,72 +111,98 @@
 </section>
 
 <script>
-// Проверка доступности username
-const usernameInput = document.querySelector('[name="username"]');
+window.__AUTH_MODE = '{{ auth_mode }}';
+
+{% if auth_mode == 'both' %}
+// Navigation between choice and forms
+const choiceSection = document.getElementById('register-choice');
+const localSection = document.getElementById('local-register-section');
+const supabaseSection = document.getElementById('supabase-register-section');
+
+function showChoice() {
+  choiceSection.style.display = 'block';
+  localSection.style.display = 'none';
+  supabaseSection.style.display = 'none';
+}
+
+function showLocalForm() {
+  choiceSection.style.display = 'none';
+  localSection.style.display = 'block';
+  supabaseSection.style.display = 'none';
+}
+
+function showSupabaseForm() {
+  choiceSection.style.display = 'none';
+  localSection.style.display = 'none';
+  supabaseSection.style.display = 'block';
+}
+
+document.getElementById('choose-simple')?.addEventListener('click', showLocalForm);
+document.getElementById('choose-email')?.addEventListener('click', showSupabaseForm);
+document.getElementById('back-from-local')?.addEventListener('click', showChoice);
+document.getElementById('back-from-supabase')?.addEventListener('click', showChoice);
+{% endif %}
+
+{% if auth_mode in ['local', 'both'] %}
+// Username availability check
+const usernameInput = document.querySelector('#register-form [name="username"]');
 const usernameHint = document.getElementById('username-hint');
 
-let debounceTimer;
-usernameInput.addEventListener('input', (e) => {
-  clearTimeout(debounceTimer);
-  const username = e.target.value.trim();
-  
-  if (username.length < 3) {
-    usernameHint.textContent = '';
-    return;
-  }
-  
-  debounceTimer = setTimeout(async () => {
-    try {
-      const res = await fetch(`/auth/username-available?u=${encodeURIComponent(username)}`);
-      const data = await res.json();
-      
-      if (data.available) {
-        usernameHint.textContent = '✓ Доступен';
-        usernameHint.style.color = 'var(--accent)';
-      } else {
-        usernameHint.textContent = data.reason === 'invalid_format' 
-          ? 'Только a-z, 0-9, . _ -' 
-          : '✗ Занят';
-        usernameHint.style.color = 'var(--danger)';
-      }
-    } catch (err) {
-      console.error('Username check failed:', err);
+if (usernameInput) {
+  let debounceTimer;
+  usernameInput.addEventListener('input', (e) => {
+    clearTimeout(debounceTimer);
+    const username = e.target.value.trim();
+    
+    if (username.length < 3) {
+      usernameHint.textContent = '';
+      return;
     }
-  }, 500);
-});
+    
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/auth/username-available?u=${encodeURIComponent(username)}`);
+        const data = await res.json();
+        
+        if (data.available) {
+          usernameHint.textContent = '✓ Доступен';
+          usernameHint.style.color = 'var(--accent)';
+        } else {
+          usernameHint.textContent = data.reason === 'invalid_format' 
+            ? 'Только a-z, 0-9, . _ -' 
+            : '✗ Занят';
+          usernameHint.style.color = 'var(--danger)';
+        }
+      } catch (err) {
+        console.error('Username check failed:', err);
+      }
+    }, 500);
+  });
+}
 
-// Submit
-document.getElementById('register-form').addEventListener('submit', async (e) => {
+// Local registration handler
+document.getElementById('register-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
-  const email = formData.get('email')?.trim();
   const payload = {
     username: formData.get('username'),
     password: formData.get('password'),
   };
   
-  if (email && email.length > 0) {
-    payload.email = email;
-  }
-  
   const errorEl = document.getElementById('register-error');
   errorEl.textContent = '';
   
   try {
-    console.log('Sending payload:', payload);
     const res = await fetch('/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     
-    console.log('Response status:', res.status);
-    
     if (res.ok) {
       window.location.href = '/login?registered=1';
     } else {
       const err = await res.json();
-      console.error('Registration error:', err);
       errorEl.textContent = err.detail || 'Ошибка регистрации';
     }
   } catch (err) {
@@ -120,5 +210,130 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
     errorEl.textContent = 'Ошибка сети';
   }
 });
+{% endif %}
+
+{% if auth_mode in ['supabase', 'both'] %}
+// Supabase registration handler
+document.getElementById('supabase-register-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const email = formData.get('email');
+  const password = formData.get('password');
+  
+  const errorEl = document.getElementById('supabase-register-error');
+  const successEl = document.getElementById('supabase-register-success');
+  const formEl = document.getElementById('supabase-register-form');
+  const registeredEmailEl = document.getElementById('registered-email');
+  
+  errorEl.textContent = '';
+  
+  try {
+    if (!window.supabaseAuth) {
+      throw new Error('Supabase not initialized');
+    }
+    
+    const data = await window.supabaseAuth.signUp(email, password);
+    
+    // Always show confirmation message (Supabase requires email confirmation)
+    // Hide the form and show success message
+    formEl.style.display = 'none';
+    registeredEmailEl.textContent = email;
+    successEl.style.display = 'block';
+    
+    // Hide back button when showing success
+    document.getElementById('back-from-supabase')?.style.setProperty('display', 'none');
+    
+  } catch (err) {
+    console.error('Supabase registration error:', err);
+    errorEl.textContent = err.message || 'Ошибка регистрации';
+  }
+});
+{% endif %}
 </script>
+
+<style>
+/* Registration choice cards */
+.register-choice {
+  margin-bottom: 1rem;
+}
+.register-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.register-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  width: 100%;
+}
+.register-option:hover {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+.register-option__icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.register-option__title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+.register-option__desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.register-option--email:hover {
+  border-color: var(--info, #3b82f6);
+}
+
+/* Back button */
+.back-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem 0;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: color 0.2s;
+}
+.back-button:hover {
+  color: var(--text);
+}
+
+/* Success message after Supabase registration */
+.register-success {
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+.register-success__icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+.register-success h3 {
+  margin: 0 0 0.75rem 0;
+  color: var(--text);
+}
+.register-success p {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-muted);
+}
+.register-success .pill-button {
+  margin-top: 1rem;
+}
+</style>
 {% endblock %}

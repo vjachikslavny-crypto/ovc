@@ -101,6 +101,17 @@ def require_csrf(request: Request) -> None:
 
 
 def get_current_user(request: Request) -> User:
+    """
+    Get current user - uses auth provider system based on AUTH_MODE.
+    """
+    from app.core.config import settings
+    
+    # If using multi-provider mode, delegate to auth_provider
+    if settings.auth_mode in ("supabase", "both", "none"):
+        from app.core.auth_provider import get_current_user_from_provider
+        return get_current_user_from_provider(request)
+    
+    # Default: local-only mode (original behavior)
     token = get_bearer_token(request)
     logger.info(f"[AUTH-DEBUG] get_current_user - token present: {token is not None}")
     if not token:

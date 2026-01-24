@@ -105,14 +105,25 @@ def _fingerprint_hash(request: Request) -> Optional[str]:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _auth_template_context(request: Request) -> dict:
+    """Build common context for auth templates."""
+    return {
+        "request": request,
+        "user": None,
+        "auth_mode": settings.auth_mode,
+        "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
+        "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
+    }
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_view(request: Request):
-    return templates.TemplateResponse("auth/login.html", {"request": request, "user": None})
+    return templates.TemplateResponse("auth/login.html", _auth_template_context(request))
 
 
 @router.get("/register", response_class=HTMLResponse)
 def register_view(request: Request):
-    return templates.TemplateResponse("auth/register.html", {"request": request, "user": None})
+    return templates.TemplateResponse("auth/register.html", _auth_template_context(request))
 
 
 
