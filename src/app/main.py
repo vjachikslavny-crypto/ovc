@@ -34,6 +34,12 @@ async def startup_event():
     logger.info(f"PDF rendering libraries: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE}")
     if not HAS_PYMUPDF and not HAS_PDF2IMAGE:
         logger.warning("PDF rendering not available! Install pymupdf: pip install pymupdf")
+    try:
+        from app.db.migrate import upgrade
+
+        upgrade()
+    except Exception as exc:
+        logger.warning("Schema migration failed on startup: %s", exc)
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(commit_router, prefix="/api")
@@ -45,6 +51,7 @@ app.include_router(resolve_router, prefix="/api")
 app.include_router(files_router)
 app.include_router(auth_router)
 app.include_router(users_router, prefix="/api")
+app.include_router(users_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -61,8 +68,9 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     
     # Build CSP based on auth mode
-    script_src = "'self' 'unsafe-inline'"
-    connect_src = "'self'"
+    script_src = "'self' 'unsafe-inline' https://www.instagram.com"
+    connect_src = "'self' https://www.instagram.com"
+    frame_src = "'self' https://www.instagram.com https://www.tiktok.com"
     
     # Allow Supabase CDN and API when supabase auth is enabled
     if settings.auth_mode in ("supabase", "both"):
@@ -76,7 +84,8 @@ async def security_headers(request: Request, call_next):
         f"media-src 'self' blob:; "
         f"style-src 'self' 'unsafe-inline'; "
         f"script-src {script_src}; "
-        f"connect-src {connect_src}"
+        f"connect-src {connect_src}; "
+        f"frame-src {frame_src}"
     )
     return response
 

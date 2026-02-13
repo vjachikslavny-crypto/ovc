@@ -220,6 +220,33 @@ BLOCK_SCHEMA: dict = {
                 },
                 {
                     "properties": {
+                        "type": {"const": "instagram"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string"},
+                            },
+                            "required": ["url"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
+                        "type": {"const": "tiktok"},
+                        "data": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string"},
+                                "videoId": {"type": "string"},
+                            },
+                            "required": ["url", "videoId"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                {
+                    "properties": {
                         "type": {"const": "doc"},
                         "data": {
                             "type": "object",

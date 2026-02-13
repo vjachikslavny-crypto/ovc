@@ -4,7 +4,6 @@ import { initInlineBubble } from './inline_bubble.js';
 import { initPalette } from './palette.js';
 import { initSmartInsert } from './smart_insert.js';
 import { initInspector } from './inspector.js';
-import { initHints } from './hints.js';
 import { uuid } from './utils.js';
 import { initUploader } from './uploader.js';
 import { initPdfViewers } from './pdf_viewer.js';  // OVC: pdf - импорт PDF-виджета
@@ -39,14 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const toolbarEl = document.getElementById('format-toolbar');
   const bubbleEl = document.getElementById('inline-bubble');
   const inspectorEl = document.getElementById('note-inspector');
-  const hintBanner = document.getElementById('hint-banner');
-  const hintText = document.getElementById('hint-text');
-  const hintDismiss = document.getElementById('hint-dismiss');
   const llmToggle = document.getElementById('llm-toggle');
   const connectionsPanelEl = document.getElementById('connections-panel');
   const connectionsToggleBtn = document.getElementById('connections-toggle');
 
-  const hints = initHints(hintBanner, hintText, hintDismiss);
   const inspector = initInspector(inspectorEl, {
     onSetLayoutHint: handleLayoutHintUpdate,
     fetchNoteOptions: fetchLinkableNotes,
@@ -72,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAudioRecorder({
     button: fabVoice,
     uploader,
-    onReady: () => hints.push('Аудиозапись добавлена в заметку.'),
+    onReady: () => {},
   });
 
   canvas.addEventListener('click', (event) => {
@@ -200,7 +195,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const noteId = await ensureNote();
     const note = await fetchNoteDetail(noteId);
     applyNote(note);
-    hints.push('Нажмите ＋, чтобы добавить новый блок.');
   }
 
   // ---- RENDER ----
@@ -1217,7 +1211,6 @@ document.addEventListener('DOMContentLoaded', () => {
     focusedBlockId = block.id;
     pendingCaretBlockId = block.id;
 
-    hints.push('Выделите текст, чтобы появилось форматирование.');
     render();
     scheduleSave();
   }
@@ -1235,7 +1228,6 @@ document.addEventListener('DOMContentLoaded', () => {
     noteState.blocks = noteState.blocks.concat(normalized);
     focusedBlockId = normalized.at(-1)?.id || null;
     pendingCaretBlockId = null;
-    hints.push('Файл добавлен в конец заметки.');
     render();
     scheduleSave();
   }

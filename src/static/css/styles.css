@@ -669,10 +669,6 @@ select.pill-button--compact:focus {
   color: var(--muted);
 }
 
-.connections-panel__close {
-  display: inline-flex;
-}
-
 .connections-panel__body {
   flex: 1;
   overflow-y: auto;
@@ -1575,7 +1571,9 @@ select.pill-button--compact:focus {
 }
 
 .note-block--video,
-.note-block--youtube {
+.note-block--youtube,
+.note-block--instagram,
+.note-block--tiktok {
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
   padding: 12px 14px;
@@ -1710,6 +1708,89 @@ select.pill-button--compact:focus {
   border: 0;
   border-radius: var(--radius-md);
   aspect-ratio: 16 / 9;
+  background: var(--surface);
+}
+
+.instagram-embed,
+.tiktok-frame {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Media grid for consecutive video blocks */
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+  max-width: 100%;
+}
+
+/* Limit to max 3 columns */
+@media (min-width: 1000px) {
+  .media-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.media-grid .note-block--tiktok,
+.media-grid .note-block--instagram,
+.media-grid .note-block--youtube,
+.media-grid .note-block--video {
+  margin-bottom: 0;
+  max-width: 100%;
+}
+
+.note-block--instagram {
+  max-width: 540px;
+}
+
+.media-grid .note-block--instagram {
+  max-width: 100%;
+}
+
+.instagram-embed blockquote.instagram-media {
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.instagram-replay-btn {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.instagram-replay-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+}
+
+.tiktok-frame {
+  max-width: 320px;
+}
+
+.media-grid .tiktok-frame {
+  max-width: 100%;
+}
+
+.tiktok-frame iframe {
+  width: 100%;
+  max-height: 70vh;
+  border: 0;
+  border-radius: var(--radius-md);
+  aspect-ratio: 9 / 16;
   background: var(--surface);
 }
 
@@ -2832,21 +2913,6 @@ select.pill-button--compact:focus {
   width: 90px;
 }
 
-.hint-banner {
-  position: fixed;
-  left: 50%;
-  bottom: clamp(80px, 12vw, 160px);
-  transform: translateX(-50%);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 10px 18px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  box-shadow: var(--shadow);
-}
-
 .notes-page {
   width: min(1200px, 100%);
   display: grid;
@@ -3528,8 +3594,7 @@ textarea,
   .app-shell__footer,
   .floating-actions,
   .bottom-sheet,
-  .note-inspector,
-  .hint-banner {
+  .note-inspector {
     display: none !important;
   }
 

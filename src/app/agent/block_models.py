@@ -236,6 +236,25 @@ class YouTubeData(BaseModel):
             allow_population_by_field_name = True
 
 
+class InstagramData(BaseModel):
+    url: str
+
+    class Config:
+        extra = "forbid"
+
+
+class TikTokData(BaseModel):
+    url: str
+    video_id: str = Field(alias="videoId")
+
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    else:
+        class Config:
+            extra = "forbid"
+            allow_population_by_field_name = True
+
+
 class SourceData(BaseModel):
     url: str
     title: str
@@ -368,6 +387,16 @@ class YouTubeBlock(BlockBase):
     data: YouTubeData
 
 
+class InstagramBlock(BlockBase):
+    type: Literal["instagram"]
+    data: InstagramData
+
+
+class TikTokBlock(BlockBase):
+    type: Literal["tiktok"]
+    data: TikTokData
+
+
 class SourceBlock(BlockBase):
     type: Literal["source"]
     data: SourceData
@@ -406,6 +435,8 @@ BlockModel = Union[
     TableBlock,
     MarkdownBlock,
     YouTubeBlock,
+    InstagramBlock,
+    TikTokBlock,
     SourceBlock,
     SummaryBlock,
     TodoBlock,

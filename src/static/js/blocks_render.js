@@ -3,23 +3,78 @@ const THEMES = {
   brief: 'theme-brief',
 };
 
+let instagramScriptRequested = false;
+let instagramProcessQueued = false;
+const INSTAGRAM_SCRIPT_SRC = 'https://www.instagram.com/embed.js';
+const INSTAGRAM_HOSTS = new Set(['instagram.com', 'www.instagram.com']);
+const TIKTOK_HOSTS = new Set(['tiktok.com', 'www.tiktok.com', 'vt.tiktok.com', 'vm.tiktok.com']);
+const INSTAGRAM_REEL_RE = /^[A-Za-z0-9_-]+$/;
+const TIKTOK_VIDEO_RE = /^\d+$/;
+
+const MEDIA_BLOCK_TYPES = new Set(['tiktok', 'instagram', 'youtube', 'video']);
+
 export function renderNote(container, note, theme = 'clean') {
   container.innerHTML = '';
   const blocks = Array.isArray(note?.blocks) ? note.blocks : [];
 
-  blocks.forEach((block) => {
-    const element = renderBlock(block);
-    if (element) {
-      element.dataset.blockId = block.id || '';
-      element.dataset.blockType = block.type || '';
-      container.appendChild(element);
+  let i = 0;
+  while (i < blocks.length) {
+    const block = blocks[i];
+    const blockType = block?.type;
+    
+    // Check if this is a media block and if there are consecutive media blocks
+    if (MEDIA_BLOCK_TYPES.has(blockType)) {
+      // Collect consecutive media blocks
+      const mediaGroup = [];
+      while (i < blocks.length && MEDIA_BLOCK_TYPES.has(blocks[i]?.type)) {
+        mediaGroup.push(blocks[i]);
+        i++;
+      }
+      
+      // If more than one media block, wrap in grid
+      if (mediaGroup.length > 1) {
+        const gridWrapper = document.createElement('div');
+        gridWrapper.className = 'media-grid';
+        
+        mediaGroup.forEach((mediaBlock) => {
+          const element = renderBlock(mediaBlock);
+          if (element) {
+            element.dataset.blockId = mediaBlock.id || '';
+            element.dataset.blockType = mediaBlock.type || '';
+            gridWrapper.appendChild(element);
+          }
+        });
+        
+        container.appendChild(gridWrapper);
+      } else {
+        // Single media block - render normally
+        const element = renderBlock(mediaGroup[0]);
+        if (element) {
+          element.dataset.blockId = mediaGroup[0].id || '';
+          element.dataset.blockType = mediaGroup[0].type || '';
+          container.appendChild(element);
+        }
+      }
+    } else {
+      // Non-media block - render normally
+      const element = renderBlock(block);
+      if (element) {
+        element.dataset.blockId = block.id || '';
+        element.dataset.blockType = block.type || '';
+        container.appendChild(element);
+      }
+      i++;
     }
-  });
+  }
 
   const themeClass = THEMES[theme] || THEMES.clean;
   container.dataset.theme = theme;
   container.classList.remove(...Object.values(THEMES));
   container.classList.add(themeClass);
+
+  if (blocks.some((block) => block?.type === 'instagram')) {
+    queueInstagramEmbeds();
+  }
 }
 
 export function renderBlock(block) {
@@ -49,6 +104,10 @@ export function renderBlock(block) {
       return renderVideoBlock(data);
     case 'youtube':
       return renderYouTubeBlock(data);
+    case 'instagram':
+      return renderInstagramBlock(data);
+    case 'tiktok':
+      return renderTikTokBlock(data);
     case 'code':
       return renderCodeBlock(data);
     case 'markdown':
@@ -553,6 +612,188 @@ function renderYouTubeBlock(data = {}) {
   }
 
   return block;
+}
+
+function renderInstagramBlock(data = {}) {
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--instagram';
+  const url = normalizeInstagramReelUrl(data.url || '');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'instagram-embed';
+
+  function createEmbed() {
+    wrap.innerHTML = '';
+    const blockquote = document.createElement('blockquote');
+    blockquote.className = 'instagram-media';
+    blockquote.dataset.instgrmPermalink = url;
+    blockquote.dataset.instgrmVersion = '14';
+    wrap.appendChild(blockquote);
+    
+    // Process embed after adding to DOM
+    setTimeout(() => {
+      if (window.instgrm?.Embeds?.process) {
+        window.instgrm.Embeds.process();
+      }
+    }, 100);
+  }
+
+  if (url) {
+    createEmbed();
+  } else {
+    const placeholder = document.createElement('p');
+    placeholder.className = 'media-meta';
+    placeholder.textContent = 'Ссылка на Instagram Reel не задана';
+    wrap.appendChild(placeholder);
+  }
+
+  block.appendChild(wrap);
+
+  if (url) {
+    const meta = document.createElement('div');
+    meta.className = 'media-meta';
+    meta.textContent = url.replace(/^https?:\/\//, '');
+    block.appendChild(meta);
+    
+    // Add replay button at the bottom
+    const replayBtn = document.createElement('button');
+    replayBtn.className = 'instagram-replay-btn';
+    replayBtn.textContent = '↻ Пересмотреть';
+    replayBtn.title = 'Пересоздать embed для повторного просмотра';
+    replayBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      createEmbed();
+    });
+    block.appendChild(replayBtn);
+  }
+
+  return block;
+}
+
+function renderTikTokBlock(data = {}) {
+  const block = document.createElement('article');
+  block.className = 'note-block note-block--tiktok';
+  const url = normalizeTikTokUrl(data.url || '');
+  const dataVideoId = (data.videoId || data.video_id || '').trim();
+  const videoId = url
+    ? (TIKTOK_VIDEO_RE.test(dataVideoId) ? dataVideoId : extractTikTokVideoId(url))
+    : '';
+
+  const frameWrap = document.createElement('div');
+  frameWrap.className = 'tiktok-frame';
+
+  if (videoId) {
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.tiktok.com/player/v1/${videoId}`;
+    iframe.title = 'TikTok video player';
+    iframe.loading = 'lazy';
+    iframe.allow = 'fullscreen';
+    iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+    iframe.allowFullscreen = true;
+    frameWrap.appendChild(iframe);
+  } else {
+    const placeholder = document.createElement('p');
+    placeholder.className = 'media-meta';
+    placeholder.textContent = 'Ссылка на TikTok не задана';
+    frameWrap.appendChild(placeholder);
+  }
+
+  block.appendChild(frameWrap);
+
+  if (url) {
+    const meta = document.createElement('div');
+    meta.className = 'media-meta';
+    meta.textContent = url.replace(/^https?:\/\//, '');
+    block.appendChild(meta);
+  }
+
+  return block;
+}
+
+function ensureInstagramScript() {
+  if (window.instgrm?.Embeds?.process) return;
+  if (instagramScriptRequested) return;
+  instagramScriptRequested = true;
+  const existing = document.querySelector(`script[src="${INSTAGRAM_SCRIPT_SRC}"]`);
+  if (existing) return;
+
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = INSTAGRAM_SCRIPT_SRC;
+  script.onload = () => {
+    if (instagramProcessQueued && window.instgrm?.Embeds?.process) {
+      window.instgrm.Embeds.process();
+      instagramProcessQueued = false;
+    }
+  };
+  document.head.appendChild(script);
+}
+
+function queueInstagramEmbeds() {
+  instagramProcessQueued = true;
+  if (window.instgrm?.Embeds?.process) {
+    window.instgrm.Embeds.process();
+    instagramProcessQueued = false;
+    return;
+  }
+  ensureInstagramScript();
+}
+
+function safeParseUrl(rawUrl) {
+  if (!rawUrl) return null;
+  try {
+    return new URL(String(rawUrl).trim());
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeInstagramReelUrl(rawUrl) {
+  const parsed = safeParseUrl(rawUrl);
+  if (!parsed) return '';
+  if (!INSTAGRAM_HOSTS.has(parsed.host.toLowerCase())) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length < 2 || segments[0] !== 'reel') return '';
+  const code = segments[1];
+  if (!INSTAGRAM_REEL_RE.test(code)) return '';
+  return `https://www.instagram.com/reel/${code}/`;
+}
+
+function normalizeTikTokUrl(rawUrl) {
+  const parsed = safeParseUrl(rawUrl);
+  if (!parsed) return '';
+  const host = parsed.host.toLowerCase();
+  if (!TIKTOK_HOSTS.has(host)) return '';
+  
+  // Short URLs don't have video ID in path - return as-is
+  if (host === 'vt.tiktok.com' || host === 'vm.tiktok.com') {
+    return rawUrl;
+  }
+  
+  // Full URL format: /@user/video/1234567890
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length < 3 || segments[1] !== 'video') return '';
+  const videoId = segments[2];
+  if (!TIKTOK_VIDEO_RE.test(videoId)) return '';
+  return `${parsed.origin}${parsed.pathname}`;
+}
+
+function extractTikTokVideoId(rawUrl) {
+  const parsed = safeParseUrl(rawUrl);
+  if (!parsed) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  
+  // Find "video" segment and get the ID after it
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === 'video' && i + 1 < segments.length) {
+      const videoId = segments[i + 1];
+      if (TIKTOK_VIDEO_RE.test(videoId)) {
+        return videoId;
+      }
+    }
+  }
+  return '';
 }
 
 function renderCodeBlock(data = {}) {

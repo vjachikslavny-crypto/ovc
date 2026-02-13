@@ -14,7 +14,6 @@ export function initConnectionsPanel({
 
   const bodyEl = rootEl.querySelector('#connections-body') || rootEl;
   const countEl = rootEl.querySelector('#connections-count');
-  const closeBtn = rootEl.querySelector('[data-action="close-connections"]');
   const state = {
     linksFrom: [],
     linksTo: [],
@@ -34,7 +33,6 @@ export function initConnectionsPanel({
     }
   });
 
-  closeBtn?.addEventListener('click', () => setOpen(false));
   document.addEventListener('keydown', (event) => {
     if (event.key === ESC_KEY && rootEl.classList.contains('connections-panel--open')) {
       setOpen(false);

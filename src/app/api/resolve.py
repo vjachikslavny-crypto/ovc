@@ -4,10 +4,11 @@ import re
 from urllib.parse import parse_qs, urlparse
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.agent.block_models import YouTubeBlock, YouTubeData, dump_block
+from app.agent.block_models import YouTubeBlock, YouTubeData, TikTokBlock, TikTokData, dump_block
 from app.db.models import generate_uuid
 
 
@@ -112,3 +113,78 @@ def resolve_youtube(payload: YouTubeResolveRequest):
         )
     )
     return YouTubeResolveResponse(block=block)
+
+
+# ============================================================================
+# TikTok Resolve
+# ============================================================================
+
+_TIKTOK_HOSTS = {
+    "tiktok.com",
+    "www.tiktok.com",
+    "vt.tiktok.com",
+    "vm.tiktok.com",
+}
+_TIKTOK_VIDEO_ID_RE = re.compile(r"^\d+$")
+
+
+class TikTokResolveRequest(BaseModel):
+    url: str
+
+
+class TikTokResolveResponse(BaseModel):
+    url: str
+    videoId: str
+
+
+def _extract_tiktok_video_id(url: str) -> tuple[str, str]:
+    """
+    Extract TikTok video ID from URL.
+    For short URLs (vt.tiktok.com, vm.tiktok.com), follows redirects to get the real URL.
+    Returns (final_url, video_id).
+    """
+    parsed = urlparse(url.strip())
+    host = (parsed.hostname or "").lower()
+    
+    if host not in _TIKTOK_HOSTS:
+        raise HTTPException(status_code=400, detail="Unsupported TikTok domain")
+    
+    # Short URL - need to follow redirect
+    if host in ("vt.tiktok.com", "vm.tiktok.com"):
+        try:
+            with httpx.Client(follow_redirects=True, timeout=10.0) as client:
+                response = client.head(url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; OVC/1.0)"
+                })
+                final_url = str(response.url)
+                parsed = urlparse(final_url)
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Failed to resolve TikTok URL: {e}")
+    else:
+        final_url = url
+    
+    # Extract video ID from path: /@user/video/1234567890
+    path_parts = [p for p in parsed.path.split("/") if p]
+    
+    video_id = None
+    for i, part in enumerate(path_parts):
+        if part == "video" and i + 1 < len(path_parts):
+            video_id = path_parts[i + 1]
+            break
+    
+    if not video_id or not _TIKTOK_VIDEO_ID_RE.match(video_id):
+        raise HTTPException(status_code=400, detail="Unable to extract TikTok video ID")
+    
+    return final_url, video_id
+
+
+@router.post("/resolve/tiktok", response_model=TikTokResolveResponse)
+def resolve_tiktok(payload: TikTokResolveRequest):
+    try:
+        final_url, video_id = _extract_tiktok_video_id(payload.url)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return TikTokResolveResponse(url=final_url, videoId=video_id)

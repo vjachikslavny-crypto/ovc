@@ -160,6 +160,9 @@ function getPreviewText(note) {
   if (types.includes('pdf')) return '📄 PDF документ';
   if (types.includes('audio')) return '🎵 Аудио';
   if (types.includes('video')) return '🎬 Видео';
+  if (types.includes('youtube')) return '▶ YouTube';
+  if (types.includes('instagram')) return '📸 Instagram Reel';
+  if (types.includes('tiktok')) return '🎵 TikTok';
   
   return '';
 }
