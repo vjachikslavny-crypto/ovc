@@ -14,6 +14,7 @@ import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
 import { initMarkdownViewers } from './markdown_viewer.js';
 import { initConnectionsPanel } from './connections_panel.js';
+import { initMiniGraph } from './mini-graph.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('note-blocks');
   const floatingActions = document.querySelector('.floating-actions');
   const titleEl = document.getElementById('note-title');
+  const titleToggle = document.getElementById('title-toggle');
   const shareBtn = document.getElementById('note-share');
   const backBtn = document.getElementById('nav-back');
   const infoBtn = document.getElementById('note-info');
@@ -146,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!res.ok) throw new Error(await res.text());
     const note = await res.json();
     noteState.id = note.id;
+    editorEl.dataset.noteId = note.id;
     window.history.replaceState({}, '', `/notes/${note.id}`);
     return note.id;
   }
@@ -192,9 +195,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadNote() {
-    const noteId = await ensureNote();
-    const note = await fetchNoteDetail(noteId);
-    applyNote(note);
+    try {
+      const noteId = await ensureNote();
+      const note = await fetchNoteDetail(noteId);
+      applyNote(note);
+    } finally {
+      // Перезапуск мини-графа после загрузки заметки (или её ошибки),
+      // чтобы гарантировать актуальные данные
+      initMiniGraph({ force: true });
+    }
   }
 
   // ---- RENDER ----
@@ -320,6 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     titleEl.textContent = noteState.title || 'Без названия';
+    checkTitleOverflow();
     
     renderNote(canvas, noteState, document.body.dataset.theme || 'clean');
     clearSelectionSnapshot();
@@ -1371,16 +1381,36 @@ document.addEventListener('DOMContentLoaded', () => {
   
   titleEl.addEventListener('blur', () => {
     isEditingTitle = false;
-    // Обновляем title в noteState при потере фокуса
+    titleEl.classList.remove('editor__title--expanded');
     noteState.title = titleEl.textContent.trim();
     scheduleSave();
+    checkTitleOverflow();
   });
   
   titleEl.addEventListener('input', () => {
-    // Обновляем title в noteState при вводе, но НЕ вызываем render()
     noteState.title = titleEl.textContent.trim();
     scheduleSave();
   });
+
+  function checkTitleOverflow() {
+    if (!titleEl || !titleToggle) return;
+    requestAnimationFrame(() => {
+      const isOverflowing = titleEl.scrollHeight > titleEl.clientHeight + 2;
+      titleToggle.classList.toggle('editor__title-more--visible', isOverflowing);
+      if (!isOverflowing) {
+        titleEl.classList.remove('editor__title--expanded');
+        titleToggle.textContent = '···';
+      }
+    });
+  }
+
+  if (titleToggle) {
+    titleToggle.addEventListener('click', () => {
+      titleEl.classList.toggle('editor__title--expanded');
+      const isExpanded = titleEl.classList.contains('editor__title--expanded');
+      titleToggle.textContent = isExpanded ? '▴' : '···';
+    });
+  }
 
   document.addEventListener('theme-change', (event) => {
     noteState.styleTheme = event.detail?.theme || 'clean';

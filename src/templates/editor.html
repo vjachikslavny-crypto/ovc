@@ -6,7 +6,10 @@
 <div class="editor" data-note-id="{{ note_id or '' }}">
   <section class="editor__header">
     <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
-    <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+    <div class="editor__title-wrapper">
+      <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+      <button class="editor__title-more" id="title-toggle" type="button">···</button>
+    </div>
     <div class="editor__header-actions">
       <button class="icon-button icon-button--ghost" id="connections-toggle" aria-label="Связи">↔</button>
       <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>

@@ -7,6 +7,7 @@
     <h1>Мои заметки</h1>
     <div class="notes-page__actions">
       <input type="search" id="notes-search" placeholder="Поиск по заметкам" aria-label="Поиск" />
+      <button class="pill-button pill-button--compact" id="deep-search-toggle" type="button" title="Расширенный поиск по содержимому и файлам">🔍 Глубокий</button>
       <select id="theme-switcher" class="pill-button pill-button--compact" aria-label="Выбор темы">
         <option value="default">Фиолетовая</option>
         <option value="dark">Тёмная</option>
@@ -16,6 +17,14 @@
       <button class="pill-button" id="create-note">Новая</button>
     </div>
   </header>
+  <div class="deep-search-panel" id="deep-search-panel" hidden>
+    <div class="deep-search-panel__row">
+      <input type="search" id="deep-search-input" placeholder="Поиск по тексту заметок и именам файлов…" aria-label="Глубокий поиск" />
+      <button class="pill-button pill-button--primary pill-button--compact" id="deep-search-go" type="button">Найти</button>
+      <button class="pill-button pill-button--compact" id="deep-search-close" type="button">✕</button>
+    </div>
+    <div class="deep-search-panel__status" id="deep-search-status"></div>
+  </div>
   <section class="notes-page__list" id="notes-list" aria-live="polite"></section>
   <footer class="notes-page__footer">
     <button class="pill-button" id="load-more">Показать ещё</button>

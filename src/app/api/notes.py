@@ -18,7 +18,7 @@ from app.api.note_models import (
     NoteUpdateRequest,
     SourcePayload,
 )
-from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
+from app.db.models import FileAsset, Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
@@ -84,6 +84,89 @@ async def list_notes(
 
         items = [_serialize_summary(note) for note in notes]
         return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/notes/search/full")
+async def search_notes_full(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(30, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+):
+    """Extended search: TF-IDF content search + title search + file name search."""
+    query_lower = q.strip().lower()
+    matched_note_ids: dict[str, float] = {}
+
+    # 1. TF-IDF full-text search across note content
+    tfidf_results = index.search(q, limit=limit)
+    for result in tfidf_results:
+        nid = result["note_id"]
+        score = result["score"]
+        if nid not in matched_note_ids or score > matched_note_ids[nid]:
+            matched_note_ids[nid] = score
+
+    with get_session() as session:
+        user_note_ids = set(
+            row[0]
+            for row in session.execute(
+                select(Note.id).where(
+                    or_(Note.user_id == current_user.id, Note.user_id.is_(None))
+                )
+            ).all()
+        )
+
+        # 2. Title search (SQL LIKE)
+        title_matches = (
+            session.execute(
+                select(Note.id).where(
+                    or_(Note.user_id == current_user.id, Note.user_id.is_(None)),
+                    func.lower(Note.title).contains(query_lower),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for nid in title_matches:
+            if nid not in matched_note_ids:
+                matched_note_ids[nid] = 0.5
+
+        # 3. File name search
+        file_matches = (
+            session.execute(
+                select(FileAsset.note_id).where(
+                    FileAsset.note_id.isnot(None),
+                    func.lower(FileAsset.filename).contains(query_lower),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for nid in file_matches:
+            if nid and nid not in matched_note_ids:
+                matched_note_ids[nid] = 0.4
+
+        # Filter to only user's notes and sort by relevance
+        final_ids = [
+            nid for nid in matched_note_ids if nid in user_note_ids
+        ]
+        final_ids.sort(key=lambda nid: matched_note_ids[nid], reverse=True)
+        final_ids = final_ids[:limit]
+
+        if not final_ids:
+            return {"items": [], "total": 0, "query": q}
+
+        notes = (
+            session.execute(select(Note).where(Note.id.in_(final_ids)))
+            .scalars()
+            .all()
+        )
+        notes_map = {n.id: n for n in notes}
+        ordered = [notes_map[nid] for nid in final_ids if nid in notes_map]
+        items = [
+            _serialize_summary(n).dict(by_alias=True)
+            for n in ordered
+        ]
+
+        return {"items": items, "total": len(items), "query": q}
 
 
 @router.get("/notes/{note_id}", response_model=NoteDetail)

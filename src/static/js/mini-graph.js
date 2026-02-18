@@ -10,6 +10,7 @@ let isInitializing = false;
 let initTimeout = null;
 let retryCount = 0;
 const MAX_RETRIES = 5;
+const INIT_SAFETY_MS = 8000;
 
 // Функция для сброса состояния
 function resetMiniGraph() {
@@ -29,7 +30,17 @@ function resetMiniGraph() {
 }
 
 // Инициализация мини-графа с debounce
-export function initMiniGraph() {
+export function initMiniGraph(options = {}) {
+  const { force = false } = options;
+  
+  // При force-режиме сбрасываем блокировки и кеш
+  if (force) {
+    console.log('[MiniGraph] Force re-init requested');
+    isInitializing = false;
+    currentNoteId = null;
+    miniGraphData = null;
+  }
+  
   // Предотвращаем множественные вызовы
   if (isInitializing) {
     console.log('[MiniGraph] Already initializing, skipping...');
@@ -56,7 +67,14 @@ function doInitMiniGraph() {
   }
   
   isInitializing = true;
-  console.log('[MiniGraph] Set isInitializing = true');
+  
+  // Safety timeout: reset flag if initialization hangs
+  setTimeout(() => {
+    if (isInitializing) {
+      console.warn('[MiniGraph] Safety timeout: resetting isInitializing');
+      isInitializing = false;
+    }
+  }, INIT_SAFETY_MS);
   
   // Сбрасываем предыдущее состояние
   resetMiniGraph();
@@ -71,6 +89,15 @@ function doInitMiniGraph() {
   
   const editor = document.querySelector('.editor');
   let newNoteId = editor?.dataset?.noteId;
+  
+  // Fallback: извлекаем ID из URL если атрибут пуст
+  if (!newNoteId) {
+    const urlMatch = window.location.pathname.match(/\/notes\/([a-f0-9-]+)/);
+    if (urlMatch) {
+      newNoteId = urlMatch[1];
+      console.log('[MiniGraph] Got note ID from URL:', newNoteId);
+    }
+  }
   
   console.log('[MiniGraph] Note ID:', newNoteId, '(previous:', currentNoteId, ')');
   
@@ -606,4 +633,15 @@ window.addEventListener('popstate', () => {
   console.log('[MiniGraph] Popstate event, re-initializing...');
   isInitializing = false;
   setTimeout(initMiniGraph, 100);
+});
+
+// Обработка bfcache (back-forward cache) — страница восстановлена из кеша
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    console.log('[MiniGraph] Page restored from bfcache, re-initializing...');
+    isInitializing = false;
+    currentNoteId = null;
+    miniGraphData = null;
+    initMiniGraph();
+  }
 });
