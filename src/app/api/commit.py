@@ -26,6 +26,7 @@ from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_engine import OP_COMMIT, enqueue_sync_operation
 
 router = APIRouter(tags=["commit"])
 
@@ -172,6 +173,12 @@ async def commit_endpoint(
 
         for note_id in touched_notes:
             log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note_id})
+
+        enqueue_sync_operation(
+            session,
+            OP_COMMIT,
+            {"draft": [action.dict(by_alias=True) for action in payload.draft]},
+        )
 
     dataset_logger.append(
         {

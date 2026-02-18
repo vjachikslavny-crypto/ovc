@@ -13,10 +13,12 @@ from app.api.graph import router as graph_router
 from app.api.notes import router as notes_router
 from app.api.upload import router as upload_router
 from app.api.resolve import router as resolve_router
+from app.api.sync import router as sync_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.users import router as users_router
 from app.core.security import CSRF_COOKIE, get_user_from_refresh_cookie, issue_csrf_token
 from app.core.config import settings
+from app.services.sync_engine import start_sync_worker_once
 
 # OVC: pdf - проверяем доступность библиотек при старте
 from app.services.files import HAS_PYMUPDF, HAS_PDF2IMAGE
@@ -40,6 +42,7 @@ async def startup_event():
         upgrade()
     except Exception as exc:
         logger.warning("Schema migration failed on startup: %s", exc)
+    start_sync_worker_once()
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(commit_router, prefix="/api")
@@ -48,6 +51,7 @@ app.include_router(export_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
 app.include_router(resolve_router, prefix="/api")
+app.include_router(sync_router, prefix="/api")
 app.include_router(files_router)
 app.include_router(auth_router)
 app.include_router(users_router, prefix="/api")
