@@ -48,7 +48,9 @@
     <script>
       // Auth configuration - injected by server
       window.__AUTH_MODE = '{{ auth_mode | default("local") }}';
+      window.__DESKTOP_MODE = {{ 'true' if desktop_mode else 'false' }};
     </script>
+    <script type="module" src="/static/js/data_adapter.js"></script>
     {% if auth_mode in ['supabase', 'both'] %}
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>

@@ -59,6 +59,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # Add auth_mode to global template context
 templates.env.globals["auth_mode"] = settings.auth_mode
+templates.env.globals["desktop_mode"] = settings.desktop_mode
 
 
 @app.middleware("http")
@@ -106,6 +107,7 @@ def _template_context(request: Request, user):
         "request": request,
         "user": user,
         "auth_mode": settings.auth_mode,
+        "desktop_mode": settings.desktop_mode,
         "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
         "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
     }

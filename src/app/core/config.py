@@ -48,6 +48,17 @@ class Settings:
         self.password_require_symbol = os.getenv("PASSWORD_REQUIRE_SYMBOL", "false").lower() == "true"
         self.email_from = os.getenv("EMAIL_FROM", "no-reply@ovc.local")
         self.email_backend = os.getenv("EMAIL_BACKEND", "mock")
+        self.desktop_mode = os.getenv("DESKTOP_MODE", "false").lower() == "true"
+        self.sync_enabled = os.getenv("SYNC_ENABLED", "false").lower() == "true"
+        self.sync_remote_base_url = os.getenv("SYNC_REMOTE_BASE_URL", "").strip()
+        self.sync_bearer_token = os.getenv("SYNC_BEARER_TOKEN", "").strip()
+        self.sync_poll_seconds = int(os.getenv("SYNC_POLL_SECONDS", "15"))
+        self.sync_outbox_max = int(os.getenv("SYNC_OUTBOX_MAX", "10000"))
+        self.sync_batch_size = int(os.getenv("SYNC_BATCH_SIZE", "100"))
+        self.sync_request_timeout_seconds = float(
+            os.getenv("SYNC_REQUEST_TIMEOUT_SECONDS", "12")
+        )
+        self.sync_pull_enabled = os.getenv("SYNC_PULL_ENABLED", "true").lower() == "true"
         
         # Auth mode: "none" | "local" | "supabase" | "both"
         self.auth_mode: AuthMode = os.getenv("AUTH_MODE", "local").lower()  # type: ignore
