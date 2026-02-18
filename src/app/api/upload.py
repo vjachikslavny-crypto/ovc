@@ -11,6 +11,7 @@ from app.services import files as file_service
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_engine import OP_UPLOAD_FILE, enqueue_sync_operation
 
 # OVC: video - увеличиваем лимит размера файла
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
@@ -92,6 +93,19 @@ async def _store_uploads(
                     request=request,
                     metadata={"file_id": asset.id, "kind": asset.kind},
                 )
+                if note_id:
+                    enqueue_sync_operation(
+                        session,
+                        OP_UPLOAD_FILE,
+                        {
+                            "localNoteId": note_id,
+                            "fileAssetId": asset.id,
+                            "filePath": asset.path_original,
+                            "filename": asset.filename,
+                            "mime": asset.mime,
+                        },
+                        note_id=note_id,
+                    )
 
             session.commit()
         except HTTPException:

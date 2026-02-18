@@ -325,18 +325,39 @@ def _flush_commit(session, client: httpx.Client, payload: Dict[str, Any]) -> Non
 def _flush_upload_file(session, client: httpx.Client, payload: Dict[str, Any]) -> None:
     local_note_id = payload.get("localNoteId")
     file_path = payload.get("filePath")
+    file_asset_id = payload.get("fileAssetId") or ""
     filename = payload.get("filename") or "upload"
     mime = payload.get("mime") or "application/octet-stream"
 
     if not local_note_id or not file_path:
         raise RuntimeError("upload_file payload missing localNoteId/filePath")
 
-    remote_note_id = _get_remote_note_id(session, local_note_id) or local_note_id
+    remote_note_id = _get_remote_note_id(session, local_note_id)
+    if not remote_note_id:
+        has_pending_create = (
+            session.execute(
+                select(func.count(SyncOutbox.id)).where(
+                    SyncOutbox.op_type == OP_CREATE_NOTE,
+                    SyncOutbox.note_id == local_note_id,
+                    SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]),
+                )
+            ).scalar_one()
+            or 0
+        )
+        if has_pending_create:
+            raise RetryableSyncError(
+                f"note mapping for upload {local_note_id} is not ready yet"
+            )
+        remote_note_id = local_note_id
 
     try:
         with open(file_path, "rb") as f:
             files = {"files": (filename, f, mime)}
-            response = client.post(f"/api/upload?noteId={remote_note_id}", files=files)
+            response = client.post(
+                f"/api/upload?noteId={remote_note_id}",
+                files=files,
+                headers={"X-Desktop-File-Id": str(file_asset_id)},
+            )
     except FileNotFoundError as exc:
         raise RuntimeError(f"local file missing: {file_path}") from exc
 

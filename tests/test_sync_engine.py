@@ -90,6 +90,9 @@ class _FakeClient:
 
         return _FakeResponse(404, text="not found")
 
+    def post_upload(self, path, files=None, headers=None):
+        return _FakeResponse(200, {"ok": True})
+
 
 class SyncEngineTests(unittest.TestCase):
     def setUp(self):
@@ -212,6 +215,30 @@ class SyncEngineTests(unittest.TestCase):
             remote_payload = fake_client._notes.get(map_row.remote_note_id)
             self.assertIsNotNone(remote_payload)
             self.assertEqual(remote_payload.get("title"), "Edited offline title")
+
+    def test_upload_waits_for_note_mapping(self):
+        with db_session.get_session() as session:
+            session.add(
+                SyncOutbox(
+                    op_type=sync_engine.OP_CREATE_NOTE,
+                    note_id="note-upload",
+                    payload_json="{}",
+                    status=sync_engine.STATUS_PENDING,
+                )
+            )
+            session.flush()
+
+            with self.assertRaises(sync_engine.RetryableSyncError):
+                sync_engine._flush_upload_file(
+                    session,
+                    _FakeClient(),
+                    {
+                        "localNoteId": "note-upload",
+                        "filePath": "/tmp/not-used",
+                        "filename": "a.txt",
+                        "mime": "text/plain",
+                    },
+                )
 
 
 if __name__ == "__main__":
