@@ -12,11 +12,28 @@ const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || '';
 
 let supabaseClient = null;
 let supabaseAccessToken = null;
+let initPromise = null;
+
+function persistAccessCookie(token) {
+  if (!token) return;
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `ovc_access_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secure}`;
+}
+
+function clearAccessCookie() {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `ovc_access_token=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+}
 
 /**
  * Initialize Supabase client.
  */
 function initSupabase() {
+  if (initPromise) {
+    return initPromise;
+  }
+
+  initPromise = (async () => {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     console.warn('[Supabase] Not configured');
     return false;
@@ -36,29 +53,39 @@ function initSupabase() {
     if (session?.access_token) {
       supabaseAccessToken = session.access_token;
       window.__supabaseAccessToken = supabaseAccessToken;
+      persistAccessCookie(supabaseAccessToken);
       console.log('[Supabase] Access token updated');
     } else {
       supabaseAccessToken = null;
       window.__supabaseAccessToken = null;
+      clearAccessCookie();
     }
+    window.dispatchEvent(new CustomEvent('ovc:supabase-auth', {
+      detail: { event, hasSession: Boolean(session?.access_token) },
+    }));
   });
   
   // Check for existing session
-  supabaseClient.auth.getSession().then(({ data: { session } }) => {
+  await supabaseClient.auth.getSession().then(({ data: { session } }) => {
     if (session?.access_token) {
       supabaseAccessToken = session.access_token;
       window.__supabaseAccessToken = supabaseAccessToken;
+      persistAccessCookie(supabaseAccessToken);
       console.log('[Supabase] Existing session found');
     }
   });
   
   return true;
+  })();
+
+  return initPromise;
 }
 
 /**
  * Sign up with email and password via Supabase.
  */
 async function supabaseSignUp(email, password) {
+  await initSupabase();
   if (!supabaseClient) {
     throw new Error('Supabase not initialized');
   }
@@ -81,6 +108,7 @@ async function supabaseSignUp(email, password) {
  * Sign in with email and password via Supabase.
  */
 async function supabaseSignIn(email, password) {
+  await initSupabase();
   if (!supabaseClient) {
     throw new Error('Supabase not initialized');
   }
@@ -98,6 +126,7 @@ async function supabaseSignIn(email, password) {
   if (data.session?.access_token) {
     supabaseAccessToken = data.session.access_token;
     window.__supabaseAccessToken = supabaseAccessToken;
+    persistAccessCookie(supabaseAccessToken);
   }
   
   console.log('[Supabase] Sign in successful');
@@ -108,6 +137,7 @@ async function supabaseSignIn(email, password) {
  * Sign out from Supabase.
  */
 async function supabaseSignOut() {
+  await initSupabase();
   if (!supabaseClient) {
     return;
   }
@@ -119,6 +149,7 @@ async function supabaseSignOut() {
   
   supabaseAccessToken = null;
   window.__supabaseAccessToken = null;
+  clearAccessCookie();
   console.log('[Supabase] Signed out');
 }
 
@@ -133,6 +164,7 @@ function getSupabaseAccessToken() {
  * Refresh Supabase session.
  */
 async function refreshSupabaseSession() {
+  await initSupabase();
   if (!supabaseClient) {
     return null;
   }
@@ -146,6 +178,7 @@ async function refreshSupabaseSession() {
   if (data.session?.access_token) {
     supabaseAccessToken = data.session.access_token;
     window.__supabaseAccessToken = supabaseAccessToken;
+    persistAccessCookie(supabaseAccessToken);
   }
   
   return supabaseAccessToken;
@@ -167,4 +200,3 @@ document.addEventListener('DOMContentLoaded', () => {
     initSupabase();
   }
 });
-

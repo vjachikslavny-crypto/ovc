@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingRes
 
 from app.db.models import FileAsset
 from app.db.session import get_session
+from app.core.config import settings
 from app.core.security import get_current_user, get_current_user_or_refresh
 from app.models.user import User
 from app.services.files import (
@@ -432,6 +433,8 @@ def stream_media(file_id: str, request: Request, current_user: User = Depends(ge
         raise HTTPException(status_code=404, detail="Original file is missing on disk")
 
     file_size = path.stat().st_size
+    if file_size <= 0:
+        raise HTTPException(status_code=404, detail="Audio stream is empty")
     range_header = request.headers.get("range")
     
     # OVC: audio - нормализуем MIME-тип для WebM с codecs
@@ -442,28 +445,39 @@ def stream_media(file_id: str, request: Request, current_user: User = Depends(ge
     
     if range_header:
         start, end = _parse_range(range_header, file_size)
-        chunk_size = 1024 * 64
+        status_code = 206
         headers = {
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(end - start + 1),
             "Content-Type": media_type,
         }
+    else:
+        if not settings.desktop_mode:
+            # Keep original web behavior intact.
+            return FileResponse(path, media_type=media_type, filename=asset.filename)
+        start, end = 0, max(0, file_size - 1)
+        status_code = 200
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Type": media_type,
+        }
 
-        def iter_file():
-            with path.open("rb") as f:
-                f.seek(start)
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = f.read(min(chunk_size, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    yield chunk
+    chunk_size = 1024 * 64
 
-        return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=media_type)
+    def iter_file():
+        with path.open("rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
 
-    return FileResponse(path, media_type=media_type, filename=asset.filename)
+    return StreamingResponse(iter_file(), status_code=status_code, headers=headers, media_type=media_type)
 
 
 @router.get("/files/{file_id}/page/{page_num}")

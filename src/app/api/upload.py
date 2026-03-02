@@ -3,14 +3,16 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Request, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from app.db.models import Note
+from app.db.models import FileAsset, Note
 from app.db.session import get_session
 from app.services import files as file_service
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_engine import OP_UPLOAD_FILE, enqueue_sync_operation
 
 # OVC: video - увеличиваем лимит размера файла
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
@@ -52,6 +54,8 @@ async def _store_uploads(
     response_blocks: List[dict] = []
     response_files: List[UploadedFilePayload] = []
 
+    upload_op_id = request.headers.get("X-Upload-Op-Id") or request.headers.get("X-Desktop-Op-Id")
+
     with get_session() as session:
         try:
             if note_id:
@@ -66,14 +70,39 @@ async def _store_uploads(
                     raise HTTPException(status_code=404, detail="Note not found")
 
             for upload in uploads:
-                stored = await file_service.save_upload(session, upload, note_id, user.id)
-                asset = stored.asset
+                existing_asset = None
+                if upload_op_id:
+                    # Idempotency guard for desktop retries: same op id should not create duplicate files.
+                    existing_asset = (
+                        session.query(FileAsset)
+                        .filter(
+                            FileAsset.user_id == user.id,
+                            FileAsset.note_id == note_id,
+                            FileAsset.upload_op_id == upload_op_id,
+                        )
+                        .first()
+                    )
+
+                if existing_asset:
+                    asset = existing_asset
+                    block = file_service._build_block(asset)
+                else:
+                    stored = await file_service.save_upload(
+                        session,
+                        upload,
+                        note_id,
+                        user.id,
+                        upload_op_id=upload_op_id,
+                    )
+                    asset = stored.asset
+                    block = stored.block
+
                 original_url = f"/files/{asset.id}/original"
                 preview_url = f"/files/{asset.id}/preview" if asset.path_preview else None
                 if asset.kind == "video":
                     original_url = f"/files/{asset.id}/video/source"
                     preview_url = f"/files/{asset.id}/video/poster.webp" if asset.path_video_poster else preview_url
-                response_blocks.append(stored.block)
+                response_blocks.append(block)
                 response_files.append(
                     UploadedFilePayload(
                         id=asset.id,
@@ -92,6 +121,20 @@ async def _store_uploads(
                     request=request,
                     metadata={"file_id": asset.id, "kind": asset.kind},
                 )
+                if note_id:
+                    enqueue_sync_operation(
+                        session,
+                        OP_UPLOAD_FILE,
+                        {
+                            "localNoteId": note_id,
+                            "fileAssetId": asset.id,
+                            "filePath": asset.path_original,
+                            "filename": asset.filename,
+                            "mime": asset.mime,
+                        },
+                        note_id=note_id,
+                        user_id=user.id,
+                    )
 
             session.commit()
         except HTTPException:
@@ -122,3 +165,16 @@ async def upload_audio(
     current_user: User = Depends(get_current_user),
 ):
     return await _store_uploads(note_id, [file], current_user, request)
+
+
+@router.post("/transcribe", response_class=PlainTextResponse)
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("audio/"):
+        raise HTTPException(status_code=415, detail="Only audio files can be transcribed")
+    await file.read()
+    return PlainTextResponse("Voice transcription not configured")

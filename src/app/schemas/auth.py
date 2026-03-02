@@ -5,9 +5,9 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class RegisterRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=24)
+    username: Optional[str] = Field(default=None, min_length=3, max_length=24)
     password: str = Field(..., min_length=8)
-    email: Optional[EmailStr] = None
+    email: EmailStr
 
 
 class LoginRequest(BaseModel):
@@ -37,4 +37,3 @@ class AuthOkResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8)
-

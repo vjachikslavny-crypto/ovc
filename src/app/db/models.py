@@ -52,7 +52,7 @@ class NoteChunk(Base):
     __tablename__ = "note_chunks"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True)
     idx = Column(Float, nullable=False)
     text = Column(Text, nullable=False)
     embedding = Column(Text, nullable=False)
@@ -64,8 +64,8 @@ class NoteLink(Base):
     __tablename__ = "note_links"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    from_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
-    to_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
+    from_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    to_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True)
     reason = Column(String, nullable=True)
     confidence = Column(Float, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
@@ -80,8 +80,8 @@ class NoteTag(Base):
     __tablename__ = "note_tags"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
-    tag = Column(String, nullable=False)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    tag = Column(String, nullable=False, index=True)
     weight = Column(Float, default=1.0)
 
     note = relationship("Note", back_populates="tags")
@@ -104,7 +104,7 @@ class NoteSource(Base):
     __tablename__ = "note_sources"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True)
     source_id = Column(String, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False)
     relevance = Column(Float, default=1.0)
 
@@ -167,6 +167,7 @@ class FileAsset(Base):
     path_code_original = Column(String, nullable=True)
     path_markdown_raw = Column(String, nullable=True)
     hash_sha256 = Column(String, nullable=True)
+    upload_op_id = Column(String, nullable=True, index=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     pages = Column(Integer, nullable=True)
@@ -184,3 +185,38 @@ class FileAsset(Base):
 
     note = relationship("Note", back_populates="files")
     user = relationship("User", back_populates="files")
+
+
+class SyncOutbox(Base):
+    __tablename__ = "sync_outbox"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    op_type = Column(String, nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    payload_json = Column(Text, nullable=False, default="{}")
+    status = Column(String, nullable=False, default="pending", index=True)
+    tries = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+
+class SyncNoteMap(Base):
+    __tablename__ = "sync_note_map"
+
+    local_note_id = Column(String, ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True)
+    remote_note_id = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+
+class SyncConflict(Base):
+    __tablename__ = "sync_conflicts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    local_note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    remote_note_id = Column(String, nullable=True, index=True)
+    kind = Column(String, nullable=False, default="note_conflict")
+    payload_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -12,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.config import settings
 from app.core.security import (
+    ACCESS_COOKIE,
     CSRF_COOKIE,
     REFRESH_COOKIE,
     create_access_token,
@@ -54,6 +56,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 _rate_limiter = RateLimiter()
 _login_lock = LoginLockout()
+_USERNAME_SANITIZE_RE = re.compile(r"[^a-z0-9._-]+")
 
 
 # Serializer и link builders не используются в username-based auth
@@ -96,6 +99,7 @@ def _set_csrf_cookie(response: Response, token: str) -> None:
 def _clear_cookies(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE, domain=settings.cookie_domain, path="/")
     response.delete_cookie(CSRF_COOKIE, domain=settings.cookie_domain, path="/")
+    response.delete_cookie(ACCESS_COOKIE, domain=settings.cookie_domain, path="/")
 
 
 def _fingerprint_hash(request: Request) -> Optional[str]:
@@ -116,6 +120,37 @@ def _auth_template_context(request: Request) -> dict:
     }
 
 
+def _normalize_username_candidate(raw: str) -> str:
+    value = (raw or "").strip().lower()
+    value = _USERNAME_SANITIZE_RE.sub("-", value).strip("._-")
+    if len(value) < 3:
+        value = "user"
+    return value[:24]
+
+
+def _username_exists(session, username: str) -> bool:
+    return session.query(User).filter(func.lower(User.username) == username.lower()).first() is not None
+
+
+def _build_unique_username(session, email: str, explicit_username: Optional[str]) -> str:
+    base_raw = explicit_username or email.split("@", 1)[0]
+    base = _normalize_username_candidate(base_raw)
+    if not validate_username(base):
+        base = "user"
+
+    candidate = base
+    suffix = 1
+    while _username_exists(session, candidate) or not validate_username(candidate):
+        suffix_text = f"-{suffix}"
+        prefix = base[: max(3, 24 - len(suffix_text))]
+        candidate = f"{prefix}{suffix_text}"[:24]
+        suffix += 1
+        if suffix > 9999:
+            candidate = f"user-{dt.datetime.now(dt.timezone.utc).timestamp():.0f}"[:24]
+            break
+    return candidate
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_view(request: Request):
     return templates.TemplateResponse("auth/login.html", _auth_template_context(request))
@@ -133,14 +168,9 @@ def register(payload: RegisterRequest, request: Request):
     if not _rate_limiter.allow(f"register:{request.client.host}", 10, 60):
         raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
 
-    username = payload.username.strip()
-    
-    # Валидация username
-    if not validate_username(username):
-        raise HTTPException(
-            status_code=400,
-            detail="Username должен содержать только a-z, 0-9, ., _, - (3-24 символа) и не быть зарезервированным"
-        )
+    email_lower = payload.email.lower().strip()
+    if not email_lower:
+        raise HTTPException(status_code=400, detail="Email обязателен")
     
     # Валидация пароля
     errors = validate_password(payload.password)
@@ -148,27 +178,18 @@ def register(payload: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail=" ".join(errors))
 
     with get_session() as session:
-        # Проверка username (case-insensitive)
-        existing = session.query(User).filter(
-            func.lower(User.username) == username.lower()
+        email_exists = session.query(User).filter(
+            func.lower(User.email) == email_lower
         ).first()
-        if existing:
-            log_event(session, "REGISTER_USERNAME_EXISTS", request=request, metadata={"username": username})
-            raise HTTPException(status_code=409, detail="Username уже занят")
-        
-        # Проверка email (если указан)
-        if payload.email:
-            email_lower = payload.email.lower()
-            email_exists = session.query(User).filter(
-                func.lower(User.email) == email_lower
-            ).first()
-            if email_exists:
-                log_event(session, "REGISTER_EMAIL_EXISTS", request=request, metadata={"email": payload.email})
-                raise HTTPException(status_code=409, detail="Email уже используется")
+        if email_exists:
+            log_event(session, "REGISTER_EMAIL_EXISTS", request=request, metadata={"email": payload.email})
+            raise HTTPException(status_code=409, detail="Email уже используется")
+
+        username = _build_unique_username(session, email_lower, payload.username)
 
         user = User(
             username=username,
-            email=payload.email.lower() if payload.email else None,
+            email=email_lower,
             password_hash=hash_password(payload.password)
         )
         session.add(user)
