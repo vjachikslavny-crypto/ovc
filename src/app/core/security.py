@@ -10,7 +10,7 @@ from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.low_level import Type
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from fastapi import HTTPException, Request
 from jose import JWTError, jwt
 
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 JWT_ALG = "HS256"
 CSRF_COOKIE = "csrf_token"
 REFRESH_COOKIE = "refresh_token"
+ACCESS_COOKIE = "ovc_access_token"
 USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9._-]{3,24}$')
 FORBIDDEN_USERNAMES = {'admin', 'root', 'system', 'api', 'auth', 'login', 'register', 'logout', 'me'}
 
@@ -38,7 +39,10 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     try:
         return _ph.verify(password_hash, password)
-    except VerifyMismatchError:
+    except (VerifyMismatchError, InvalidHashError):
+        return False
+    except Exception as exc:
+        logger.warning("Password verify failed due to unexpected hash error: %s", exc)
         return False
 
 
@@ -90,6 +94,12 @@ def get_bearer_token(request: Request) -> Optional[str]:
     parts = auth.split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return parts[1]
+    cookie_token = request.cookies.get(ACCESS_COOKIE)
+    if cookie_token:
+        return cookie_token.strip()
+    query_token = request.query_params.get("access_token")
+    if query_token:
+        return query_token.strip()
     return None
 
 
@@ -106,8 +116,8 @@ def get_current_user(request: Request) -> User:
     """
     from app.core.config import settings
     
-    # If using multi-provider mode, delegate to auth_provider
-    if settings.auth_mode in ("supabase", "both", "none"):
+    # In desktop mode we also use the provider layer to allow local offline user fallback.
+    if settings.desktop_mode or settings.auth_mode in ("supabase", "both", "none"):
         from app.core.auth_provider import get_current_user_from_provider
         return get_current_user_from_provider(request)
     
@@ -157,9 +167,13 @@ def get_user_from_refresh_cookie(request: Request) -> User:
 
 
 def get_current_user_or_refresh(request: Request) -> User:
+    # Prefer bearer/cookie token, but gracefully fallback to refresh cookie when token is stale.
     token = get_bearer_token(request)
     if token:
-        return get_current_user(request)
+        try:
+            return get_current_user(request)
+        except HTTPException:
+            pass
     return get_user_from_refresh_cookie(request)
 
 

@@ -5,11 +5,13 @@ from urllib.parse import parse_qs, urlparse
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.agent.block_models import YouTubeBlock, YouTubeData, TikTokBlock, TikTokData, dump_block
+from app.core.security import get_current_user
 from app.db.models import generate_uuid
+from app.models.user import User
 
 
 router = APIRouter(tags=["resolve"])
@@ -97,13 +99,13 @@ def _parse_start_param(raw: Optional[str]) -> Optional[int]:
 
 
 @router.post("/resolve/youtube", response_model=YouTubeResolveResponse)
-def resolve_youtube(payload: YouTubeResolveRequest):
+def resolve_youtube(payload: YouTubeResolveRequest, _user: User = Depends(get_current_user)):
     try:
         video_id, start_sec = _extract_youtube_id(payload.url)
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL")
 
     block = dump_block(
         YouTubeBlock(
@@ -179,12 +181,12 @@ def _extract_tiktok_video_id(url: str) -> tuple[str, str]:
 
 
 @router.post("/resolve/tiktok", response_model=TikTokResolveResponse)
-def resolve_tiktok(payload: TikTokResolveRequest):
+def resolve_tiktok(payload: TikTokResolveRequest, _user: User = Depends(get_current_user)):
     try:
         final_url, video_id = _extract_tiktok_video_id(payload.url)
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid TikTok URL")
 
     return TikTokResolveResponse(url=final_url, videoId=video_id)

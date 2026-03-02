@@ -345,6 +345,21 @@ def _guess_extension(filename: str, mime: str) -> str:
     return guessed or ".bin"
 
 
+def _audio_mime_from_filename(filename: str) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix == ".mp3":
+        return "audio/mpeg"
+    if suffix == ".wav":
+        return "audio/wav"
+    if suffix == ".m4a":
+        return "audio/mp4"
+    if suffix == ".aac":
+        return "audio/aac"
+    if suffix == ".ogg":
+        return "audio/ogg"
+    return "audio/webm"
+
+
 def _classify_file(upload: UploadFile) -> FileMetadata:
     filename = upload.filename or ""
     mime = (upload.content_type or "").lower()
@@ -378,7 +393,7 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
             excel_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return FileMetadata(kind=excel_kind, mime=excel_mime, extension=extension, max_bytes=EXCEL_MAX_BYTES)
     if mime in AUDIO_MIME_TYPES or filename.lower().endswith(AUDIO_EXTENSIONS):
-        audio_mime = mime if mime in AUDIO_MIME_TYPES else "audio/webm"
+        audio_mime = mime if mime in AUDIO_MIME_TYPES else _audio_mime_from_filename(filename)
         extension = _guess_extension(filename, audio_mime) or ".webm"
         return FileMetadata(kind="audio", mime=audio_mime, extension=extension, max_bytes=AUDIO_MAX_BYTES)
     if mime in VIDEO_MIME_TYPES or filename.lower().endswith(VIDEO_EXTENSIONS):
@@ -397,7 +412,10 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
 
     raise HTTPException(
         status_code=415,
-        detail="Unsupported file type for this prototype (only images, PDF, Word/RTF, PPTX, Excel/CSV, audio, and video are allowed).",
+        detail=(
+            "Unsupported file type. Supported: png/jpg/jpeg/gif/webp, pdf, "
+            "docx, xlsx, pptx, mp3/wav/m4a, mp4/mov, plus markdown/code formats."
+        ),
     )
 
 
@@ -3058,7 +3076,13 @@ class StoredAsset:
     block: dict
 
 
-async def save_upload(session: Session, upload: UploadFile, note_id: Optional[str], user_id: str) -> StoredAsset:
+async def save_upload(
+    session: Session,
+    upload: UploadFile,
+    note_id: Optional[str],
+    user_id: str,
+    upload_op_id: Optional[str] = None,
+) -> StoredAsset:
     logger = logging.getLogger(__name__)  # OVC: docx - определяем logger в начале функции
     meta = _classify_file(upload)
     data = await upload.read()
@@ -3202,6 +3226,7 @@ async def save_upload(session: Session, upload: UploadFile, note_id: Optional[st
         path_excel_chart_sheets_json=charts_sheets_json_path,
         excel_default_sheet=default_sheet,
         hash_sha256=_hash_bytes(data),
+        upload_op_id=upload_op_id,
         width=width,
         height=height,
         pages=pages,

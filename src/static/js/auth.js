@@ -9,74 +9,97 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function persistAccessCookie(token) {
+  if (!token) return;
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `ovc_access_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secure}`;
+}
+
+function clearAccessCookie() {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `ovc_access_token=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+}
+
 async function refreshAccessToken() {
   const hasSupabase = window.supabaseAuth && (AUTH_MODE === 'supabase' || AUTH_MODE === 'both');
+
+  // For local and both modes prioritize local cookie refresh first.
+  if (AUTH_MODE === 'local' || AUTH_MODE === 'both' || AUTH_MODE === 'none') {
+    const refreshCookie = getCookie('refresh_token');
+    if (refreshCookie) {
+      const csrf = getCookie('csrf_token');
+      console.log('[AUTH] refreshAccessToken called, csrf:', csrf ? 'present' : 'missing');
+      if (csrf) {
+        const res = await fetch('/auth/refresh', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrf },
+        });
+        console.log('[AUTH] /auth/refresh response:', res.status, res.ok);
+        if (res.ok) {
+          const data = await res.json();
+          console.log('[AUTH] Refresh response data:', data);
+          accessToken = data.accessToken;
+          window.__accessToken = accessToken;
+          persistAccessCookie(accessToken);
+          console.log('[AUTH] Access token saved:', accessToken ? 'YES' : 'NO');
+          return accessToken;
+        }
+      } else {
+        console.log('[AUTH] No csrf_token cookie, cannot refresh local token');
+      }
+    }
+  }
 
   if (hasSupabase) {
     const existing = window.supabaseAuth.getAccessToken();
     if (existing) {
       accessToken = existing;
       window.__accessToken = accessToken;
+      persistAccessCookie(accessToken);
+      return accessToken;
+    }
+    const refreshed = await window.supabaseAuth.refreshSession();
+    if (refreshed) {
+      accessToken = refreshed;
+      window.__accessToken = accessToken;
+      persistAccessCookie(accessToken);
       return accessToken;
     }
   }
-  
-  // For local or both modes, try local refresh first
-  const csrf = getCookie('csrf_token');
-  console.log('[AUTH] refreshAccessToken called, csrf:', csrf ? 'present' : 'missing');
-  if (!csrf) {
-    // No local session, try Supabase refresh if available
-    if (hasSupabase) {
-      const token = await window.supabaseAuth.refreshSession();
-      if (token) {
-        accessToken = token;
-        window.__accessToken = accessToken;
-        return accessToken;
-      }
-    }
-    console.log('[AUTH] No csrf_token cookie, cannot refresh');
-    return null;
-  }
-  const res = await fetch('/auth/refresh', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': csrf },
-  });
-  console.log('[AUTH] /auth/refresh response:', res.status, res.ok);
-  if (!res.ok) {
-    // Local refresh failed, try Supabase refresh if available
-    if (hasSupabase) {
-      const token = await window.supabaseAuth.refreshSession();
-      if (token) {
-        accessToken = token;
-        window.__accessToken = accessToken;
-        return accessToken;
-      }
-    }
-    return null;
-  }
-  const data = await res.json();
-  console.log('[AUTH] Refresh response data:', data);
-  accessToken = data.accessToken;
-  window.__accessToken = accessToken;
-  console.log('[AUTH] Access token saved:', accessToken ? 'YES' : 'NO');
-  return accessToken;
+
+  return null;
 }
 
 // Делаем функцию глобальной для использования в формах
 window.refreshAccessToken = refreshAccessToken;
 
 async function ensureAccessToken() {
-  // Check for Supabase token first if available
+  if (accessToken) return accessToken;
+
+  // In local/both mode prefer local refresh-token session.
+  if (AUTH_MODE === 'local' || AUTH_MODE === 'both' || AUTH_MODE === 'none') {
+    const refreshCookie = getCookie('refresh_token');
+    if (refreshCookie) {
+      if (!refreshPromise) {
+        refreshPromise = refreshAccessToken().finally(() => {
+          refreshPromise = null;
+        });
+      }
+      return refreshPromise;
+    }
+  }
+
+  // Fallback to Supabase token (for supabase mode or when local cookie absent).
   if ((AUTH_MODE === 'supabase' || AUTH_MODE === 'both') && window.supabaseAuth) {
     const sbToken = window.supabaseAuth.getAccessToken();
     if (sbToken) {
       accessToken = sbToken;
       window.__accessToken = accessToken;
+      persistAccessCookie(accessToken);
       return accessToken;
     }
   }
-  
-  if (accessToken) return accessToken;
+
   if (!refreshPromise) {
     refreshPromise = refreshAccessToken().finally(() => {
       refreshPromise = null;
@@ -84,6 +107,8 @@ async function ensureAccessToken() {
   }
   return refreshPromise;
 }
+
+window.ensureAccessToken = ensureAccessToken;
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
@@ -175,6 +200,7 @@ async function handleLogout(event) {
     }
   }
   await fetch('/auth/logout', { method: 'POST' });
+  clearAccessCookie();
   window.location.href = '/login';
 }
 
@@ -188,7 +214,10 @@ async function updateNavForSession() {
   if (!token) return;
   
   try {
-    const res = await fetch('/api/users/me');
+    let res = await fetch('/api/users/me');
+    if (!res.ok && res.status === 404) {
+      res = await fetch('/users/me');
+    }
     if (!res.ok) return;
     const user = await res.json();
     const navLogin = document.getElementById('nav-login');
@@ -216,6 +245,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('auth-logout')?.addEventListener('click', handleLogout);
   ensureAccessToken();
   updateNavForSession();
+  window.addEventListener('ovc:supabase-auth', () => {
+    updateNavForSession();
+  });
 });
 
 async function extractError(res) {

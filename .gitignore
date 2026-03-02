@@ -5,7 +5,6 @@ __pycache__/
 *.sqlite
 *.db
 *.log
-dataset.log
 src/ovc.db
 src/*.db
 src/**/*.db

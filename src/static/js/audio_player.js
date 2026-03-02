@@ -1,14 +1,18 @@
+// Возвращает актуальный src для аудио — учитывает и <source>, и прямой src
+function getAudioSrc(audioEl) {
+  return audioEl.currentSrc || audioEl.dataset.srcUrl || audioEl.src || '';
+}
+
 export function initAudioPlayers(container, onBlockUpdate) {
   if (!container) return;
   const blocks = container.querySelectorAll('.audio-block');
-  console.log('Audio player: initAudioPlayers called', { blocksCount: blocks.length, container });
   blocks.forEach((block) => {
     const audioEl = block.querySelector('audio');
     if (!audioEl) return;
     
     // OVC: audio - проверяем, нужно ли переинициализировать блок
     const savedSrc = audioEl.dataset.savedSrc;
-    const currentSrc = audioEl.src;
+    const currentSrc = getAudioSrc(audioEl);
     const needsReinit = !block.dataset.audioReady || savedSrc !== currentSrc;
     
     if (block.dataset.audioReady === 'true' && !needsReinit) {
@@ -71,6 +75,14 @@ function setupAudioBlock(block, onBlockUpdate) {
     console.warn('Audio player: audio element not found in block', block);
     return;
   }
+  const isDesktop = Boolean(window.__DESKTOP_MODE || window.__TAURI__);
+  if (isDesktop && audioEl.readyState === 0) {
+    try {
+      audioEl.load();
+    } catch (_) {
+      // ignore load errors on initial probe
+    }
+  }
 
   const playBtn = block.querySelector('[data-action="play"]');
   if (!playBtn) {
@@ -93,7 +105,6 @@ function setupAudioBlock(block, onBlockUpdate) {
   const durationLabel = block.querySelector('.audio-time__duration');
   const expanded = block.querySelector('.audio-expanded');
   const blockId = block.dataset.blockId;
-
   let durationFromMetadata = false;
 
   if (playBtn) {
@@ -104,30 +115,73 @@ function setupAudioBlock(block, onBlockUpdate) {
       
       if (audioEl.paused) {
         try {
-          // OVC: audio - проверяем, что аудио готово к воспроизведению
-          if (audioEl.readyState < 2) {
-            console.warn('Audio player: not ready to play', { readyState: audioEl.readyState });
-            // Ждем, пока аудио загрузится
-            audioEl.addEventListener('canplay', async () => {
-              try {
-                await audioEl.play();
-                playBtn.textContent = '⏸';
-                console.log('Audio player: playback started after canplay', { src: audioEl.src });
-              } catch (err) {
-                console.error('Audio player: playback failed after canplay', { error: err, src: audioEl.src });
-              }
-            }, { once: true });
-            return;
-          }
-          
           await audioEl.play();
-        playBtn.textContent = '⏸';
+          playBtn.textContent = '⏸';
           console.log('Audio player: playback started', { 
             src: audioEl.src, 
             readyState: audioEl.readyState,
             duration: audioEl.duration 
           });
         } catch (error) {
+          if (!isDesktop) {
+            console.error('Audio player: playback failed', {
+              error,
+              src: audioEl.src,
+              errorCode: audioEl.error?.code,
+              errorMessage: audioEl.error?.message,
+              readyState: audioEl.readyState,
+              networkState: audioEl.networkState,
+            });
+            playBtn.textContent = '▶';
+            return;
+          }
+
+          const retryWithNudge = async () => {
+            try {
+              const originalTime = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
+              if (Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
+                audioEl.currentTime = Math.min(audioEl.duration, Math.max(0, originalTime + 0.001));
+              } else {
+                audioEl.currentTime = Math.max(0, originalTime + 0.001);
+              }
+              await audioEl.play();
+              playBtn.textContent = '⏸';
+              console.log('Audio player: playback started after nudge', { src: audioEl.src });
+              return true;
+            } catch (_) {
+              return false;
+            }
+          };
+
+          if (await retryWithNudge()) {
+            return;
+          }
+
+          // Desktop/webview can reject first play before buffer is ready.
+          if (audioEl.readyState < 2) {
+            const retryOnCanPlay = async () => {
+              try {
+                if (!(await retryWithNudge())) {
+                  await audioEl.play();
+                }
+                playBtn.textContent = '⏸';
+                console.log('Audio player: playback started after retry', { src: audioEl.src });
+              } catch (retryError) {
+                console.error('Audio player: playback failed after retry', {
+                  error: retryError,
+                  src: audioEl.src,
+                });
+                playBtn.textContent = '▶';
+              }
+            };
+            audioEl.addEventListener('canplay', retryOnCanPlay, { once: true });
+            try {
+              audioEl.load();
+            } catch (_) {
+              // ignore load() errors
+            }
+            return;
+          }
           console.error('Audio player: playback failed', { 
             error, 
             src: audioEl.src,
@@ -183,7 +237,8 @@ function setupAudioBlock(block, onBlockUpdate) {
     });
     if (!Number.isFinite(audioEl.duration)) return;
     durationLabel.textContent = formatTime(audioEl.duration);
-    if (!block.dataset.duration && typeof onBlockUpdate === 'function' && blockId) {
+    const savedDuration = Number(block.dataset.duration || 0);
+    if ((!(savedDuration > 0)) && typeof onBlockUpdate === 'function' && blockId) {
       onBlockUpdate(blockId, { duration: Number(audioEl.duration.toFixed(2)) });
     }
     durationFromMetadata = true;
@@ -237,9 +292,10 @@ function setupAudioBlock(block, onBlockUpdate) {
     audioEl.currentTime = Math.min(audioEl.duration || audioEl.currentTime + 10, audioEl.currentTime + 10);
   });
 
-  if (downloadBtn && audioEl.src) {
+  const srcForDownload = getAudioSrc(audioEl);
+  if (downloadBtn && srcForDownload) {
     downloadBtn.addEventListener('click', () => {
-      window.open(audioEl.src, '_blank');
+      window.open(getAudioSrc(audioEl), '_blank');
     });
   }
 

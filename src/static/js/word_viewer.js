@@ -9,6 +9,15 @@ export function initWordViewers(container, onBlockUpdate) {
   });
 }
 
+function sanitizeWordHtml(html) {
+  if (!html) return '';
+  if (window.DOMPurify?.sanitize) {
+    return window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+  }
+  // Без DOMPurify показываем как текст, чтобы не вставлять потенциально опасный HTML.
+  return escapeHtml(html);
+}
+
 function hydrateWordBlock(block, onBlockUpdate) {
   const blockId = block.dataset.blockId;
   const fileId = block.dataset.fileId;
@@ -54,7 +63,7 @@ function hydrateWordBlock(block, onBlockUpdate) {
     loading = true;
     showPlaceholder();
     if (wordContentCache.has(fileId)) {
-      inlineContainer.innerHTML = wordContentCache.get(fileId);
+      inlineContainer.innerHTML = sanitizeWordHtml(wordContentCache.get(fileId));
       decorateInlineContent(inlineContainer);
       loaded = true;
       inlineContainer.dataset.loaded = 'true';
@@ -69,8 +78,9 @@ function hydrateWordBlock(block, onBlockUpdate) {
         throw new Error(await response.text());
       }
       const html = await response.text();
-      wordContentCache.set(fileId, html);
-      inlineContainer.innerHTML = html;
+      const sanitizedHtml = sanitizeWordHtml(html);
+      wordContentCache.set(fileId, sanitizedHtml);
+      inlineContainer.innerHTML = sanitizedHtml;
       decorateInlineContent(inlineContainer);
       loaded = true;
       inlineContainer.dataset.loaded = 'true';

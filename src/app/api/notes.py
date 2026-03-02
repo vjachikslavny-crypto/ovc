@@ -218,6 +218,7 @@ async def create_note(payload: NoteCreateRequest, request: Request, current_user
                 },
             },
             note_id=note.id,
+            user_id=current_user.id,
         )
         log_event(session, "NOTE_CREATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         return _serialize_detail(note, session=session, user_id=current_user.id)
@@ -279,6 +280,7 @@ async def update_note(
                 "snapshot": _serialize_detail(note, session=session, user_id=current_user.id).dict(by_alias=True),
             },
             note_id=note.id,
+            user_id=current_user.id,
         )
         log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         return _serialize_detail(note, session=session, user_id=current_user.id)
@@ -296,6 +298,7 @@ async def delete_note(note_id: str, request: Request, current_user: User = Depen
             OP_DELETE_NOTE,
             {"localNoteId": note.id},
             note_id=note.id,
+            user_id=current_user.id,
         )
         log_event(session, "NOTE_DELETE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         session.delete(note)

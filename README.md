@@ -12,7 +12,6 @@
 - 🏷️ **Теги** — добавление в паспорте заметки и список всех тегов через `/api/tags`.
 - 🔁 **DraftAction API** (`/api/commit`) — атомарно применяет действия (`insert_block`, `update_block`, `move_block`, `add_tag`, `remove_tag`, `add_link`, `set_style`).
 - 🔎 **Локальный поиск** — TF-IDF индекс по тексту блоков, обновляется при каждом изменении.
-- 🗃 **Журнал** (`/api/dataset/export`) — JSONL-лог для обучения модели.
 - 🔐 **Авторизация** — регистрация/вход, refresh-токены в HttpOnly cookie, email‑подтверждение.
 - 🤖 **LLM-интерфейсы** — `app/providers/llm_provider.py` + `structurizer.py` заготовлены под будущий Ollama/vLLM, сейчас возвращают пустой draft.
 
@@ -157,7 +156,6 @@ OVC/
 │   │   ├── api/          # REST-эндпоинты (notes, commit, chat, export)
 │   │   ├── agent/        # JSON-схема блоков и DraftAction
 │   │   ├── db/           # SQLAlchemy модели и миграция
-│   │   ├── log/          # JSONL журнал
 │   │   ├── providers/    # LLM-заглушки и заготовка Ollama
 │   │   ├── rag/          # TF-IDF индекс
 │   │   └── main.py       # FastAPI приложение

@@ -51,10 +51,33 @@ fn wait_for_port(host: &str, port: u16, timeout: Duration) -> bool {
     false
 }
 
+fn pick_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_database_url(project_root: &Path, app_data_dir: &Path) -> String {
+    if let Some(explicit) = pick_env("OVC_DESKTOP_DATABASE_URL") {
+        return explicit;
+    }
+    if let Some(shared_from_env) = pick_env("DATABASE_URL") {
+        return shared_from_env;
+    }
+
+    // By default desktop shares the same local DB as web to keep a single account base.
+    let shared_db = project_root.join("src").join("ovc.db");
+    if let Some(parent) = shared_db.parent() {
+        let _ = ensure_dir(parent);
+    }
+    let _ = app_data_dir;
+    format!("sqlite:///{}", shared_db.display())
+}
+
 fn spawn_local_backend(app_data_dir: &Path) -> Result<Child> {
     let root = find_project_root()?;
-    let db_path = app_data_dir.join("ovc-desktop.db");
-    let database_url = format!("sqlite:///{}", db_path.display());
+    let database_url = resolve_database_url(&root, app_data_dir);
 
     let mut cmd = Command::new("python3");
     cmd.arg("-m")
@@ -95,7 +118,8 @@ fn main() {
 
                 let child = spawn_local_backend(&app_data_dir)?;
                 {
-                    let mut guard = app.state::<BackendState>().child.lock().expect("poisoned mutex");
+                    let backend_state = app.state::<BackendState>();
+                    let mut guard = backend_state.child.lock().expect("poisoned mutex");
                     *guard = Some(child);
                 }
 
@@ -111,11 +135,16 @@ fn main() {
             let parsed = url::Url::parse(&target_url)
                 .with_context(|| format!("invalid target URL: {}", target_url))?;
 
-            tauri::WindowBuilder::new(app, "main", WindowUrl::External(parsed))
-                .title("OVC")
-                .inner_size(1440.0, 920.0)
-                .min_inner_size(1100.0, 700.0)
-                .build()?;
+            if app.get_window("main").is_none() {
+                tauri::WindowBuilder::new(app, "main", WindowUrl::External(parsed))
+                    .title("OVC")
+                    .inner_size(1440.0, 920.0)
+                    .min_inner_size(1100.0, 700.0)
+                    .build()?;
+            } else if let Some(window) = app.get_window("main") {
+                let escaped = target_url.replace('\\', "\\\\").replace('\'', "\\'");
+                window.eval(&format!("window.location.replace('{}')", escaped))?;
+            }
 
             Ok(())
         })
@@ -124,12 +153,12 @@ fn main() {
 
     app.run(|app, event| {
             if let RunEvent::Exit = event {
-                if let Ok(mut guard) = app.state::<BackendState>().child.lock() {
-                    if let Some(child) = guard.as_mut() {
-                        let _ = child.kill();
-                    }
-                    *guard = None;
+                let backend_state = app.state::<BackendState>();
+                let mut guard = backend_state.child.lock().expect("poisoned mutex");
+                if let Some(child) = guard.as_mut() {
+                    let _ = child.kill();
                 }
+                *guard = None;
             }
         });
 }

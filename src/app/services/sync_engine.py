@@ -5,10 +5,10 @@ import logging
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.config import settings
 from app.db.models import Note, NoteTag, SyncConflict, SyncNoteMap, SyncOutbox
@@ -69,6 +69,12 @@ def start_sync_worker_once() -> None:
         logger.info("sync worker disabled: set SYNC_ENABLED=true or DESKTOP_MODE=true")
         return
 
+    # Desktop sync should run with user-bound bearer from /api/sync/trigger.
+    # Running background worker without token causes unauthorized pushes.
+    if settings.desktop_mode and not settings.sync_bearer_token:
+        logger.info("sync worker disabled in desktop mode without SYNC_BEARER_TOKEN")
+        return
+
     with _worker_lock:
         if _worker_started:
             return
@@ -97,6 +103,7 @@ def enqueue_sync_operation(
     payload: Dict[str, Any],
     *,
     note_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> None:
     if not (settings.desktop_mode or settings.sync_enabled):
         return
@@ -113,6 +120,7 @@ def enqueue_sync_operation(
 
     item = SyncOutbox(
         op_type=op_type,
+        user_id=user_id,
         note_id=note_id,
         payload_json=json.dumps(payload, ensure_ascii=False),
         status=STATUS_PENDING,
@@ -121,18 +129,22 @@ def enqueue_sync_operation(
     session.add(item)
 
 
-def trigger_sync_now() -> Dict[str, Any]:
+def trigger_sync_now(
+    *,
+    access_token: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     if not settings.sync_remote_base_url:
         return {"ok": False, "reason": "remote_base_url_empty"}
 
     with _sync_guard():
         with get_session() as session:
-            client = _build_client()
-            pushed, failed = _push_outbox(session, client)
+            client = _build_client(access_token=access_token)
+            pushed, failed = _push_outbox(session, client, user_id=user_id)
             pulled = 0
             conflicts = 0
             if settings.sync_pull_enabled:
-                pulled, conflicts = _pull_remote_changes(session, client)
+                pulled, conflicts = _pull_remote_changes(session, client, user_id=user_id)
 
             return {
                 "ok": True,
@@ -143,18 +155,28 @@ def trigger_sync_now() -> Dict[str, Any]:
             }
 
 
-def get_sync_status() -> Dict[str, Any]:
+def get_sync_status(*, user_id: Optional[str] = None) -> Dict[str, Any]:
     with get_session() as session:
+        base_filter = []
+        if user_id:
+            base_filter.append(SyncOutbox.user_id == user_id)
+
         pending = (
-            session.execute(select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_PENDING)).scalar_one()
+            session.execute(
+                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_PENDING, *base_filter)
+            ).scalar_one()
             or 0
         )
         failed = (
-            session.execute(select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_FAILED)).scalar_one()
+            session.execute(
+                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_FAILED, *base_filter)
+            ).scalar_one()
             or 0
         )
         done = (
-            session.execute(select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_DONE)).scalar_one()
+            session.execute(
+                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_DONE, *base_filter)
+            ).scalar_one()
             or 0
         )
         conflicts = session.execute(select(func.count(SyncConflict.id))).scalar_one() or 0
@@ -169,12 +191,11 @@ def get_sync_status() -> Dict[str, Any]:
     }
 
 
-def _build_client() -> httpx.Client:
-    headers: Dict[str, str] = {
-        "Content-Type": "application/json",
-    }
-    if settings.sync_bearer_token:
-        headers["Authorization"] = f"Bearer {settings.sync_bearer_token}"
+def _build_client(*, access_token: Optional[str] = None) -> httpx.Client:
+    headers: Dict[str, str] = {}
+    token = (access_token or "").strip() or settings.sync_bearer_token
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     return httpx.Client(
         base_url=settings.sync_remote_base_url.rstrip("/"),
@@ -183,23 +204,30 @@ def _build_client() -> httpx.Client:
     )
 
 
-def _push_outbox(session, client: httpx.Client) -> Tuple[int, int]:
-    items = (
-        session.execute(
-            select(SyncOutbox)
-            .where(SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]))
-            .order_by(SyncOutbox.created_at.asc())
-            .limit(settings.sync_batch_size)
-        )
-        .scalars()
-        .all()
+def _push_outbox(session, client: httpx.Client, *, user_id: Optional[str] = None) -> Tuple[int, int]:
+    query = (
+        select(SyncOutbox)
+        .where(SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]))
+        .order_by(SyncOutbox.created_at.asc())
+        .limit(settings.sync_batch_size)
     )
+    if user_id:
+        query = query.where(or_(SyncOutbox.user_id == user_id, SyncOutbox.user_id.is_(None)))
+
+    items = session.execute(query).scalars().all()
 
     pushed = 0
     failed = 0
     for item in items:
         try:
             payload = json.loads(item.payload_json or "{}")
+
+            if user_id and not _operation_belongs_to_user(session, item, payload, user_id):
+                continue
+            if user_id and not item.user_id:
+                item.user_id = user_id
+                session.add(item)
+
             _flush_operation(session, client, item, payload)
             item.status = STATUS_DONE
             item.last_error = None
@@ -243,7 +271,7 @@ def _flush_operation(session, client: httpx.Client, item: SyncOutbox, payload: D
         _flush_commit(session, client, payload)
         return
     if op_type == OP_UPLOAD_FILE:
-        _flush_upload_file(session, client, payload)
+        _flush_upload_file(session, client, item, payload)
         return
 
     raise RuntimeError(f"unsupported op type: {op_type}")
@@ -322,7 +350,12 @@ def _flush_commit(session, client: httpx.Client, payload: Dict[str, Any]) -> Non
         raise RetryableSyncError(f"remote commit failed: {response.status_code} {response.text}")
 
 
-def _flush_upload_file(session, client: httpx.Client, payload: Dict[str, Any]) -> None:
+def _flush_upload_file(
+    session,
+    client: httpx.Client,
+    item: SyncOutbox,
+    payload: Dict[str, Any],
+) -> None:
     local_note_id = payload.get("localNoteId")
     file_path = payload.get("filePath")
     file_asset_id = payload.get("fileAssetId") or ""
@@ -356,7 +389,10 @@ def _flush_upload_file(session, client: httpx.Client, payload: Dict[str, Any]) -
             response = client.post(
                 f"/api/upload?noteId={remote_note_id}",
                 files=files,
-                headers={"X-Desktop-File-Id": str(file_asset_id)},
+                headers={
+                    "X-Desktop-File-Id": str(file_asset_id),
+                    "X-Desktop-Op-Id": item.id,
+                },
             )
     except FileNotFoundError as exc:
         raise RuntimeError(f"local file missing: {file_path}") from exc
@@ -393,7 +429,12 @@ def _map_action_ids(session, action: Dict[str, Any]) -> Dict[str, Any]:
     return mapped
 
 
-def _pull_remote_changes(session, client: httpx.Client) -> Tuple[int, int]:
+def _pull_remote_changes(
+    session,
+    client: httpx.Client,
+    *,
+    user_id: Optional[str] = None,
+) -> Tuple[int, int]:
     pulled = 0
     conflicts = 0
     offset = 0
@@ -429,14 +470,14 @@ def _pull_remote_changes(session, client: httpx.Client) -> Tuple[int, int]:
 
             detail = _fetch_remote_note_detail(client, remote_id)
             if local_note is None:
-                _upsert_local_note_from_remote(session, local_id, detail)
+                _upsert_local_note_from_remote(session, local_id, detail, user_id=user_id)
                 _set_note_map(session, local_id, remote_id)
                 pulled += 1
                 continue
 
             local_updated = local_note.updated_at or datetime.min
             if remote_updated > local_updated:
-                _upsert_local_note_from_remote(session, local_id, detail)
+                _upsert_local_note_from_remote(session, local_id, detail, user_id=user_id)
                 _set_note_map(session, local_id, remote_id)
                 pulled += 1
 
@@ -455,10 +496,18 @@ def _fetch_remote_note_detail(client: httpx.Client, remote_id: str) -> Dict[str,
     return response.json() or {}
 
 
-def _upsert_local_note_from_remote(session, local_id: str, detail: Dict[str, Any]) -> None:
+def _upsert_local_note_from_remote(
+    session,
+    local_id: str,
+    detail: Dict[str, Any],
+    *,
+    user_id: Optional[str] = None,
+) -> None:
     note = session.get(Note, local_id)
     if note is None:
         note = Note(id=local_id)
+    if user_id:
+        note.user_id = user_id
 
     note.title = detail.get("title") or "Новая заметка"
     note.style_theme = detail.get("styleTheme") or "clean"
@@ -563,3 +612,41 @@ def _set_note_map(session, local_note_id: str, remote_note_id: str) -> None:
         row.remote_note_id = remote_note_id
     row.updated_at = _now()
     session.add(row)
+
+
+def _operation_belongs_to_user(
+    session,
+    item: SyncOutbox,
+    payload: Dict[str, Any],
+    user_id: str,
+) -> bool:
+    if item.user_id:
+        return item.user_id == user_id
+
+    note_ids: Set[str] = set()
+    for key in ("localNoteId", "noteId", "fromId", "toId"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            note_ids.add(value)
+    if item.note_id:
+        note_ids.add(item.note_id)
+
+    if item.op_type == OP_COMMIT:
+        draft = payload.get("draft") or []
+        if isinstance(draft, list):
+            for action in draft:
+                if not isinstance(action, dict):
+                    continue
+                for key in ("noteId", "fromId", "toId"):
+                    value = action.get(key)
+                    if isinstance(value, str) and value:
+                        note_ids.add(value)
+
+    if not note_ids:
+        return False
+
+    for note_id in note_ids:
+        note = session.get(Note, note_id)
+        if note and note.user_id not in {None, user_id}:
+            return False
+    return True

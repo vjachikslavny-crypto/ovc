@@ -1,6 +1,12 @@
 import logging
+import os
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlsplit
+
+import httpx
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -16,7 +22,12 @@ from app.api.resolve import router as resolve_router
 from app.api.sync import router as sync_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.users import router as users_router
-from app.core.security import CSRF_COOKIE, get_user_from_refresh_cookie, issue_csrf_token
+from app.core.security import (
+    CSRF_COOKIE,
+    create_access_token,
+    get_user_from_refresh_cookie,
+    issue_csrf_token,
+)
 from app.core.config import settings
 from app.services.sync_engine import start_sync_worker_once
 
@@ -29,6 +40,25 @@ logger = logging.getLogger(__name__)
 MAX_REQUEST_SIZE = 500 * 1024 * 1024  # 500MB
 
 app = FastAPI(title="OVC Simple App", version="0.1.0")
+
+_cors_origins = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:18741",
+    "http://localhost:18741",
+    "tauri://localhost",
+]
+_extra = os.getenv("CORS_ORIGINS", "")
+if _extra:
+    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # OVC: pdf - логируем статус библиотек при старте
 @app.on_event("startup")
@@ -66,20 +96,130 @@ templates.env.globals["auth_mode"] = settings.auth_mode
 templates.env.globals["desktop_mode"] = settings.desktop_mode
 
 
+def _default_port_for_scheme(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
+
+
+def _same_host(a: Optional[str], b: Optional[str]) -> bool:
+    if not a or not b:
+        return False
+    aliases = {
+        "127.0.0.1": {"127.0.0.1", "localhost"},
+        "localhost": {"127.0.0.1", "localhost"},
+    }
+    if a == b:
+        return True
+    return b in aliases.get(a, set()) or a in aliases.get(b, set())
+
+
+async def _proxy_remote_file_if_needed(request: Request, response):
+    """
+    Desktop-only fallback:
+    if local /files/* returns 404, fetch same path from SYNC_REMOTE_BASE_URL.
+    This keeps web behavior unchanged and lets desktop render server-side attachments.
+    """
+    if not settings.desktop_mode:
+        return response
+    if request.method.upper() != "GET":
+        return response
+    if response.status_code != 404:
+        return response
+    if not request.url.path.startswith("/files/"):
+        return response
+
+    remote_base = (settings.sync_remote_base_url or "").strip().rstrip("/")
+    if not remote_base:
+        return response
+
+    try:
+        remote = urlsplit(remote_base)
+    except Exception:
+        return response
+
+    req_port = request.url.port or _default_port_for_scheme(request.url.scheme or "http")
+    remote_port = remote.port or _default_port_for_scheme(remote.scheme or "http")
+    if _same_host(request.url.hostname, remote.hostname) and req_port == remote_port:
+        # Avoid proxy loops when remote points to current backend.
+        return response
+
+    target = f"{remote_base}{request.url.path}"
+    if request.url.query:
+        target += f"?{request.url.query}"
+
+    # Forward auth context and range/cache headers for media playback.
+    proxy_headers = {}
+    for header_name in (
+        "authorization",
+        "cookie",
+        "range",
+        "accept",
+        "if-none-match",
+        "if-modified-since",
+        "user-agent",
+    ):
+        value = request.headers.get(header_name)
+        if value:
+            proxy_headers[header_name] = value
+
+    # Browser media tags (<img>/<audio>/<video>) do not send Authorization.
+    # In desktop mode, derive a short-lived access token from local refresh cookie.
+    if "authorization" not in proxy_headers:
+        try:
+            proxy_user = get_user_from_refresh_cookie(request)
+            proxy_headers["authorization"] = f"Bearer {create_access_token(str(proxy_user.id))}"
+        except Exception:
+            pass
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.sync_request_timeout_seconds,
+            follow_redirects=True,
+        ) as client:
+            proxied = await client.get(target, headers=proxy_headers)
+    except Exception as exc:
+        logger.warning("remote file proxy failed for %s: %s", target, exc)
+        return response
+
+    if proxied.status_code >= 400:
+        return response
+
+    passthrough_headers = {}
+    for header_name in (
+        "cache-control",
+        "etag",
+        "last-modified",
+        "content-disposition",
+        "content-range",
+        "accept-ranges",
+    ):
+        value = proxied.headers.get(header_name)
+        if value:
+            passthrough_headers[header_name] = value
+
+    return Response(
+        content=proxied.content,
+        status_code=proxied.status_code,
+        headers=passthrough_headers,
+        media_type=proxied.headers.get("content-type"),
+    )
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
+    response = await _proxy_remote_file_if_needed(request, response)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     
     # Build CSP based on auth mode
-    script_src = "'self' 'unsafe-inline' https://www.instagram.com"
-    connect_src = "'self' https://www.instagram.com"
+    script_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
+    connect_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
     frame_src = "'self' https://www.instagram.com https://www.tiktok.com"
     
     # Allow Supabase CDN and API when supabase auth is enabled
     if settings.auth_mode in ("supabase", "both"):
         script_src += " https://cdn.jsdelivr.net"
+        connect_src += " https://cdn.jsdelivr.net"
         if settings.supabase_url:
             connect_src += f" {settings.supabase_url}"
     
@@ -103,6 +243,8 @@ def _require_user(request: Request):
 
 
 def _allow_anonymous() -> bool:
+    if settings.desktop_mode:
+        return True
     return settings.auth_mode in ("none", "supabase", "both")
 
 
