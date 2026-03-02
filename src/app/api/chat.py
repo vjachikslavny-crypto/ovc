@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from app.agent.draft_types import AgentReply
 from app.agent.orchestrator import handle_user_message
-from app.log import dataset_logger
 from app.core.security import get_current_user
 from app.models.user import User
 
@@ -32,16 +34,8 @@ async def chat_endpoint(payload: ChatRequest, current_user: User = Depends(get_c
     try:
         agent_reply: AgentReply = handle_user_message(payload.text, payload.note_id)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    dataset_logger.append(
-        {
-            "kind": "chat",
-            "input": payload.text,
-            "noteId": payload.note_id,
-            "draft": [action.dict(by_alias=True) for action in agent_reply.draft],
-        }
-    )
+        logger.exception("Chat processing error")
+        raise HTTPException(status_code=500, detail="Internal chat error") from exc
 
     return ChatResponse(
         reply=agent_reply.reply,

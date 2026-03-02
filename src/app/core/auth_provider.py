@@ -87,6 +87,65 @@ def _fetch_jwks() -> None:
         raise HTTPException(status_code=503, detail="Auth service unavailable")
 
 
+def _is_supabase_issuer(issuer: str) -> bool:
+    if not issuer:
+        return False
+    expected = (settings.supabase_issuer or "").rstrip("/")
+    if expected and issuer.rstrip("/") == expected:
+        return True
+    # Legacy/older Supabase tokens can carry simplified issuer values.
+    if issuer == "supabase":
+        return True
+    base = (settings.supabase_url or "").rstrip("/")
+    return bool(base and issuer.startswith(base))
+
+
+def _verify_supabase_token_via_userinfo(token: str) -> AuthUser:
+    """
+    Validate Supabase access token via Supabase Auth API.
+    Works as a compatibility fallback when local JWT checks are insufficient.
+    """
+    base = (settings.supabase_url or "").rstrip("/")
+    if not base or not settings.supabase_anon_key:
+        raise HTTPException(status_code=503, detail="Supabase configuration is incomplete")
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(
+                f"{base}/auth/v1/user",
+                headers={
+                    "apikey": settings.supabase_anon_key,
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Supabase /auth/v1/user request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Auth service unavailable") from exc
+
+    if response.status_code in (401, 403):
+        logger.warning(
+            "Supabase /auth/v1/user unauthorized (%s): %s",
+            response.status_code,
+            (response.text or "")[:200],
+        )
+        raise HTTPException(status_code=401, detail="Invalid Supabase token")
+    if response.status_code >= 400:
+        logger.warning("Supabase /auth/v1/user returned %s", response.status_code)
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+
+    data = response.json()
+    user_id = data.get("id") or data.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Supabase token has no subject")
+
+    return AuthUser(
+        id=str(user_id),
+        email=data.get("email"),
+        provider="supabase",
+        raw_claims=data,
+    )
+
+
 def _get_signing_key(token: str) -> Any:
     """Get the signing key for a JWT token."""
     try:
@@ -119,11 +178,17 @@ def _get_signing_key(token: str) -> Any:
 # ============================================================================
 
 def get_bearer_token(request: Request) -> Optional[str]:
-    """Extract Bearer token from Authorization header."""
+    """Extract access token from Authorization header, cookie, or query."""
     auth = request.headers.get("Authorization") or ""
     parts = auth.split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return parts[1]
+    cookie_token = request.cookies.get("ovc_access_token")
+    if cookie_token:
+        return cookie_token.strip()
+    query_token = request.query_params.get("access_token")
+    if query_token:
+        return query_token.strip()
     return None
 
 
@@ -174,24 +239,37 @@ def supabase_auth_get_user(request: Request) -> Optional[AuthUser]:
     if not token:
         return None
     
-    # Check if this looks like a Supabase token (simple heuristic)
-    # Local tokens are HS256; Supabase currently uses ES256 (JWKS)
+    # Check token algorithm and validate through the suitable strategy.
     try:
         headers = jwt.get_unverified_header(token)
         alg = headers.get("alg", "")
-        
-        # If HS256, this is likely a local token
-        if alg == "HS256":
-            return None
-        if alg not in ("ES256", "RS256"):
-            raise HTTPException(status_code=401, detail="Unsupported token algorithm")
-        
     except JWTError:
         return None
-    
-    # Get signing key from JWKS
-    signing_key = _get_signing_key(token)
-    
+
+    if alg == "HS256":
+        # HS256 can be either local token or Supabase legacy token.
+        # Distinguish by issuer when possible; if issuer is absent we still try
+        # Supabase introspection to keep compatibility with legacy tokens.
+        try:
+            claims = jwt.get_unverified_claims(token)
+        except JWTError:
+            return None
+        issuer = str(claims.get("iss") or "")
+        if issuer and not _is_supabase_issuer(issuer):
+            return None
+        return _verify_supabase_token_via_userinfo(token)
+
+    if alg not in ("ES256", "RS256"):
+        # Unknown/changed algorithm: let Supabase API be the source of truth.
+        return _verify_supabase_token_via_userinfo(token)
+
+    # Asymmetric Supabase tokens: verify locally via JWKS.
+    try:
+        signing_key = _get_signing_key(token)
+    except HTTPException:
+        # If JWKS fetch/key lookup fails, fallback to Supabase API validation.
+        return _verify_supabase_token_via_userinfo(token)
+
     try:
         payload = jwt.decode(
             token,
@@ -201,13 +279,13 @@ def supabase_auth_get_user(request: Request) -> Optional[AuthUser]:
             issuer=settings.supabase_issuer,
         )
     except JWTError as e:
-        logger.warning(f"Supabase JWT verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid Supabase token")
-    
+        logger.warning(f"Supabase JWT verification failed, fallback to userinfo: {e}")
+        return _verify_supabase_token_via_userinfo(token)
+
     sub = payload.get("sub")
     if not sub:
         raise HTTPException(status_code=401, detail="Token missing subject")
-    
+
     return AuthUser(
         id=sub,
         email=payload.get("email"),
@@ -233,17 +311,25 @@ def get_auth_user(request: Request) -> AuthUser:
     Raises HTTPException if authentication fails.
     """
     mode = settings.auth_mode
-    
+    has_access_token = bool(get_bearer_token(request))
     # Mode: none - anonymous/dev access
     if mode == "none":
         return AuthUser(id="dev-user", email=None, provider="none")
     
     # Mode: local only
     if mode == "local":
-        user = local_auth_get_user(request)
-        if not user:
-            raise HTTPException(status_code=401, detail="Missing access token")
-        return user
+        try:
+            user = local_auth_get_user(request)
+        except HTTPException:
+            # Desktop offline fallback is allowed only when no access token was provided.
+            if settings.desktop_mode and not has_access_token:
+                return AuthUser(id="dev-user", email=None, provider="none")
+            raise
+        if user:
+            return user
+        if settings.desktop_mode and not has_access_token:
+            return AuthUser(id="dev-user", email=None, provider="none")
+        raise HTTPException(status_code=401, detail="Missing access token")
     
     # Mode: supabase only
     if mode == "supabase":
@@ -254,23 +340,34 @@ def get_auth_user(request: Request) -> AuthUser:
     
     # Mode: both - try local first, then supabase
     if mode == "both":
+        local_error: Optional[HTTPException] = None
+        supabase_error: Optional[HTTPException] = None
+
         # Try local auth first (non-raising check)
         try:
             user = local_auth_get_user(request)
             if user:
                 return user
-        except HTTPException:
-            pass  # Local token invalid, try Supabase
+        except HTTPException as exc:
+            local_error = exc  # Local token invalid, try Supabase
         
         # Try Supabase auth
         try:
             user = supabase_auth_get_user(request)
             if user:
                 return user
-        except HTTPException:
-            pass  # Supabase token invalid too
+        except HTTPException as exc:
+            supabase_error = exc  # Supabase token invalid too
+
+        if supabase_error and supabase_error.status_code != 401:
+            raise supabase_error
+        if local_error and local_error.status_code != 401:
+            raise local_error
         
-        # No valid authentication found
+        # No valid authentication found.
+        # Desktop fallback is only for explicit offline/no-token usage.
+        if settings.desktop_mode and not has_access_token:
+            return AuthUser(id="dev-user", email=None, provider="none")
         raise HTTPException(status_code=401, detail="Missing or invalid access token")
     
     # Fallback - should not reach here

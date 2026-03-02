@@ -206,13 +206,13 @@ class LinkData(BaseModel):
 
 
 class TableData(BaseModel):
-    kind: Literal["xlsx", "xls", "csv"]
-    src: str
-    summary: str
+    kind: Optional[Literal["xlsx", "xls", "csv"]] = None
+    src: Optional[str] = None
+    summary: Optional[str] = None
     view: Literal["cover", "inline"] = "cover"
     active_sheet: Optional[str] = Field(default=None, alias="activeSheet")
     charts: Optional[str] = None  # OVC: excel - URL к JSON с метаданными диаграмм
-    rows: Optional[List[List[str]]] = None  # legacy inline payload
+    rows: Optional[List[List[str]]] = None
 
     if ConfigDict is not None:  # Pydantic v2
         model_config = ConfigDict(extra="forbid", populate_by_name=True)

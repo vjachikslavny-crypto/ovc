@@ -4,190 +4,37 @@
 {% block content %}
 <section class="auth-page">
   <div class="auth-card">
-    <h1>Войти</h1>
-    
-    {% if auth_mode == 'both' %}
-    <!-- Tab switcher for both modes -->
-    <div class="auth-tabs" id="auth-tabs">
-      <button class="auth-tab auth-tab--active" data-tab="local">Локальный вход</button>
-      <button class="auth-tab" data-tab="supabase">Вход через Supabase</button>
-    </div>
-    {% endif %}
-    
+    <h1>Вход</h1>
+
     {% if request.query_params.get('registered') %}
     <p class="muted" style="color: var(--accent)">✓ Регистрация завершена! Войдите.</p>
     {% endif %}
-    
-    {% if auth_mode in ['local', 'both'] %}
-    <!-- Local login form -->
-    <div id="local-login-section" {% if auth_mode == 'both' %}class="auth-section auth-section--active"{% endif %}>
-      <p class="muted">Используйте username (или email) и пароль для входа.</p>
-      <form id="login-form" class="auth-form">
-        <input 
-          type="text" 
-          name="identifier" 
-          placeholder="Username или Email" 
-          required
-          autocomplete="username"
-        />
-        <input 
-          type="password" 
-          name="password" 
-          placeholder="Пароль" 
-          required
-          autocomplete="current-password"
-        />
-        <button type="submit" class="pill-button pill-button--primary">Войти</button>
-        <span id="login-error" class="muted"></span>
-      </form>
-    </div>
-    {% endif %}
-    
-    {% if auth_mode in ['supabase', 'both'] %}
-    <!-- Supabase login form -->
-    <div id="supabase-login-section" {% if auth_mode == 'both' %}class="auth-section" style="display: none;"{% endif %}>
-      <p class="muted">Войдите с помощью email и пароля Supabase.</p>
-      <form id="supabase-login-form" class="auth-form">
-        <input 
-          type="email" 
-          name="email" 
-          placeholder="Email" 
-          required
-          autocomplete="email"
-        />
-        <input 
-          type="password" 
-          name="password" 
-          placeholder="Пароль" 
-          required
-          autocomplete="current-password"
-        />
-        <button type="submit" class="pill-button pill-button--primary">Войти через Supabase</button>
-        <span id="supabase-login-error" class="muted"></span>
-      </form>
-    </div>
-    {% endif %}
-    
+
+    <p class="muted">Введите логин или email и пароль.</p>
+    <form id="login-form" class="auth-form">
+      <input
+        type="text"
+        name="identifier"
+        placeholder="Логин или Email"
+        required
+        autocomplete="username"
+      />
+      <input
+        type="password"
+        name="password"
+        placeholder="Пароль"
+        required
+        autocomplete="current-password"
+      />
+      <button type="submit" class="pill-button pill-button--primary">Войти</button>
+      <span id="login-error" class="muted"></span>
+    </form>
+
     <div class="auth-actions">
       <a href="/register">Создать аккаунт</a>
     </div>
   </div>
 </section>
 
-<script>
-window.__AUTH_MODE = '{{ auth_mode }}';
-
-{% if auth_mode == 'both' %}
-// Tab switching
-document.querySelectorAll('.auth-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    const tabName = tab.dataset.tab;
-    
-    // Update active tab
-    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('auth-tab--active'));
-    tab.classList.add('auth-tab--active');
-    
-    // Show/hide sections
-    document.getElementById('local-login-section').style.display = tabName === 'local' ? 'block' : 'none';
-    document.getElementById('supabase-login-section').style.display = tabName === 'supabase' ? 'block' : 'none';
-  });
-});
-{% endif %}
-
-{% if auth_mode in ['local', 'both'] %}
-// Local login handler
-document.getElementById('login-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const formData = new FormData(e.target);
-  const payload = {
-    identifier: formData.get('identifier'),
-    password: formData.get('password')
-  };
-  
-  const errorEl = document.getElementById('login-error');
-  errorEl.textContent = '';
-  
-  try {
-    const res = await fetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    if (res.ok) {
-      // Обновляем access token перед редиректом
-      if (window.refreshAccessToken) {
-        await window.refreshAccessToken();
-      }
-      window.location.href = '/';
-    } else {
-      const err = await res.json();
-      errorEl.textContent = err.detail || 'Ошибка входа';
-    }
-  } catch (err) {
-    errorEl.textContent = 'Ошибка сети';
-  }
-});
-{% endif %}
-
-{% if auth_mode in ['supabase', 'both'] %}
-// Supabase login handler
-document.getElementById('supabase-login-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const formData = new FormData(e.target);
-  const email = formData.get('email');
-  const password = formData.get('password');
-  
-  const errorEl = document.getElementById('supabase-login-error');
-  errorEl.textContent = '';
-  
-  try {
-    if (!window.supabaseAuth) {
-      throw new Error('Supabase not initialized');
-    }
-    
-    await window.supabaseAuth.signIn(email, password);
-    
-    // Redirect on success
-    window.location.href = '/';
-  } catch (err) {
-    console.error('Supabase login error:', err);
-    errorEl.textContent = err.message || 'Ошибка входа';
-  }
-});
-{% endif %}
-</script>
-
-<style>
-.auth-tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-.auth-tab {
-  flex: 1;
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: 0.25rem;
-  transition: all 0.2s;
-}
-.auth-tab:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-.auth-tab--active {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-.auth-section {
-  display: none;
-}
-.auth-section--active {
-  display: block;
-}
-</style>
+<script src="/static/js/auth_login_page.js" defer></script>
 {% endblock %}

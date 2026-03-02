@@ -8,7 +8,14 @@
     <link rel="stylesheet" href="/static/vendor/prism/prism-tomorrow.css" />
     <link rel="stylesheet" href="/static/css/prism-ovc.css" />
   </head>
-  <body class="theme-brief" data-theme="brief">
+  <body
+    class="theme-brief"
+    data-theme="brief"
+    data-auth-mode="{{ auth_mode | default('local') }}"
+    data-desktop-mode="{{ 'true' if desktop_mode else 'false' }}"
+    data-supabase-url="{{ supabase_url | default('') }}"
+    data-supabase-anon-key="{{ supabase_anon_key | default('') }}"
+  >
     <header class="app-shell__topbar">
       <div class="app-shell__brand">
         <span class="app-shell__logo">OVC</span>
@@ -18,7 +25,6 @@
         <a href="/notes" class="nav-link">База</a>
         <a href="/" class="nav-link">Редактор</a>
         <a href="/graph" class="nav-link">Граф</a>
-        <a href="/api/dataset/export" class="nav-link" target="_blank">JSONL</a>
         {% if user %}
           <span class="nav-link nav-link--user">{{ user.username }}</span>
           <a href="/change-password" class="nav-link">Пароль</a>
@@ -37,6 +43,7 @@
     </main>
     <footer class="app-shell__footer">
       <small>Offline · Готово к своей модели</small>
+      <small id="sync-status-indicator" class="muted" aria-live="polite"></small>
     </footer>
     <script defer src="/static/vendor/prism/prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/"></script>
     <script defer src="/static/js/vendor/markdown-it.min.js"></script>
@@ -45,16 +52,10 @@
     <script defer src="/static/js/vendor/markdown-it-sup.min.js"></script>
     <script defer src="/static/js/vendor/markdown-it-footnote.min.js"></script>
     <script defer src="/static/js/vendor/dompurify.min.js"></script>
-    <script>
-      // Auth configuration - injected by server
-      window.__AUTH_MODE = '{{ auth_mode | default("local") }}';
-    </script>
+    <script src="/static/js/app_bootstrap.js"></script>
+    <script type="module" src="/static/js/data_adapter.js"></script>
     {% if auth_mode in ['supabase', 'both'] %}
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
-      window.__SUPABASE_URL = '{{ supabase_url }}';
-      window.__SUPABASE_ANON_KEY = '{{ supabase_anon_key }}';
-    </script>
     <script src="/static/js/supabase_auth.js"></script>
     {% endif %}
     <script type="module" src="/static/js/auth.js"></script>

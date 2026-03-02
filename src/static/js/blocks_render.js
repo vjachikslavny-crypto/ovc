@@ -129,6 +129,7 @@ const PLACEHOLDER_TEXT = new Set(['Новый заголовок', 'Новый �
 const CODE_MAX_LINES = 10000;
 const CODE_PREVIEW_LINES = 25;
 const CODE_EXPANDED_LINES = 300;
+const SAFE_DOWNLOAD_PROTOCOLS = new Set(['http:', 'https:', 'blob:', 'data:']);
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
@@ -136,6 +137,40 @@ function formatBytes(bytes) {
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** exponent;
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function sanitizeDownloadUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const value = rawUrl.trim();
+  if (!value) return null;
+  if (value.startsWith('/')) return value;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (!SAFE_DOWNLOAD_PROTOCOLS.has(parsed.protocol)) {
+      return null;
+    }
+    return parsed.href;
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderCodeCapMessage(cap, totalText, downloadUrl) {
+  cap.textContent = '';
+  const prefix = document.createTextNode(
+    `Показаны первые ${CODE_MAX_LINES.toLocaleString('ru-RU')} строк${totalText}. `
+  );
+  cap.appendChild(prefix);
+  const safeUrl = sanitizeDownloadUrl(downloadUrl);
+  if (!safeUrl) {
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = safeUrl;
+  link.target = '_blank';
+  link.rel = 'noreferrer noopener';
+  link.textContent = 'Скачать файл';
+  cap.appendChild(link);
 }
 
 function renderHeading(data) {
@@ -888,7 +923,7 @@ function renderCodeBlock(data = {}) {
           cap.hidden = false;
           const total = data.lineCount ? ` (из ${Number(data.lineCount).toLocaleString('ru-RU')})` : '';
           const downloadUrl = fileId ? `/files/${fileId}/original` : data.src || '#';
-          cap.innerHTML = `Показаны первые ${CODE_MAX_LINES.toLocaleString('ru-RU')} строк${total}. <a href="${downloadUrl}" target="_blank" rel="noreferrer">Скачать файл</a>`;
+          renderCodeCapMessage(cap, total, downloadUrl);
         }
         return response.text();
       })
@@ -1265,12 +1300,14 @@ function renderSlides(data) {
 function renderAudio(data) {
   const view = data.view || 'mini';
   const fileId = data.waveform ? data.waveform.match(/\/files\/(.+?)\//)?.[1] : (data.src?.match(/\/files\/(.+?)\//)?.[1] || '');
+  const durationSec = Number(data.duration);
+  const hasDuration = Number.isFinite(durationSec) && durationSec > 0;
   const block = document.createElement('article');
   block.className = 'audio-block';
   block.dataset.view = view;
   if (fileId) block.dataset.fileId = fileId;
   if (data.waveform) block.dataset.waveform = data.waveform;
-  if (data.duration) block.dataset.duration = String(data.duration);
+  if (hasDuration) block.dataset.duration = String(durationSec);
 
   const controls = document.createElement('div');
   controls.className = 'audio-controls';
@@ -1296,7 +1333,7 @@ function renderAudio(data) {
   const sep = document.createTextNode('/');
   const dur = document.createElement('span');
   dur.className = 'audio-time__duration';
-  dur.textContent = data.duration ? formatTime(data.duration) : '–:–';
+  dur.textContent = hasDuration ? formatTime(durationSec) : '–:–';
   timeBox.append(cur, sep, dur);
   controls.appendChild(timeBox);
 
@@ -1309,18 +1346,24 @@ function renderAudio(data) {
   block.appendChild(controls);
 
   const audioEl = document.createElement('audio');
-  audioEl.preload = 'metadata';
-  if (data.src) audioEl.src = data.src;
-  // OVC: audio - нормализуем MIME-тип для WebM с codecs
-  if (data.mime) {
-    // Для WebM с codecs используем базовый тип, браузер сам определит codec
-    const normalizedMime = data.mime.includes('webm') && data.mime.includes('codecs') 
-      ? 'audio/webm' 
-      : data.mime;
-    audioEl.type = normalizedMime;
-  }
-  // Добавляем controls для отладки (можно убрать позже)
+  const isDesktop = Boolean(window.__DESKTOP_MODE || window.__TAURI__);
+  audioEl.preload = isDesktop ? 'auto' : 'metadata';
   audioEl.controls = false;
+  if (data.src) {
+    // Нормализуем MIME-тип: WebM с codecs → базовый audio/webm
+    const normalizedMime = data.mime
+      ? (data.mime.includes('webm') && data.mime.includes('codecs') ? 'audio/webm' : data.mime)
+      : null;
+    // Используем <source> для корректной передачи MIME-типа браузеру
+    const sourceEl = document.createElement('source');
+    sourceEl.src = data.src;
+    if (normalizedMime) sourceEl.type = normalizedMime;
+    audioEl.appendChild(sourceEl);
+    // Прямой src помогает WKWebView корректно стартовать воспроизведение с первой попытки.
+    audioEl.src = data.src;
+    // data-src — для audio_player.js и скачивания (audioEl.src пустой когда есть <source>)
+    audioEl.dataset.srcUrl = data.src;
+  }
   block.appendChild(audioEl);
 
   const expanded = document.createElement('div');

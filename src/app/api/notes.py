@@ -18,13 +18,19 @@ from app.api.note_models import (
     NoteUpdateRequest,
     SourcePayload,
 )
-from app.db.models import Note, NoteChunk, NoteLink, NoteSource, NoteTag
+from app.db.models import FileAsset, Note, NoteChunk, NoteLink, NoteSource, NoteTag
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_engine import (
+    OP_CREATE_NOTE,
+    OP_DELETE_NOTE,
+    OP_UPDATE_NOTE,
+    enqueue_sync_operation,
+)
 from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints, parse_layout_hints
 
 logger = logging.getLogger(__name__)
@@ -86,6 +92,89 @@ async def list_notes(
         return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
+@router.get("/notes/search/full")
+async def search_notes_full(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(30, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+):
+    """Extended search: TF-IDF content search + title search + file name search."""
+    query_lower = q.strip().lower()
+    matched_note_ids: dict[str, float] = {}
+
+    # 1. TF-IDF full-text search across note content
+    tfidf_results = index.search(q, limit=limit)
+    for result in tfidf_results:
+        nid = result["note_id"]
+        score = result["score"]
+        if nid not in matched_note_ids or score > matched_note_ids[nid]:
+            matched_note_ids[nid] = score
+
+    with get_session() as session:
+        user_note_ids = set(
+            row[0]
+            for row in session.execute(
+                select(Note.id).where(
+                    or_(Note.user_id == current_user.id, Note.user_id.is_(None))
+                )
+            ).all()
+        )
+
+        # 2. Title search (SQL LIKE)
+        title_matches = (
+            session.execute(
+                select(Note.id).where(
+                    or_(Note.user_id == current_user.id, Note.user_id.is_(None)),
+                    func.lower(Note.title).contains(query_lower),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for nid in title_matches:
+            if nid not in matched_note_ids:
+                matched_note_ids[nid] = 0.5
+
+        # 3. File name search
+        file_matches = (
+            session.execute(
+                select(FileAsset.note_id).where(
+                    FileAsset.note_id.isnot(None),
+                    func.lower(FileAsset.filename).contains(query_lower),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for nid in file_matches:
+            if nid and nid not in matched_note_ids:
+                matched_note_ids[nid] = 0.4
+
+        # Filter to only user's notes and sort by relevance
+        final_ids = [
+            nid for nid in matched_note_ids if nid in user_note_ids
+        ]
+        final_ids.sort(key=lambda nid: matched_note_ids[nid], reverse=True)
+        final_ids = final_ids[:limit]
+
+        if not final_ids:
+            return {"items": [], "total": 0, "query": q}
+
+        notes = (
+            session.execute(select(Note).where(Note.id.in_(final_ids)))
+            .scalars()
+            .all()
+        )
+        notes_map = {n.id: n for n in notes}
+        ordered = [notes_map[nid] for nid in final_ids if nid in notes_map]
+        items = [
+            _serialize_summary(n).dict(by_alias=True)
+            for n in ordered
+        ]
+
+        return {"items": items, "total": len(items), "query": q}
+
+
 @router.get("/notes/{note_id}", response_model=NoteDetail)
 async def get_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
     with get_session() as session:
@@ -115,6 +204,22 @@ async def create_note(payload: NoteCreateRequest, request: Request, current_user
         session.flush()
         _reindex_note(session, note)
         session.refresh(note)
+        enqueue_sync_operation(
+            session,
+            OP_CREATE_NOTE,
+            {
+                "localNoteId": note.id,
+                "note": {
+                    "title": note.title,
+                    "styleTheme": note.style_theme,
+                    "layoutHints": parse_layout_hints(note.layout_hints),
+                    "blocks": _load_blocks(note.blocks_json, note_id=note.id),
+                    "passport": json.loads(note.passport_json or "{}"),
+                },
+            },
+            note_id=note.id,
+            user_id=current_user.id,
+        )
         log_event(session, "NOTE_CREATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         return _serialize_detail(note, session=session, user_id=current_user.id)
 
@@ -147,6 +252,18 @@ async def update_note(
         if payload.passport is not None:
             note.passport_json = _dumps(payload.passport)
 
+        patch_payload: Dict[str, Any] = {}
+        if payload.title is not None:
+            patch_payload["title"] = payload.title
+        if payload.style_theme is not None:
+            patch_payload["styleTheme"] = payload.style_theme
+        if payload.layout_hints is not None:
+            patch_payload["layoutHints"] = payload.layout_hints
+        if payload.blocks is not None:
+            patch_payload["blocks"] = dump_blocks(payload.blocks)
+        if payload.passport is not None:
+            patch_payload["passport"] = payload.passport
+
         session.add(note)
         session.flush()
 
@@ -154,6 +271,17 @@ async def update_note(
             _reindex_note(session, note)
 
         session.refresh(note)
+        enqueue_sync_operation(
+            session,
+            OP_UPDATE_NOTE,
+            {
+                "localNoteId": note.id,
+                "patch": patch_payload,
+                "snapshot": _serialize_detail(note, session=session, user_id=current_user.id).dict(by_alias=True),
+            },
+            note_id=note.id,
+            user_id=current_user.id,
+        )
         log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         return _serialize_detail(note, session=session, user_id=current_user.id)
 
@@ -165,6 +293,13 @@ async def delete_note(note_id: str, request: Request, current_user: User = Depen
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
         _ensure_note_owner(note, current_user, session)
+        enqueue_sync_operation(
+            session,
+            OP_DELETE_NOTE,
+            {"localNoteId": note.id},
+            note_id=note.id,
+            user_id=current_user.id,
+        )
         log_event(session, "NOTE_DELETE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         session.delete(note)
         session.flush()

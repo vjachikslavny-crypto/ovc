@@ -3,6 +3,7 @@ import { renderNoteCard } from './notes_renderer.js';
 const limit = 20;
 let offset = 0;
 let notesCache = [];
+let deepSearchResults = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   const listEl = document.getElementById('notes-list');
@@ -10,12 +11,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const createBtn = document.getElementById('create-note');
   const loadMoreBtn = document.getElementById('load-more');
 
+  const deepToggle = document.getElementById('deep-search-toggle');
+  const deepPanel = document.getElementById('deep-search-panel');
+  const deepInput = document.getElementById('deep-search-input');
+  const deepGoBtn = document.getElementById('deep-search-go');
+  const deepCloseBtn = document.getElementById('deep-search-close');
+  const deepStatus = document.getElementById('deep-search-status');
+
   if (!listEl) return;
 
   const state = {
     loading: false,
     reachedEnd: false,
   };
+
+  /* ── Regular notes loading ── */
 
   async function fetchNotes(reset = false) {
     if (state.loading || state.reachedEnd) return;
@@ -51,9 +61,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  /* ── Render ── */
+
   function renderList() {
-    const query = (searchEl?.value || '').trim().toLowerCase();
     listEl.innerHTML = '';
+
+    if (deepSearchResults) {
+      const info = document.createElement('div');
+      info.className = 'deep-search-panel__status';
+      info.style.marginBottom = '12px';
+      info.textContent = `Глубокий поиск: «${deepSearchResults.query}» — найдено ${deepSearchResults.items.length}`;
+      listEl.appendChild(info);
+
+      if (deepSearchResults.items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'notes-empty';
+        empty.textContent = 'Ничего не найдено. Попробуйте другой запрос.';
+        listEl.appendChild(empty);
+        return;
+      }
+      deepSearchResults.items.forEach((note) => {
+        listEl.appendChild(renderNoteCard(note));
+      });
+      return;
+    }
+
+    const query = (searchEl?.value || '').trim().toLowerCase();
     const filtered = query
       ? notesCache.filter((note) =>
           note.title.toLowerCase().includes(query) ||
@@ -74,9 +107,87 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  searchEl?.addEventListener('input', () => renderList());
+  searchEl?.addEventListener('input', () => {
+    if (deepSearchResults) {
+      deepSearchResults = null;
+      if (deepStatus) deepStatus.textContent = '';
+    }
+    renderList();
+  });
 
   loadMoreBtn?.addEventListener('click', () => fetchNotes());
+
+  /* ── Deep search panel ── */
+
+  function openDeepPanel() {
+    deepPanel.hidden = false;
+    deepToggle.classList.add('active');
+    deepInput.focus();
+  }
+
+  function closeDeepPanel() {
+    deepPanel.hidden = true;
+    deepToggle.classList.remove('active');
+    deepInput.value = '';
+    if (deepStatus) deepStatus.textContent = '';
+    if (deepSearchResults) {
+      deepSearchResults = null;
+      loadMoreBtn?.style.removeProperty('display');
+      renderList();
+    }
+  }
+
+  async function performDeepSearch() {
+    const query = (deepInput?.value || '').trim();
+    if (!query) {
+      deepInput?.focus();
+      return;
+    }
+
+    deepGoBtn.setAttribute('disabled', 'disabled');
+    deepGoBtn.textContent = 'Ищу…';
+    if (deepStatus) deepStatus.textContent = 'Поиск по содержимому заметок и файлам…';
+
+    try {
+      const res = await fetch(`/api/notes/search/full?q=${encodeURIComponent(query)}`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      deepSearchResults = { items: data.items, query, total: data.total };
+      loadMoreBtn?.style.setProperty('display', 'none');
+      if (deepStatus) deepStatus.textContent = `Найдено: ${data.items.length}`;
+      renderList();
+    } catch (error) {
+      console.error('Deep search failed', error);
+      if (deepStatus) deepStatus.textContent = 'Ошибка поиска. Попробуйте ещё раз.';
+    } finally {
+      deepGoBtn.removeAttribute('disabled');
+      deepGoBtn.textContent = 'Найти';
+    }
+  }
+
+  deepToggle?.addEventListener('click', () => {
+    if (deepPanel.hidden) {
+      openDeepPanel();
+    } else {
+      closeDeepPanel();
+    }
+  });
+
+  deepCloseBtn?.addEventListener('click', closeDeepPanel);
+
+  deepGoBtn?.addEventListener('click', performDeepSearch);
+
+  deepInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      performDeepSearch();
+    }
+    if (e.key === 'Escape') {
+      closeDeepPanel();
+    }
+  });
+
+  /* ── Create note ── */
 
   createBtn?.addEventListener('click', async () => {
     createBtn.setAttribute('disabled', 'disabled');

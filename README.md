@@ -12,7 +12,6 @@
 - 🏷️ **Теги** — добавление в паспорте заметки и список всех тегов через `/api/tags`.
 - 🔁 **DraftAction API** (`/api/commit`) — атомарно применяет действия (`insert_block`, `update_block`, `move_block`, `add_tag`, `remove_tag`, `add_link`, `set_style`).
 - 🔎 **Локальный поиск** — TF-IDF индекс по тексту блоков, обновляется при каждом изменении.
-- 🗃 **Журнал** (`/api/dataset/export`) — JSONL-лог для обучения модели.
 - 🔐 **Авторизация** — регистрация/вход, refresh-токены в HttpOnly cookie, email‑подтверждение.
 - 🤖 **LLM-интерфейсы** — `app/providers/llm_provider.py` + `structurizer.py` заготовлены под будущий Ollama/vLLM, сейчас возвращают пустой draft.
 
@@ -46,6 +45,34 @@ cd ~/OVC
 
 **Важно:** Всегда запускайте сервер из корневой директории проекта `OVC`, а не из `src`!
 
+## Desktop macOS (Tauri add-on)
+
+Desktop-режим добавлен как **аддитивный слой**: веб-UI остаётся тем же, приложение открывает тот же интерфейс в нативном окне.
+
+### Запуск desktop в dev
+
+```bash
+cd ~/OVC
+npm run desktop:dev
+```
+
+По умолчанию desktop поднимает локальный backend (`127.0.0.1:18741`) и использует локальную SQLite в app data директории.
+
+Чтобы принудительно открыть удалённый сервер, задайте:
+
+```bash
+OVC_DESKTOP_BASE_URL=https://your-host.example npm run desktop:dev
+```
+
+### Сборка desktop
+
+```bash
+cd ~/OVC
+npm run desktop:build
+```
+
+`desktop/src-tauri/tauri.conf.json` уже содержит базовые параметры окна и DMG target. Для App Store позже потребуется отдельный этап: signing/notarization/entitlements.
+
 ## Переменные окружения
 
 ```
@@ -72,6 +99,10 @@ OFFLINE_MODE=true
 - `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_MAX`
 - `PASSWORD_MIN_LENGTH` и флаги классов символов
 - `EMAIL_FROM`, `EMAIL_BACKEND`
+- `DESKTOP_MODE` — включает desktop-ветку поведения (ставится desktop-wrapper’ом)
+- `SYNC_ENABLED`, `SYNC_REMOTE_BASE_URL`, `SYNC_BEARER_TOKEN`
+- `SYNC_POLL_SECONDS`, `SYNC_BATCH_SIZE`, `SYNC_OUTBOX_MAX`
+- `SYNC_PULL_ENABLED` — подтягивать изменения с remote на локальную базу
 
 ## Migrations
 
@@ -103,6 +134,7 @@ PYTHONPATH=src python -m app.db.migrate
 - Refresh токен хранится в HttpOnly cookie, access токен передаётся как Bearer.
 - Для запросов с cookie используется CSRF токен (double-submit).
 - Ограничения частоты и блокировки логина — in-memory (для продакшна нужен Redis/DB).
+- Sync outbox ограничен `SYNC_OUTBOX_MAX`, чтобы очередь не росла бесконечно.
 
 ## Документация
 
@@ -124,7 +156,6 @@ OVC/
 │   │   ├── api/          # REST-эндпоинты (notes, commit, chat, export)
 │   │   ├── agent/        # JSON-схема блоков и DraftAction
 │   │   ├── db/           # SQLAlchemy модели и миграция
-│   │   ├── log/          # JSONL журнал
 │   │   ├── providers/    # LLM-заглушки и заготовка Ollama
 │   │   ├── rag/          # TF-IDF индекс
 │   │   └── main.py       # FastAPI приложение
@@ -164,3 +195,11 @@ OVC/
 - Настроить e2e-тестирование (Playwright/pytest + httpx).
 
 Проект остаётся полностью офлайн и служит каркасом для собственной “человечной” модели заметок.
+
+## Быстрая проверка offline -> sync
+
+1. Запустите desktop и отключите интернет.
+2. Создайте/измените заметку и (опционально) прикрепите файл.
+3. Включите интернет обратно.
+4. Проверьте `GET /api/sync/status`: `pending` должно уменьшаться, `done` расти.
+5. Для ручного запуска цикла синка: `POST /api/sync/trigger`.

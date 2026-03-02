@@ -6,7 +6,11 @@
 <div class="editor" data-note-id="{{ note_id or '' }}">
   <section class="editor__header">
     <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
-    <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+    <button class="icon-button icon-button--mini" id="nav-refresh" type="button" aria-label="Обновить редактор" title="Обновить">↻</button>
+    <div class="editor__title-wrapper">
+      <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+      <button class="editor__title-more" id="title-toggle" type="button">···</button>
+    </div>
     <div class="editor__header-actions">
       <button class="icon-button icon-button--ghost" id="connections-toggle" aria-label="Связи">↔</button>
       <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>
@@ -31,7 +35,7 @@
     <button class="toolbar__btn" data-action="align">Align</button>
   </section>
 
-      <aside class="connections-panel connections-panel--compact connections-panel--open" id="connections-panel" aria-label="Связи">
+      <aside class="connections-panel connections-panel--compact" id="connections-panel" aria-label="Связи">
         <header class="connections-panel__header">
           <div>
             <p class="connections-panel__title">Связи</p>
@@ -171,6 +175,15 @@
   </div>
 
 </div>
+
+<button
+  class="icon-button icon-button--ghost mini-graph-toggle-floating"
+  id="mini-graph-toggle"
+  type="button"
+  aria-label="Скрыть мини-граф"
+  aria-pressed="false"
+  title="Скрыть мини-граф"
+>▦</button>
 
 <aside class="graph-sidebar" id="graph-sidebar" aria-label="Граф связей">
   <div class="graph-sidebar__content">

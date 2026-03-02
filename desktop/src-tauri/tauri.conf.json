@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/1",
+  "package": {
+    "productName": "OVC Desktop",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devPath": "http://127.0.0.1:18741",
+    "distDir": "../web"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      },
+      "window": {
+        "all": true
+      },
+      "path": {
+        "all": true
+      },
+      "dialog": {
+        "all": true
+      }
+    },
+    "windows": [
+      {
+        "title": "OVC",
+        "width": 1440,
+        "height": 920,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "bundle": {
+      "active": false,
+      "targets": ["dmg"],
+      "identifier": "com.ovc.desktop"
+    },
+    "security": {
+      "csp": "default-src 'self'; base-uri 'self'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.instagram.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: http://127.0.0.1:18741 http://127.0.0.1:8000; connect-src 'self' http://127.0.0.1:18741 http://127.0.0.1:8000 https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cemlfmnjpydwgwcedlzy.supabase.co https://YOUR_REMOTE_DOMAIN; frame-src 'self' https://www.instagram.com https://www.tiktok.com; object-src 'none'; frame-ancestors 'none'"
+    }
+  }
+}

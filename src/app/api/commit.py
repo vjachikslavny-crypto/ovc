@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
@@ -20,12 +23,12 @@ from app.agent.draft_types import (
 )
 from app.db.models import Note, NoteLink, NoteTag
 from app.db.session import get_session
-from app.log import dataset_logger
 from app.api.notes import _reindex_note
 from app.utils.layout_hints import dumps_layout_hints, merge_layout_hints
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_engine import OP_COMMIT, enqueue_sync_operation
 
 router = APIRouter(tags=["commit"])
 
@@ -161,7 +164,8 @@ async def commit_endpoint(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            logger.exception("Commit processing error")
+            raise HTTPException(status_code=500, detail="Internal commit error") from exc
 
         for note_id in notes_requiring_index:
             note = session.get(Note, note_id)
@@ -173,15 +177,12 @@ async def commit_endpoint(
         for note_id in touched_notes:
             log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note_id})
 
-    dataset_logger.append(
-        {
-            "kind": "commit",
-            "draft": [action.dict(by_alias=True) for action in payload.draft],
-            "applied": applied,
-            "rejected": len(payload.draft) - applied,
-            "notes_changed": list(touched_notes),
-        }
-    )
+        enqueue_sync_operation(
+            session,
+            OP_COMMIT,
+            {"draft": [action.dict(by_alias=True) for action in payload.draft]},
+            user_id=current_user.id,
+        )
 
     return CommitResponse(applied=applied, notes_changed=list(touched_notes))
 

@@ -208,7 +208,7 @@ export function initUploader({
       const blocks = await sendFile(noteId, file, (value) => {
         record.progress = value;
         renderStatus();
-      });
+      }, uploadId);
       record.state = 'success';
       record.progress = 1;
       renderStatus();
@@ -230,7 +230,11 @@ export function initUploader({
     }
   }
 
-  function sendFile(noteId, file, onProgress) {
+  async function sendFile(noteId, file, onProgress, uploadOpId) {
+    const token = typeof window.ensureAccessToken === 'function'
+      ? await window.ensureAccessToken()
+      : (window.__accessToken || localStorage.getItem('accessToken'));
+
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       const url = new URL('/api/upload', window.location.origin);
@@ -240,9 +244,11 @@ export function initUploader({
       xhr.open('POST', url.toString());
       xhr.responseType = 'json';
       // Добавляем авторизацию
-      const token = window.__accessToken || localStorage.getItem('accessToken');
       if (token) {
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+      if (uploadOpId) {
+        xhr.setRequestHeader('X-Upload-Op-Id', uploadOpId);
       }
       // Добавляем CSRF токен
       const csrfToken = document.cookie.match(/csrf_token=([^;]+)/)?.[1];
@@ -263,10 +269,11 @@ export function initUploader({
           const payload = xhr.response ?? {};
           resolve(payload.blocks || []);
         } else {
-          const detail =
+          const rawDetail =
             xhr.response?.detail ||
             xhr.statusText ||
             (typeof xhr.response === 'string' ? xhr.response : 'Upload failed');
+          const detail = normalizeUploadError(xhr.status, rawDetail);
           reject(new Error(detail));
         }
       });
@@ -279,6 +286,16 @@ export function initUploader({
       form.append('files', file, file.name || 'upload');
       xhr.send(form);
     });
+  }
+
+  function normalizeUploadError(status, detail) {
+    if (status === 413) {
+      return 'Файл слишком большой для загрузки';
+    }
+    if (status === 415) {
+      return 'Неподдерживаемый тип файла. Допустимы изображения, документы, аудио и видео.';
+    }
+    return detail || 'Ошибка загрузки файла';
   }
 
   function renderStatus() {

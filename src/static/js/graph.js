@@ -152,23 +152,43 @@ function renderGraph(data) {
     .text((d) => truncate(d.title, 26));
 
   const tooltip = document.getElementById('graph-tooltip');
+  const setTooltipContent = (node) => {
+    if (!tooltip) return;
+    tooltip.textContent = '';
+
+    const title = document.createElement('strong');
+    title.textContent = node.title || 'Без названия';
+    tooltip.appendChild(title);
+    tooltip.appendChild(document.createElement('br'));
+
+    const lines = [
+      `Блоков: ${node.blockCount}`,
+      `Символов: ${node.textSize}`,
+      `Вес узла: ${formatWeight(node.sizeWeight)}`,
+      `Группа: ${node.group_label}`,
+      `Обновлено: ${new Date(node.updatedAt).toLocaleString()}`,
+    ];
+    lines.forEach((line, idx) => {
+      const span = document.createElement('span');
+      span.textContent = line;
+      tooltip.appendChild(span);
+      if (idx < lines.length - 1) {
+        tooltip.appendChild(document.createElement('br'));
+      }
+    });
+  };
 
   nodeGroup.on('mouseover', (event, d) => {
+    if (!tooltip) return;
     highlightNode({ target: d });
     tooltip.classList.remove('hidden');
-    tooltip.innerHTML = `
-      <strong>${d.title}</strong><br/>
-      Блоков: ${d.blockCount}<br/>
-      Символов: ${d.textSize}<br/>
-      Вес узла: ${formatWeight(d.sizeWeight)}<br/>
-      Группа: ${d.group_label}<br/>
-      Обновлено: ${new Date(d.updatedAt).toLocaleString()}
-    `;
+    setTooltipContent(d);
     tooltip.style.left = `${event.pageX + 12}px`;
     tooltip.style.top = `${event.pageY + 12}px`;
   });
 
   nodeGroup.on('mouseout', () => {
+    if (!tooltip) return;
     highlightNode(null);
     tooltip.classList.add('hidden');
   });
@@ -344,7 +364,11 @@ function renderLegend(colorMap, labelMap = new Map()) {
     const item = document.createElement('span');
     item.className = 'graph-legend-item';
     item.style.setProperty('--legend-color', color);
-    item.innerHTML = `<span class="graph-legend-swatch"></span>${labelMap.get(cluster) || cluster}`;
+    const swatch = document.createElement('span');
+    swatch.className = 'graph-legend-swatch';
+    const label = document.createTextNode(labelMap.get(cluster) || cluster);
+    item.appendChild(swatch);
+    item.appendChild(label);
     panel.appendChild(item);
   });
 }

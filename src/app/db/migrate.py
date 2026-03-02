@@ -190,6 +190,43 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding user_id column to files table: {e}")
 
+        if 'upload_op_id' not in columns:
+            try:
+                conn.execute(text("ALTER TABLE files ADD COLUMN upload_op_id VARCHAR"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_files_upload_op_id ON files(upload_op_id)"))
+                print("Added upload_op_id column to files table")
+            except Exception as e:
+                print(f"Error adding upload_op_id column to files table: {e}")
+
+        # OVC: sync - per-user queue ownership for account-safe sync
+        result = conn.execute(text("PRAGMA table_info(sync_outbox)"))
+        sync_outbox_columns = [row[1] for row in result.fetchall()]
+        if 'user_id' not in sync_outbox_columns:
+            try:
+                conn.execute(text("ALTER TABLE sync_outbox ADD COLUMN user_id VARCHAR"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sync_outbox_user_id ON sync_outbox(user_id)"))
+                print("Added user_id column to sync_outbox table")
+            except Exception as e:
+                print(f"Error adding user_id column to sync_outbox table: {e}")
+        else:
+            try:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE sync_outbox
+                        SET user_id = (
+                            SELECT notes.user_id
+                            FROM notes
+                            WHERE notes.id = sync_outbox.note_id
+                        )
+                        WHERE user_id IS NULL
+                          AND note_id IS NOT NULL
+                        """
+                    )
+                )
+            except Exception as e:
+                print(f"Error backfilling sync_outbox.user_id: {e}")
+
         # OVC: добавляем поля в users при необходимости
         result = conn.execute(text("PRAGMA table_info(users)"))
         user_columns = [row[1] for row in result.fetchall()]

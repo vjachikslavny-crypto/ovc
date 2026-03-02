@@ -14,6 +14,7 @@ import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
 import { initMarkdownViewers } from './markdown_viewer.js';
 import { initConnectionsPanel } from './connections_panel.js';
+import { initMiniGraph } from './mini-graph.js';
 
 const SAVE_DEBOUNCE = 600;
 const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новый абзац']);
@@ -25,8 +26,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('note-blocks');
   const floatingActions = document.querySelector('.floating-actions');
   const titleEl = document.getElementById('note-title');
+  const titleToggle = document.getElementById('title-toggle');
   const shareBtn = document.getElementById('note-share');
   const backBtn = document.getElementById('nav-back');
+  const refreshBtn = document.getElementById('nav-refresh');
   const infoBtn = document.getElementById('note-info');
   const paletteEl = document.getElementById('block-palette');
   const fabPlus = document.getElementById('fab-plus');
@@ -41,6 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const llmToggle = document.getElementById('llm-toggle');
   const connectionsPanelEl = document.getElementById('connections-panel');
   const connectionsToggleBtn = document.getElementById('connections-toggle');
+  const miniGraphToggleBtn = document.getElementById('mini-graph-toggle');
+  const graphSidebarEl = document.getElementById('graph-sidebar');
+  const editorLayoutEl = document.querySelector('.editor-layout');
+  const MINI_GRAPH_VISIBILITY_KEY = 'ovc:editor:mini_graph_hidden';
 
   const inspector = initInspector(inspectorEl, {
     onSetLayoutHint: handleLayoutHintUpdate,
@@ -106,6 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
     linksTo: [],
     sources: [],
   };
+  const isNewNoteOnOpen = !String(editorEl.dataset.noteId || '').trim();
+  let isNewNoteInitialLayout = isNewNoteOnOpen;
 
   const connectionsPanel = initConnectionsPanel({
     rootEl: connectionsPanelEl,
@@ -146,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!res.ok) throw new Error(await res.text());
     const note = await res.json();
     noteState.id = note.id;
+    editorEl.dataset.noteId = note.id;
     window.history.replaceState({}, '', `/notes/${note.id}`);
     return note.id;
   }
@@ -192,9 +202,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadNote() {
-    const noteId = await ensureNote();
-    const note = await fetchNoteDetail(noteId);
-    applyNote(note);
+    try {
+      const noteId = await ensureNote();
+      const note = await fetchNoteDetail(noteId);
+      applyNote(note);
+    } finally {
+      // Перезапуск мини-графа после загрузки заметки (или её ошибки),
+      // чтобы гарантировать актуальные данные
+      initMiniGraph({ force: true });
+    }
   }
 
   // ---- RENDER ----
@@ -320,6 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     titleEl.textContent = noteState.title || 'Без названия';
+    checkTitleOverflow();
     
     renderNote(canvas, noteState, document.body.dataset.theme || 'clean');
     clearSelectionSnapshot();
@@ -1329,6 +1346,24 @@ document.addEventListener('DOMContentLoaded', () => {
     saveTimer = window.setTimeout(persistNote, SAVE_DEBOUNCE);
   }
 
+  let _saveToast = null;
+  function showSaveError() {
+    if (_saveToast) _saveToast.remove();
+    _saveToast = document.createElement('div');
+    _saveToast.textContent = 'Не удалось сохранить заметку';
+    Object.assign(_saveToast.style, {
+      position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+      background: '#d32f2f', color: '#fff', padding: '10px 24px', borderRadius: '12px',
+      fontSize: '0.9rem', zIndex: '9999', boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+      opacity: '0', transition: 'opacity 0.3s',
+    });
+    document.body.appendChild(_saveToast);
+    requestAnimationFrame(() => { _saveToast.style.opacity = '1'; });
+    setTimeout(() => {
+      if (_saveToast) { _saveToast.style.opacity = '0'; setTimeout(() => _saveToast?.remove(), 300); }
+    }, 4000);
+  }
+
   async function persistNote() {
     saveTimer = null;
 
@@ -1346,13 +1381,15 @@ document.addEventListener('DOMContentLoaded', () => {
     while (saveQueue.length) {
       const next = saveQueue[0];
       try {
-        await fetch(`/api/notes/${noteState.id}`, {
+        const res = await fetch(`/api/notes/${noteState.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(next),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (error) {
         console.error('Failed to save note', error);
+        showSaveError();
       } finally {
         saveQueue.shift();
       }
@@ -1371,16 +1408,36 @@ document.addEventListener('DOMContentLoaded', () => {
   
   titleEl.addEventListener('blur', () => {
     isEditingTitle = false;
-    // Обновляем title в noteState при потере фокуса
+    titleEl.classList.remove('editor__title--expanded');
     noteState.title = titleEl.textContent.trim();
     scheduleSave();
+    checkTitleOverflow();
   });
   
   titleEl.addEventListener('input', () => {
-    // Обновляем title в noteState при вводе, но НЕ вызываем render()
     noteState.title = titleEl.textContent.trim();
     scheduleSave();
   });
+
+  function checkTitleOverflow() {
+    if (!titleEl || !titleToggle) return;
+    requestAnimationFrame(() => {
+      const isOverflowing = titleEl.scrollHeight > titleEl.clientHeight + 2;
+      titleToggle.classList.toggle('editor__title-more--visible', isOverflowing);
+      if (!isOverflowing) {
+        titleEl.classList.remove('editor__title--expanded');
+        titleToggle.textContent = '···';
+      }
+    });
+  }
+
+  if (titleToggle) {
+    titleToggle.addEventListener('click', () => {
+      titleEl.classList.toggle('editor__title--expanded');
+      const isExpanded = titleEl.classList.contains('editor__title--expanded');
+      titleToggle.textContent = isExpanded ? '▴' : '···';
+    });
+  }
 
   document.addEventListener('theme-change', (event) => {
     noteState.styleTheme = event.detail?.theme || 'clean';
@@ -1412,6 +1469,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.href = '/notes';
   });
 
+  refreshBtn?.addEventListener('click', () => {
+    window.location.reload();
+  });
+
   infoBtn?.addEventListener('click', () => {
     const hidden = inspectorEl.getAttribute('aria-hidden') !== 'false';
     inspectorEl.setAttribute('aria-hidden', hidden ? 'false' : 'true');
@@ -1419,6 +1480,39 @@ document.addEventListener('DOMContentLoaded', () => {
       inspector.onOpen?.(noteState);
     }
   });
+
+  function applyMiniGraphVisibility(hidden, { persist = true } = {}) {
+    if (!editorLayoutEl || !graphSidebarEl || !miniGraphToggleBtn) return;
+    editorLayoutEl.classList.toggle('editor-layout--graph-hidden', hidden);
+    miniGraphToggleBtn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+    miniGraphToggleBtn.setAttribute('aria-label', hidden ? 'Показать мини-граф' : 'Скрыть мини-граф');
+    miniGraphToggleBtn.title = hidden ? 'Показать мини-граф' : 'Скрыть мини-граф';
+    miniGraphToggleBtn.textContent = hidden ? '▣' : '▦';
+    if (persist) {
+      try {
+        window.localStorage.setItem(MINI_GRAPH_VISIBILITY_KEY, hidden ? '1' : '0');
+      } catch (error) {
+        console.warn('[Editor] Failed to persist mini-graph visibility', error);
+      }
+    }
+    if (!hidden) {
+      initMiniGraph({ force: true });
+    }
+  }
+
+  if (miniGraphToggleBtn && editorLayoutEl && graphSidebarEl) {
+    let hiddenByDefault = false;
+    try {
+      hiddenByDefault = window.localStorage.getItem(MINI_GRAPH_VISIBILITY_KEY) === '1';
+    } catch (error) {
+      hiddenByDefault = false;
+    }
+    applyMiniGraphVisibility(hiddenByDefault, { persist: false });
+    miniGraphToggleBtn.addEventListener('click', () => {
+      const hidden = !editorLayoutEl.classList.contains('editor-layout--graph-hidden');
+      applyMiniGraphVisibility(hidden);
+    });
+  }
 
   // ---- LAYOUT HINTS / LINKS ----
 
@@ -2010,12 +2104,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const isEmpty = blockCount === 0;
     
     if (isEmpty) {
-      // Если заметка пустая - центрируем кнопки
-      floatingActions.classList.add('floating-actions--centered');
-      floatingActions.style.setProperty('--floating-actions-offset', 'auto');
+      if (isNewNoteInitialLayout) {
+        // Новая заметка: сразу боковое положение как после создания первого блока.
+        floatingActions.classList.remove('floating-actions--centered');
+        floatingActions.classList.remove('floating-actions--new-note-initial');
+        floatingActions.style.setProperty('--floating-actions-offset', '24px');
+      } else {
+        floatingActions.classList.add('floating-actions--centered');
+        floatingActions.classList.remove('floating-actions--new-note-initial');
+        floatingActions.style.setProperty('--floating-actions-offset', 'auto');
+      }
     } else {
       // Если есть блоки - показываем кнопки справа с динамическим отступом
+      isNewNoteInitialLayout = false;
       floatingActions.classList.remove('floating-actions--centered');
+      floatingActions.classList.remove('floating-actions--new-note-initial');
       const dynamicOffset = Math.min(18 + blockCount * 6, 140);
       floatingActions.style.setProperty(
         '--floating-actions-offset',
