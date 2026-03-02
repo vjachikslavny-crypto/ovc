@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Регистрация{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card">
+    <h1>Регистрация</h1>
+
+    <p class="muted">Регистрация доступна только по email.</p>
+    <form id="register-form" class="auth-form">
+      <input
+        type="email"
+        name="email"
+        placeholder="Email"
+        required
+        autocomplete="email"
+      />
+      <input
+        type="password"
+        name="password"
+        placeholder="Пароль"
+        required
+        minlength="8"
+        autocomplete="new-password"
+      />
+      <button type="submit" class="pill-button pill-button--primary">Создать аккаунт</button>
+      <span id="register-error" class="muted"></span>
+    </form>
+
+    <div id="register-success" class="register-success" style="display: none;">
+      <h3>Проверьте почту</h3>
+      <p>Письмо для подтверждения отправлено на <strong id="registered-email"></strong>.</p>
+      <a href="/login" class="pill-button pill-button--secondary">Перейти ко входу</a>
+    </div>
+
+    <div class="auth-actions">
+      <a href="/login">Уже есть аккаунт</a>
+    </div>
+  </div>
+</section>
+
+<script src="/static/js/auth_register_page.js" defer></script>
+{% endblock %}

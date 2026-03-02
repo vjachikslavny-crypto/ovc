@@ -1,0 +1,8 @@
+{
+  "name": "ovc-desktop-tools",
+  "private": true,
+  "scripts": {
+    "desktop:dev": "cargo run --manifest-path desktop/src-tauri/Cargo.toml",
+    "desktop:build": "cargo build --release --manifest-path desktop/src-tauri/Cargo.toml"
+  }
+}

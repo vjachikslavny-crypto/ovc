@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Граф заметок{% endblock %}
+
+{% block content %}
+<div class="graph-page">
+  <header class="graph-page__header">
+    <div>
+      <h1>Граф заметок</h1>
+      <p class="muted">Узлы — заметки, рёбра — связи. Цвета можно настроить по группам.</p>
+    </div>
+    <div class="graph-toolbar">
+      <input id="graph-search" type="search" placeholder="Поиск заметки" aria-label="Поиск" />
+      <select id="theme-switcher" class="pill-button pill-button--compact" aria-label="Выбор темы">
+        <option value="default">Фиолетовая</option>
+        <option value="dark">Тёмная</option>
+        <option value="milk">Молочная</option>
+        <option value="light">Светлая</option>
+      </select>
+      <button class="pill-button" id="graph-reset">Сбросить обзор</button>
+      <label class="graph-toggle">
+        <input type="checkbox" id="graph-show-labels" checked />
+        <span>Подписи</span>
+      </label>
+    </div>
+  </header>
+
+  <section class="graph-shell">
+    <div id="graph-canvas" class="graph-canvas">
+      <svg id="graph-svg"></svg>
+      <div id="graph-tooltip" class="graph-tooltip hidden"></div>
+    </div>
+    <aside class="graph-groups-panel">
+      <header>
+        <h2>Группы</h2>
+      </header>
+      <div id="graph-legend" class="graph-legend hidden"></div>
+      <div id="graph-groups-list" class="graph-groups-list"></div>
+    </aside>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src="/static/js/vendor/d3.v7.min.js"></script>
+  <script type="module" src="/static/js/graph.js"></script>
+{% endblock %}

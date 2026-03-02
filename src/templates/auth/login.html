@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card">
+    <h1>Вход</h1>
+
+    {% if request.query_params.get('registered') %}
+    <p class="muted" style="color: var(--accent)">✓ Регистрация завершена! Войдите.</p>
+    {% endif %}
+
+    <p class="muted">Введите логин или email и пароль.</p>
+    <form id="login-form" class="auth-form">
+      <input
+        type="text"
+        name="identifier"
+        placeholder="Логин или Email"
+        required
+        autocomplete="username"
+      />
+      <input
+        type="password"
+        name="password"
+        placeholder="Пароль"
+        required
+        autocomplete="current-password"
+      />
+      <button type="submit" class="pill-button pill-button--primary">Войти</button>
+      <span id="login-error" class="muted"></span>
+    </form>
+
+    <div class="auth-actions">
+      <a href="/register">Создать аккаунт</a>
+    </div>
+  </div>
+</section>
+
+<script src="/static/js/auth_login_page.js" defer></script>
+{% endblock %}

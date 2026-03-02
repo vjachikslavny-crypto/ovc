@@ -1,0 +1,137 @@
+/* ---- OVC Prism isolation ---- */
+.ovc-prism {
+  --ovc-bg: var(--card);
+  --ovc-border: var(--border);
+  --ovc-fg: var(--text);
+  --code-comment: color-mix(in srgb, var(--muted) 80%, var(--text) 20%);
+  --code-punctuation: color-mix(in srgb, var(--muted) 65%, var(--text) 35%);
+  --code-entity: color-mix(in srgb, var(--accent) 75%, var(--text) 25%);
+  --code-boolean: color-mix(in srgb, var(--accent) 70%, var(--on-accent) 30%);
+  --code-string: color-mix(in srgb, var(--accent) 60%, var(--muted) 40%);
+  --code-operator: color-mix(in srgb, var(--accent) 55%, var(--text) 45%);
+  --code-keyword: color-mix(in srgb, var(--accent) 65%, var(--text) 35%);
+  --code-function: color-mix(in srgb, var(--accent) 70%, var(--text) 30%);
+  --code-regex: color-mix(in srgb, var(--accent) 50%, var(--muted) 50%);
+  background: var(--ovc-bg);
+  border: 1px solid var(--ovc-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ovc-prism pre[class*='language-'],
+.ovc-prism code[class*='language-'] {
+  color: var(--ovc-fg) !important;
+  background: transparent !important;
+  text-shadow: none !important;
+  white-space: pre !important;
+  word-break: normal !important;
+  word-wrap: normal !important;
+  overflow: auto !important;
+  line-height: 1.45;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  font-family: 'Fira Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.95rem;
+}
+
+.ovc-prism pre[class*='language-'] {
+  margin: 0;
+  padding: 16px;
+  border-bottom: 1px solid var(--ovc-border);
+  max-height: calc(25 * 1.45em + 32px); /* 25 строк * line-height + padding */
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.ovc-prism pre.code-expanded {
+  max-height: none;
+  overflow: auto;
+}
+
+.ovc-prism .token.comment,
+.ovc-prism .token.prolog,
+.ovc-prism .token.doctype,
+.ovc-prism .token.cdata {
+  color: var(--code-comment);
+}
+
+.ovc-prism .token.punctuation {
+  color: var(--code-punctuation);
+}
+
+.ovc-prism .token.property,
+.ovc-prism .token.tag,
+.ovc-prism .token.constant,
+.ovc-prism .token.symbol,
+.ovc-prism .token.deleted {
+  color: var(--code-entity);
+}
+
+.ovc-prism .token.boolean,
+.ovc-prism .token.number {
+  color: var(--code-boolean);
+}
+
+.ovc-prism .token.selector,
+.ovc-prism .token.attr-name,
+.ovc-prism .token.string,
+.ovc-prism .token.char,
+.ovc-prism .token.builtin,
+.ovc-prism .token.inserted {
+  color: var(--code-string);
+}
+
+.ovc-prism .token.operator,
+.ovc-prism .token.entity,
+.ovc-prism .token.url {
+  color: var(--code-operator);
+}
+
+.ovc-prism .token.atrule,
+.ovc-prism .token.attr-value,
+.ovc-prism .token.keyword {
+  color: var(--code-keyword);
+}
+
+.ovc-prism .token.function,
+.ovc-prism .token.class-name {
+  color: var(--code-function);
+}
+
+.ovc-prism .token.regex,
+.ovc-prism .token.important,
+.ovc-prism .token.variable {
+  color: var(--code-regex);
+}
+
+.ovc-codebar {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ovc-border);
+}
+
+.ovc-codebar .btn {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--accent-weak);
+  border: 1px solid var(--ovc-border);
+  color: var(--ovc-fg);
+  cursor: pointer;
+}
+
+.ovc-codebar .btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ovc-cap {
+  margin: 8px 12px 12px;
+  opacity: 0.8;
+  font-size: 0.9rem;
+  color: var(--ovc-fg);
+}

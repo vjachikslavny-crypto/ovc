@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-jinja2
-sqlalchemy
-scikit-learn
-python-multipart
-pydantic
-markdown
