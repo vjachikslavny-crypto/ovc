@@ -6,6 +6,7 @@ function parseJsonError(response) {
 
 document.addEventListener('DOMContentLoaded', () => {
   const authMode = window.__AUTH_MODE || document.body?.dataset?.authMode || 'local';
+  const canUseSupabase = authMode === 'supabase' || authMode === 'both';
   const form = document.getElementById('register-form');
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -15,6 +16,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorEl = document.getElementById('register-error');
     const successEl = document.getElementById('register-success');
     const registeredEmailEl = document.getElementById('registered-email');
+    const successTextEl = document.getElementById('register-success-text');
+
+    const showSuccess = (emailValue, viaEmailConfirmation) => {
+      if (registeredEmailEl) registeredEmailEl.textContent = emailValue;
+      if (successTextEl) {
+        if (viaEmailConfirmation) {
+          successTextEl.innerHTML = 'Письмо для подтверждения отправлено на <strong id="registered-email"></strong>.';
+          const inlineEmail = successTextEl.querySelector('#registered-email');
+          if (inlineEmail) inlineEmail.textContent = emailValue;
+        } else {
+          successTextEl.textContent = `Аккаунт создан для ${emailValue}. Теперь можно войти.`;
+        }
+      }
+      if (form) form.style.display = 'none';
+      if (successEl) successEl.style.display = 'block';
+    };
 
     if (errorEl) errorEl.textContent = '';
     if (successEl) successEl.style.display = 'none';
@@ -25,19 +42,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      if (authMode === 'supabase') {
+      if (canUseSupabase && window.supabaseAuth) {
         if (!window.supabaseAuth) {
           if (errorEl) errorEl.textContent = 'Supabase не инициализирован';
           return;
         }
-        await window.supabaseAuth.signUp(email, password);
-        if (registeredEmailEl) registeredEmailEl.textContent = email;
-        if (form) form.style.display = 'none';
-        if (successEl) successEl.style.display = 'block';
-        return;
+        try {
+          await window.supabaseAuth.signUp(email, password);
+          showSuccess(email, true);
+          return;
+        } catch (sbError) {
+          // In mixed mode keep registration available even if Supabase is temporarily unavailable.
+          if (authMode === 'supabase') {
+            throw sbError;
+          }
+        }
       }
 
-      // local / both / none: регистрация в локальной базе, username создается сервером из email
+      // local / none / both fallback: registration in local DB.
       const response = await fetch('/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -49,7 +71,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      window.location.href = '/login?registered=1';
+      // Local registration now also sends confirmation email.
+      showSuccess(email, true);
     } catch (error) {
       if (errorEl) errorEl.textContent = error?.message || 'Ошибка регистрации';
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -8,11 +9,12 @@ from dotenv import load_dotenv
 
 # Load .env file from project root (try multiple locations)
 _config_dir = Path(__file__).resolve().parent
+_project_root = _config_dir.parents[2]  # .../OVC
 _possible_env_paths = [
-    _config_dir.parents[3] / ".env",  # OVC/.env (from src/app/core)
-    _config_dir.parents[2] / ".env",  # OVC/src/.env (legacy fallback)
-    Path.cwd() / ".env",              # Current working directory
-    Path.home() / "OVC" / ".env",     # Explicit path
+    _project_root / ".env",             # OVC/.env
+    _project_root / "src" / ".env",     # OVC/src/.env (legacy fallback)
+    Path.cwd() / ".env",                # Current working directory
+    Path.home() / "OVC" / ".env",       # Explicit path
 ]
 
 for _env_path in _possible_env_paths:
@@ -22,6 +24,21 @@ for _env_path in _possible_env_paths:
         break
 
 AuthMode = Literal["none", "local", "supabase", "both"]
+_PROJECT_ROOT = _project_root
+_DEFAULT_SQLITE_PATH = (_PROJECT_ROOT / "src" / "ovc.db").resolve()
+
+
+def _normalize_database_url(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return f"sqlite:///{_DEFAULT_SQLITE_PATH}"
+
+    # Normalize legacy relative sqlite paths so runs from any cwd use one DB.
+    if value.startswith("sqlite:///./"):
+        rel = value[len("sqlite:///./"):]
+        return f"sqlite:///{(_PROJECT_ROOT / rel).resolve()}"
+
+    return value
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -33,10 +50,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 class Settings:
     def __init__(self) -> None:
-        self.database_url = (
+        self.database_url = _normalize_database_url(
             os.getenv("DATABASE_URL")
             or os.getenv("SIMPLE_DB_URL")
-            or "sqlite:///./src/ovc.db"
+            or ""
         )
         self.secret_key = os.getenv(
             "SECRET_KEY", "CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANGE_ME"
@@ -48,8 +65,14 @@ class Settings:
         self.cookie_domain = os.getenv("COOKIE_DOMAIN") or None
         self.cookie_secure = _env_bool("COOKIE_SECURE", False)
         self.cookie_samesite = os.getenv("COOKIE_SAMESITE", "lax")
+        self.public_base_url = os.getenv("PUBLIC_BASE_URL", "").strip()
+        self.cors_origins = self._parse_cors_origins()
         self.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
         self.rate_limit_max = int(os.getenv("RATE_LIMIT_MAX", "60"))
+        self.rate_limit_login_per_min = int(os.getenv("RATE_LIMIT_LOGIN_PER_MIN", "10"))
+        self.rate_limit_register_per_min = int(
+            os.getenv("RATE_LIMIT_REGISTER_PER_MIN", str(self.rate_limit_login_per_min))
+        )
         self.password_min_length = int(os.getenv("PASSWORD_MIN_LENGTH", "6"))
         self.password_require_upper = _env_bool("PASSWORD_REQUIRE_UPPER", False)
         self.password_require_lower = _env_bool("PASSWORD_REQUIRE_LOWER", False)
@@ -93,6 +116,52 @@ class Settings:
                 raise ValueError(
                     "SUPABASE_URL and SUPABASE_ANON_KEY required when AUTH_MODE is 'supabase' or 'both'"
                 )
+
+    def _parse_cors_origins(self) -> list[str]:
+        defaults = [
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+            "http://127.0.0.1:18741",
+            "http://localhost:18741",
+            "tauri://localhost",
+        ]
+        if self.public_base_url:
+            defaults.append(self.public_base_url.rstrip("/"))
+
+        raw = os.getenv("CORS_ORIGINS", "").strip()
+        if raw:
+            parsed: list[str]
+            try:
+                if raw.startswith("["):
+                    candidate = json.loads(raw)
+                    parsed = [self._normalize_origin_value(str(item)) for item in candidate if str(item).strip()]
+                else:
+                    parsed = [self._normalize_origin_value(item) for item in raw.split(",") if item.strip()]
+            except Exception:
+                raw_fallback = raw
+                if raw_fallback.startswith("[") and raw_fallback.endswith("]"):
+                    raw_fallback = raw_fallback[1:-1]
+                parsed = [
+                    self._normalize_origin_value(item)
+                    for item in raw_fallback.split(",")
+                    if item.strip()
+                ]
+            defaults.extend(parsed)
+
+        unique: list[str] = []
+        for origin in defaults:
+            if origin and origin not in unique:
+                unique.append(origin)
+        return unique
+
+    @staticmethod
+    def _normalize_origin_value(value: str) -> str:
+        normalized = value.strip().strip("\"'").strip()
+        if normalized.startswith("["):
+            normalized = normalized[1:].strip()
+        if normalized.endswith("]"):
+            normalized = normalized[:-1].strip()
+        return normalized
 
 
 settings = Settings()

@@ -57,6 +57,56 @@ cd ~/OVC
 
 Открыть: `http://127.0.0.1:8000`
 
+## Public hosting from laptop (Cloudflare Tunnel)
+
+Этот режим открывает сайт в интернет по HTTPS, при этом backend продолжает работать на ноутбуке.
+
+Подготовка:
+
+```bash
+brew install cloudflared
+cloudflared tunnel login
+cloudflared tunnel create ovc-laptop
+cloudflared tunnel route dns ovc-laptop <YOUR_HOSTNAME>
+```
+
+Далее:
+1. Скопируйте `deploy/cloudflare_tunnel/config.yml.template` в локальный `config.yml`.
+2. Заполните `tunnel`, `credentials-file`, `hostname`.
+3. В `.env` задайте:
+
+```env
+PUBLIC_BASE_URL=https://<YOUR_HOSTNAME>
+CORS_ORIGINS=["https://<YOUR_HOSTNAME>","http://127.0.0.1:8000"]
+COOKIE_DOMAIN=<YOUR_HOSTNAME>
+COOKIE_SECURE=true
+CLOUDFLARED_CONFIG_PATH=/absolute/path/to/config.yml
+```
+
+Запуск:
+
+```bash
+./deploy/cloudflare_tunnel/start_public_server.sh
+./deploy/cloudflare_tunnel/start_tunnel.sh
+```
+
+Проверка:
+
+```bash
+./deploy/cloudflare_tunnel/verify_public.sh
+```
+
+Дополнительная инструкция: `deploy/cloudflare_tunnel/README_TUNNEL.md`.
+
+Быстрый временный вариант без домена:
+
+```bash
+./deploy/cloudflare_tunnel/start_public_server.sh
+QUICK_TUNNEL=true ./deploy/cloudflare_tunnel/start_tunnel.sh
+```
+
+Cloudflared выдаст URL вида `https://<random>.trycloudflare.com` (меняется при каждом запуске).
+
 ## Запуск desktop (macOS)
 
 Требования:

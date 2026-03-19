@@ -9,6 +9,14 @@
     {% if request.query_params.get('registered') %}
     <p class="muted" style="color: var(--accent)">✓ Регистрация завершена! Войдите.</p>
     {% endif %}
+    {% if request.query_params.get('verified') %}
+    <p class="muted" style="color: var(--accent)">✓ Email подтверждён. Теперь можно войти.</p>
+    {% endif %}
+    {% if request.query_params.get('verify') == 'expired' %}
+    <p class="muted" style="color: var(--danger, #ff6b6b)">Ссылка подтверждения истекла. Запросите письмо повторно.</p>
+    {% elif request.query_params.get('verify') == 'invalid' %}
+    <p class="muted" style="color: var(--danger, #ff6b6b)">Ссылка подтверждения недействительна.</p>
+    {% endif %}
 
     <p class="muted">Введите логин или email и пароль.</p>
     <form id="login-form" class="auth-form">

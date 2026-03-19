@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -41,20 +40,9 @@ MAX_REQUEST_SIZE = 500 * 1024 * 1024  # 500MB
 
 app = FastAPI(title="OVC Simple App", version="0.1.0")
 
-_cors_origins = [
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
-    "http://127.0.0.1:18741",
-    "http://localhost:18741",
-    "tauri://localhost",
-]
-_extra = os.getenv("CORS_ORIGINS", "")
-if _extra:
-    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -209,30 +197,27 @@ async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response = await _proxy_remote_file_if_needed(request, response)
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    
-    # Build CSP based on auth mode
-    script_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
-    connect_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
-    frame_src = "'self' https://www.instagram.com https://www.tiktok.com"
-    
-    # Allow Supabase CDN and API when supabase auth is enabled
-    if settings.auth_mode in ("supabase", "both"):
-        script_src += " https://cdn.jsdelivr.net"
-        connect_src += " https://cdn.jsdelivr.net"
-        if settings.supabase_url:
-            connect_src += f" {settings.supabase_url}"
-    
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
-        f"default-src 'self'; "
-        f"img-src 'self' data: blob:; "
-        f"media-src 'self' blob:; "
-        f"style-src 'self' 'unsafe-inline'; "
-        f"script-src {script_src}; "
-        f"connect-src {connect_src}; "
-        f"frame-src {frame_src}"
+        "default-src 'self' https: data: blob:; "
+        "script-src 'self' 'unsafe-inline' https:; "
+        "style-src 'self' 'unsafe-inline' https:; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' https: wss:; "
+        "font-src 'self' data: https:; "
+        "media-src 'self' data: blob: https:; "
+        "frame-src 'self' https:; "
+        "object-src 'none'; "
+        "frame-ancestors 'none';"
     )
     return response
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 
 def _require_user(request: Request):

@@ -80,20 +80,33 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // authMode === "both": сначала local, затем fallback в Supabase (только для email)
+      // authMode === "both":
+      // - email: сначала Supabase, затем fallback local
+      // - username: local only
+      if (identifier.includes('@') && window.supabaseAuth) {
+        try {
+          await window.supabaseAuth.signIn(identifier, password);
+          window.location.href = '/';
+          return;
+        } catch (sbError) {
+          const localResult = await submitLocalLogin(identifier, password);
+          if (localResult.ok) {
+            window.location.href = '/';
+            return;
+          }
+          if (errorEl) {
+            errorEl.textContent = sbError?.message || localResult.error || 'Ошибка входа';
+          }
+          return;
+        }
+      }
+
       const localResult = await submitLocalLogin(identifier, password);
       if (localResult.ok) {
         window.location.href = '/';
         return;
       }
-
-      if (!identifier.includes('@') || !window.supabaseAuth) {
-        if (errorEl) errorEl.textContent = localResult.error;
-        return;
-      }
-
-      await window.supabaseAuth.signIn(identifier, password);
-      window.location.href = '/';
+      if (errorEl) errorEl.textContent = localResult.error;
     } catch (error) {
       if (errorEl) errorEl.textContent = error?.message || 'Ошибка сети';
     }

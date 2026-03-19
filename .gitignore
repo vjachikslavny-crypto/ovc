@@ -10,3 +10,5 @@ src/*.db
 src/**/*.db
 .DS_Store
 data/
+deploy/cloudflare_tunnel/config.yml
+deploy/cloudflare_tunnel/*.json

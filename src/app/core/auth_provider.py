@@ -202,6 +202,20 @@ def local_auth_get_user(request: Request) -> Optional[AuthUser]:
     token = get_bearer_token(request)
     if not token:
         return None
+
+    # Skip obvious Supabase tokens in mixed mode to avoid noisy decode failures.
+    try:
+        headers = jwt.get_unverified_header(token)
+        alg = str(headers.get("alg") or "").upper()
+        if alg in {"ES256", "RS256"}:
+            return None
+        claims = jwt.get_unverified_claims(token)
+        issuer = str(claims.get("iss") or "")
+        if _is_supabase_issuer(issuer):
+            return None
+    except Exception:
+        # Let regular local decode produce the proper auth error when needed.
+        pass
     
     try:
         payload = decode_access_token(token)
