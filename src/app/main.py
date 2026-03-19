@@ -4,7 +4,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -73,7 +73,6 @@ app.include_router(sync_router, prefix="/api")
 app.include_router(files_router)
 app.include_router(auth_router)
 app.include_router(users_router, prefix="/api")
-app.include_router(users_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -249,6 +248,10 @@ def index(request: Request, note_id: str = None):
     user = _require_user(request)
     if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
+    if not user and not settings.desktop_mode and settings.auth_mode != "none":
+        response = templates.TemplateResponse("welcome.html", _template_context(request, user))
+        _ensure_csrf_cookie(request, response)
+        return response
     context = _template_context(request, user)
     context["note_id"] = note_id
     response = templates.TemplateResponse("editor.html", context)

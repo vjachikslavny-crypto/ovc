@@ -15,14 +15,23 @@
         required
         autocomplete="email"
       />
-      <input
-        type="password"
-        name="password"
-        placeholder="Пароль"
-        required
-        minlength="8"
-        autocomplete="new-password"
-      />
+      <div class="password-field">
+        <input
+          type="password"
+          name="password"
+          placeholder="Пароль"
+          required
+          minlength="8"
+          autocomplete="new-password"
+        />
+        <button
+          type="button"
+          class="password-toggle"
+          data-password-toggle
+          aria-label="Показать пароль"
+          title="Показать пароль"
+        >👁</button>
+      </div>
       <button type="submit" class="pill-button pill-button--primary">Создать аккаунт</button>
       <span id="register-error" class="muted"></span>
     </form>
@@ -39,5 +48,6 @@
   </div>
 </section>
 
+<script src="/static/js/password_toggle.js" defer></script>
 <script src="/static/js/auth_register_page.js" defer></script>
 {% endblock %}

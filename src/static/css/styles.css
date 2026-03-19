@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&display=swap");
+
 /* Базовые токены */
 :root {
   color-scheme: dark;
@@ -3817,10 +3819,117 @@ textarea,
   padding: 14px 16px;
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 54px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.password-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .auth-actions {
   display: flex;
   justify-content: space-between;
   font-size: 0.95rem;
+}
+
+.welcome-page {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 180px);
+  padding: 64px 24px;
+}
+
+.welcome-card {
+  width: min(1080px, 96vw);
+  min-height: min(620px, calc(100vh - 220px));
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: clamp(40px, 5vw, 64px);
+  display: grid;
+  align-content: center;
+  gap: 28px;
+}
+
+.welcome-brand {
+  margin: 0 0 4px;
+  text-align: center;
+  font-size: clamp(2.9rem, 8vw, 5.1rem);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  font-family: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", serif;
+  font-style: italic;
+  font-weight: 700;
+  color: #d7d9df;
+  background: linear-gradient(180deg, #f4f5f8 0%, #d7dbe2 48%, #a8aeb8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 8px rgba(214, 218, 226, 0.26), 0 0 18px rgba(167, 174, 186, 0.18);
+}
+
+.welcome-slogan {
+  margin: 0 0 6px;
+  text-align: center;
+  font-size: clamp(1.05rem, 2.3vw, 1.45rem);
+  font-weight: 500;
+  color: var(--muted);
+  max-width: 720px;
+  justify-self: center;
+}
+
+.welcome-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 12px;
+}
+
+.welcome-action-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 24px 24px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.welcome-action-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.welcome-action-card h3 {
+  margin: 0 0 10px;
+}
+
+.welcome-action-card p {
+  margin: 0;
 }
 
 .register-success {
@@ -3849,6 +3958,23 @@ textarea,
   .auth-card {
     width: 100%;
     padding: 22px 16px;
+    gap: 12px;
+  }
+
+  .welcome-page {
+    padding: 24px 12px;
+    min-height: auto;
+  }
+
+  .welcome-card {
+    width: 100%;
+    min-height: auto;
+    padding: 28px 18px;
+    gap: 18px;
+  }
+
+  .welcome-actions {
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 

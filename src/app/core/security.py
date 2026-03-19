@@ -6,7 +6,7 @@ import hashlib
 import logging
 import re
 import secrets
-from typing import Optional
+from typing import Any, Optional
 
 from argon2 import PasswordHasher
 from argon2.low_level import Type
@@ -50,7 +50,7 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, *, extra_claims: Optional[dict[str, Any]] = None) -> str:
     issued_at = _now()
     expires = issued_at + dt.timedelta(minutes=settings.access_token_expires_min)
     payload = {
@@ -59,6 +59,12 @@ def create_access_token(subject: str) -> str:
         "exp": int(expires.timestamp()),
         "jti": secrets.token_hex(16),
     }
+    if extra_claims:
+        reserved = {"sub", "iat", "exp", "jti", "aud", "iss"}
+        for key, value in extra_claims.items():
+            if key in reserved or value is None:
+                continue
+            payload[key] = value
     return jwt.encode(payload, settings.secret_key, algorithm=JWT_ALG)
 
 
