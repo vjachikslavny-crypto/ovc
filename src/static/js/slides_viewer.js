@@ -13,6 +13,7 @@ function setupSlidesBlock(block, onBlockUpdate) {
   const cover = block.querySelector('.slides-cover');
   const inline = block.querySelector('.slides-inline');
   const slidesContainer = block.querySelector('.slides-pages');
+  const singleView = block.querySelector('.slides-single-view');
   const toggleBtn = block.querySelector('[data-action="toggle-view"]');
   const fullBtn = block.querySelector('[data-action="fullscreen"]');
   const prevBtn = block.querySelector('[data-action="prev"]');
@@ -31,6 +32,8 @@ function setupSlidesBlock(block, onBlockUpdate) {
   let current = 1;
   let loadingMeta = false;
 
+  const isMobileInline = () => window.matchMedia('(max-width: 899px)').matches;
+
   if (indexTotal && meta.count) {
     indexTotal.textContent = String(meta.count);
   }
@@ -42,16 +45,26 @@ function setupSlidesBlock(block, onBlockUpdate) {
       toggleBtn.textContent = nextView === 'inline' ? 'Свернуть' : 'Просмотр';
       cover.hidden = nextView === 'inline';
       inline.hidden = nextView !== 'inline';
-      
-      // OVC: slides - показываем контейнер со всеми слайдами в режиме inline
-      if (slidesContainer) {
-        slidesContainer.hidden = nextView !== 'inline';
-        if (nextView === 'inline' && meta.count && slidesContainer.children.length === 0) {
-          // Если слайды еще не загружены, загружаем метаданные и рендерим
-          ensureMeta().then(() => {
-            if (meta.count) renderAllSlides();
-          }).catch(showError);
-      }
+
+      if (nextView === 'inline') {
+        ensureMeta()
+          .then(() => {
+            if (isMobileInline()) {
+              if (slidesContainer) slidesContainer.hidden = true;
+              if (singleView) singleView.hidden = false;
+              showSlide(current);
+            } else if (slidesContainer) {
+              if (singleView) singleView.hidden = true;
+              slidesContainer.hidden = false;
+              if (meta.count && slidesContainer.children.length === 0) {
+                renderAllSlides();
+              }
+            }
+          })
+          .catch(showError);
+      } else {
+        if (slidesContainer) slidesContainer.hidden = true;
+        if (singleView) singleView.hidden = true;
       }
       
       if (typeof onBlockUpdate === 'function' && block.dataset.blockId) {
@@ -82,18 +95,42 @@ function setupSlidesBlock(block, onBlockUpdate) {
   });
 
   if (block.dataset.view === 'inline') {
-    // OVC: slides - в режиме inline показываем все слайды
     ensureMeta().then(() => {
-      if (slidesContainer && meta.count) {
+      if (isMobileInline()) {
+        if (slidesContainer) slidesContainer.hidden = true;
+        if (singleView) singleView.hidden = false;
+        showSlide(current);
+      } else if (slidesContainer && meta.count) {
+        if (singleView) singleView.hidden = true;
+        slidesContainer.hidden = false;
         renderAllSlides();
       } else if (imageEl) {
-        // Fallback на старый режим, если контейнер отсутствует
+        if (singleView) singleView.hidden = false;
         showSlide(current);
       }
     }).catch(showError);
   } else if (preview && imageEl) {
     imageEl.src = preview;
+    if (singleView) singleView.hidden = true;
+    if (slidesContainer) slidesContainer.hidden = true;
   }
+
+  window.addEventListener('resize', () => {
+    if (block.dataset.view !== 'inline') return;
+    if (isMobileInline()) {
+      if (slidesContainer) slidesContainer.hidden = true;
+      if (singleView) singleView.hidden = false;
+      showSlide(current);
+      return;
+    }
+    if (singleView) singleView.hidden = true;
+    if (slidesContainer) {
+      slidesContainer.hidden = false;
+      if (meta.count && slidesContainer.children.length === 0) {
+        renderAllSlides();
+      }
+    }
+  });
 
   function ensureMeta() {
     // OVC: pptx - если слайды не были сгенерированы (LibreOffice не установлен), показываем сообщение
@@ -120,9 +157,16 @@ function setupSlidesBlock(block, onBlockUpdate) {
         if (indexTotal && meta.count) indexTotal.textContent = String(meta.count);
         updateThumbs();
         placeholder.hidden = true;
-        // OVC: slides - если в режиме inline и есть контейнер, рендерим все слайды
-        if (block.dataset.view === 'inline' && slidesContainer && meta.count) {
-          renderAllSlides();
+        if (block.dataset.view === 'inline') {
+          if (isMobileInline()) {
+            if (slidesContainer) slidesContainer.hidden = true;
+            if (singleView) singleView.hidden = false;
+            showSlide(current);
+          } else if (slidesContainer && meta.count) {
+            if (singleView) singleView.hidden = true;
+            slidesContainer.hidden = false;
+            renderAllSlides();
+          }
         }
       })
       .finally(() => {

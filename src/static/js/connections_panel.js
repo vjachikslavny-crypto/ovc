@@ -89,7 +89,19 @@ export function initConnectionsPanel({
 
   function setOpen(flag) {
     rootEl.classList.toggle('connections-panel--open', flag);
+    rootEl.setAttribute('aria-hidden', flag ? 'false' : 'true');
   }
+
+  const isMobileLayout = () => window.matchMedia('(max-width: 899px)').matches;
+
+  document.addEventListener('click', (event) => {
+    if (!isMobileLayout()) return;
+    if (!rootEl.classList.contains('connections-panel--open')) return;
+    if (rootEl.contains(event.target)) return;
+    if (toggleBtn?.contains(event.target)) return;
+    if (event.target?.closest?.('#fab-connections')) return;
+    setOpen(false);
+  });
 
   async function ensureOptions() {
     if (state.optionsLoaded || state.loadingOptions || !fetchOptions) return;

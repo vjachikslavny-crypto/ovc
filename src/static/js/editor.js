@@ -31,8 +31,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const backBtn = document.getElementById('nav-back');
   const refreshBtn = document.getElementById('nav-refresh');
   const infoBtn = document.getElementById('note-info');
+  const mobileHeaderActionsToggle = document.getElementById('mobile-header-actions-toggle');
+  const headerActionsEl = document.getElementById('editor-header-actions');
   const paletteEl = document.getElementById('block-palette');
   const fabPlus = document.getElementById('fab-plus');
+  const fabConnections = document.getElementById('fab-connections');
   const fabVoice = document.getElementById('fab-voice');
   const fabAttach = document.getElementById('fab-attach');
   const fileInput = document.getElementById('file-input');
@@ -59,7 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initToolbar(toolbarEl, canvas);
   initInlineBubble(bubbleEl, canvas);
-  initPalette({ paletteEl, triggerEl: fabPlus, onInsert: handleInsertBlock });
+  initPalette({
+    paletteEl,
+    triggerEl: fabPlus,
+    onInsert: handleInsertBlock,
+    onAction: handlePaletteAction,
+  });
   initSmartInsert(canvas, { onTransform: handleTransformBlock });
   const uploader = initUploader({
     attachBtn: fabAttach,
@@ -138,6 +146,47 @@ document.addEventListener('DOMContentLoaded', () => {
     position: null,
   };
   const saveQueue = [];
+
+  function isMobileLayout() {
+    return window.matchMedia('(max-width: 899px)').matches;
+  }
+
+  function setMobileHeaderActionsOpen(open) {
+    if (!editorEl || !mobileHeaderActionsToggle || !headerActionsEl) return;
+    editorEl.classList.toggle('editor--mobile-actions-open', open);
+    mobileHeaderActionsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  if (mobileHeaderActionsToggle && headerActionsEl) {
+    mobileHeaderActionsToggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      const next = !editorEl.classList.contains('editor--mobile-actions-open');
+      setMobileHeaderActionsOpen(next);
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!editorEl.classList.contains('editor--mobile-actions-open')) return;
+      if (
+        mobileHeaderActionsToggle.contains(event.target) ||
+        headerActionsEl.contains(event.target)
+      ) {
+        return;
+      }
+      setMobileHeaderActionsOpen(false);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        setMobileHeaderActionsOpen(false);
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (!isMobileLayout()) {
+        setMobileHeaderActionsOpen(false);
+      }
+    });
+  }
 
   // ---- API / LOAD ----
 
@@ -1232,6 +1281,12 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   }
 
+  function handlePaletteAction(action) {
+    if (action === 'attach-file') {
+      fabAttach?.click();
+    }
+  }
+
   function handleUploadedBlocks(blocks) {
     if (!Array.isArray(blocks) || !blocks.length) return;
     const normalized = blocks
@@ -1478,6 +1533,19 @@ document.addEventListener('DOMContentLoaded', () => {
     inspectorEl.setAttribute('aria-hidden', hidden ? 'false' : 'true');
     if (hidden) {
       inspector.onOpen?.(noteState);
+    }
+    if (isMobileLayout()) {
+      setMobileHeaderActionsOpen(false);
+    }
+  });
+
+  fabConnections?.addEventListener('click', () => {
+    connectionsToggleBtn?.click();
+  });
+
+  connectionsToggleBtn?.addEventListener('click', () => {
+    if (isMobileLayout()) {
+      setMobileHeaderActionsOpen(false);
     }
   });
 
@@ -2126,6 +2194,51 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     }
   }
+
+  function updateMobileViewportOffset() {
+    if (!editorEl) return;
+    if (!isMobileLayout() || !window.visualViewport) {
+      editorEl.style.removeProperty('--mobile-keyboard-offset');
+      return;
+    }
+    const visualViewport = window.visualViewport;
+    const keyboardOverlap = Math.max(
+      0,
+      window.innerHeight - visualViewport.height - visualViewport.offsetTop,
+    );
+    editorEl.style.setProperty(
+      '--mobile-keyboard-offset',
+      `${Math.round(keyboardOverlap)}px`,
+    );
+  }
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateMobileViewportOffset);
+    window.visualViewport.addEventListener('scroll', updateMobileViewportOffset);
+  }
+  window.addEventListener('resize', updateMobileViewportOffset);
+  updateMobileViewportOffset();
+
+  canvas.addEventListener('focusin', (event) => {
+    if (!isMobileLayout()) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.closest('[data-block-id], .note-inspector, .connections-panel')) return;
+
+    window.setTimeout(() => {
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const rect = target.getBoundingClientRect();
+      const topSafe = 86;
+      const bottomSafe = 170;
+      if (rect.top < topSafe || rect.bottom > viewportHeight - bottomSafe) {
+        target.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest',
+        });
+      }
+    }, 140);
+  });
 
   // ---- UTILS ----
 
