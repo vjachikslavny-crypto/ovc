@@ -64,8 +64,11 @@ export function initToolbar(toolbarEl, rootEl) {
   toolbarEl.addEventListener('mousedown', (event) => {
     if (event.target.closest('[data-action]')) {
       captureSelection();
-      event.preventDefault();
-      restoreSelection();
+      const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches;
+      if (!coarsePointer) {
+        event.preventDefault();
+        restoreSelection();
+      }
     }
   });
 

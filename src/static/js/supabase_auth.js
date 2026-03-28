@@ -13,6 +13,7 @@ const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || '';
 let supabaseClient = null;
 let supabaseAccessToken = null;
 let initPromise = null;
+let bridgedToken = null;
 
 function persistAccessCookie(token) {
   if (!token) return;
@@ -23,6 +24,31 @@ function persistAccessCookie(token) {
 function clearAccessCookie() {
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `ovc_access_token=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+  bridgedToken = null;
+}
+
+async function bridgeBackendSession(token) {
+  if (!token || token === bridgedToken) {
+    return true;
+  }
+  try {
+    const response = await fetch('/auth/supabase/session', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn('[Supabase] Backend session bridge failed:', response.status, text);
+      return false;
+    }
+    bridgedToken = token;
+    return true;
+  } catch (error) {
+    console.warn('[Supabase] Backend session bridge request failed:', error);
+    return false;
+  }
 }
 
 /**
@@ -55,6 +81,7 @@ function initSupabase() {
       window.__supabaseAccessToken = supabaseAccessToken;
       persistAccessCookie(supabaseAccessToken);
       console.log('[Supabase] Access token updated');
+      bridgeBackendSession(supabaseAccessToken);
     } else {
       supabaseAccessToken = null;
       window.__supabaseAccessToken = null;
@@ -66,14 +93,14 @@ function initSupabase() {
   });
   
   // Check for existing session
-  await supabaseClient.auth.getSession().then(({ data: { session } }) => {
-    if (session?.access_token) {
-      supabaseAccessToken = session.access_token;
-      window.__supabaseAccessToken = supabaseAccessToken;
-      persistAccessCookie(supabaseAccessToken);
-      console.log('[Supabase] Existing session found');
-    }
-  });
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session?.access_token) {
+    supabaseAccessToken = session.access_token;
+    window.__supabaseAccessToken = supabaseAccessToken;
+    persistAccessCookie(supabaseAccessToken);
+    console.log('[Supabase] Existing session found');
+    await bridgeBackendSession(supabaseAccessToken);
+  }
   
   return true;
   })();
@@ -127,6 +154,7 @@ async function supabaseSignIn(email, password) {
     supabaseAccessToken = data.session.access_token;
     window.__supabaseAccessToken = supabaseAccessToken;
     persistAccessCookie(supabaseAccessToken);
+    await bridgeBackendSession(supabaseAccessToken);
   }
   
   console.log('[Supabase] Sign in successful');
@@ -179,6 +207,7 @@ async function refreshSupabaseSession() {
     supabaseAccessToken = data.session.access_token;
     window.__supabaseAccessToken = supabaseAccessToken;
     persistAccessCookie(supabaseAccessToken);
+    await bridgeBackendSession(supabaseAccessToken);
   }
   
   return supabaseAccessToken;

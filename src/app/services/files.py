@@ -5,6 +5,7 @@ import csv
 import gzip
 import hashlib
 import json
+import os
 import mimetypes
 import logging
 import subprocess
@@ -94,8 +95,20 @@ except ImportError:  # pragma: no cover
 # Превью для Word файлов не генерируется, используется только inline просмотр
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4] if len(Path(__file__).resolve().parents) >= 5 else Path.cwd()
-UPLOAD_ROOT = PROJECT_ROOT / "data" / "uploads"
+_resolved = Path(__file__).resolve()
+# src/app/services/files.py -> parents[3] == project root (.../OVC)
+PROJECT_ROOT = _resolved.parents[3] if len(_resolved.parents) >= 4 else Path.cwd()
+_legacy_upload_root = Path.home() / "data" / "uploads"
+_configured_upload_root = os.getenv("OVC_UPLOAD_ROOT", "").strip()
+
+if _configured_upload_root:
+    UPLOAD_ROOT = Path(_configured_upload_root).expanduser().resolve()
+elif _legacy_upload_root.exists():
+    # Keep backward compatibility with previously saved files.
+    UPLOAD_ROOT = _legacy_upload_root
+else:
+    UPLOAD_ROOT = PROJECT_ROOT / "data" / "uploads"
+
 ORIGINAL_DIR = UPLOAD_ROOT / "original"
 PREVIEW_DIR = UPLOAD_ROOT / "preview"
 PAGES_DIR = UPLOAD_ROOT / "pages"  # OVC: pdf - кэш страниц PDF

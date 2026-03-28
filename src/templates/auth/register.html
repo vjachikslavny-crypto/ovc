@@ -15,21 +15,31 @@
         required
         autocomplete="email"
       />
-      <input
-        type="password"
-        name="password"
-        placeholder="Пароль"
-        required
-        minlength="8"
-        autocomplete="new-password"
-      />
+      <div class="password-field">
+        <input
+          type="password"
+          name="password"
+          placeholder="Пароль"
+          required
+          minlength="{{ password_min_length | default(8) }}"
+          autocomplete="new-password"
+        />
+        <button
+          type="button"
+          class="password-toggle"
+          data-password-toggle
+          aria-label="Показать пароль"
+          title="Показать пароль"
+        >👁</button>
+      </div>
       <button type="submit" class="pill-button pill-button--primary">Создать аккаунт</button>
+      <small class="muted">{{ password_policy_hint | default('Минимум 8 символов и минимум 3 из 4 классов: верхний/нижний регистр, цифры, символы.') }}</small>
       <span id="register-error" class="muted"></span>
     </form>
 
     <div id="register-success" class="register-success" style="display: none;">
       <h3>Проверьте почту</h3>
-      <p>Письмо для подтверждения отправлено на <strong id="registered-email"></strong>.</p>
+      <p id="register-success-text">Письмо для подтверждения отправлено на <strong id="registered-email"></strong>.</p>
       <a href="/login" class="pill-button pill-button--secondary">Перейти ко входу</a>
     </div>
 
@@ -39,5 +49,6 @@
   </div>
 </section>
 
+<script src="/static/js/password_toggle.js" defer></script>
 <script src="/static/js/auth_register_page.js" defer></script>
 {% endblock %}

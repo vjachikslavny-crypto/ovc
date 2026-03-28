@@ -1,6 +1,6 @@
 import { uuid } from './utils.js';
 
-export function initPalette({ paletteEl, triggerEl, onInsert }) {
+export function initPalette({ paletteEl, triggerEl, onInsert, onAction }) {
   if (!paletteEl || !triggerEl) return;
 
   const close = () => paletteEl.setAttribute('aria-hidden', 'true');
@@ -21,6 +21,14 @@ export function initPalette({ paletteEl, triggerEl, onInsert }) {
     const button = event.target.closest('[data-block]');
     if (!button) return;
     const blockType = button.dataset.block;
+
+    if (blockType === 'image' || blockType === 'source') {
+      if (typeof onAction === 'function') {
+        onAction('attach-file', { kind: blockType });
+      }
+      close();
+      return;
+    }
     
     // Для таблицы используем асинхронный выбор размера
     if (blockType === 'table') {
@@ -71,6 +79,9 @@ function buildBlock(type, dataset = {}) {
     // case 'table' обрабатывается отдельно в initPalette
     case 'table':
       // Этот case не должен вызываться, так как таблица обрабатывается асинхронно
+      return null;
+    case 'image':
+    case 'source':
       return null;
     case 'todo':
       return { id, type: 'todo', data: { items: [{ id: uuid(), text: 'Задача', done: false }] } };

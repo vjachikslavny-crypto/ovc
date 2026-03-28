@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}OVCnotes — Добро пожаловать{% endblock %}
+
+{% block content %}
+<section class="welcome-page">
+  <div class="welcome-card">
+    <h1 class="welcome-brand">OVCnotes</h1>
+    <p class="welcome-slogan">Заметки нового уровня</p>
+
+    <div class="welcome-actions">
+      <a href="/login" class="welcome-action-card">
+        <h3>Войти в аккаунт</h3>
+        <p class="muted">Продолжить работу с вашими заметками.</p>
+      </a>
+      <a href="/register" class="welcome-action-card">
+        <h3>Зарегистрировать аккаунт</h3>
+        <p class="muted">Создать новый профиль OVCnotes.</p>
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

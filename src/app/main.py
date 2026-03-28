@@ -1,11 +1,10 @@
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -41,20 +40,9 @@ MAX_REQUEST_SIZE = 500 * 1024 * 1024  # 500MB
 
 app = FastAPI(title="OVC Simple App", version="0.1.0")
 
-_cors_origins = [
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
-    "http://127.0.0.1:18741",
-    "http://localhost:18741",
-    "tauri://localhost",
-]
-_extra = os.getenv("CORS_ORIGINS", "")
-if _extra:
-    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,6 +60,9 @@ async def startup_event():
         upgrade()
     except Exception as exc:
         logger.warning("Schema migration failed on startup: %s", exc)
+    logger.info("runtime config: %s", settings.runtime_summary())
+    for warning in settings.startup_warnings:
+        logger.warning("config warning: %s", warning)
     start_sync_worker_once()
 
 app.include_router(chat_router, prefix="/api")
@@ -85,7 +76,6 @@ app.include_router(sync_router, prefix="/api")
 app.include_router(files_router)
 app.include_router(auth_router)
 app.include_router(users_router, prefix="/api")
-app.include_router(users_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -110,6 +100,78 @@ def _same_host(a: Optional[str], b: Optional[str]) -> bool:
     if a == b:
         return True
     return b in aliases.get(a, set()) or a in aliases.get(b, set())
+
+
+def _origin_from_url(value: str) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return None
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
+def _build_csp_header() -> str:
+    script_src = ["'self'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://www.instagram.com"]
+    style_src = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]
+    img_src = ["'self'", "data:", "blob:", "https:", "https://i.ytimg.com"]
+    connect_src = ["'self'"]
+    font_src = ["'self'", "data:", "https://fonts.gstatic.com"]
+    media_src = ["'self'", "data:", "blob:", "https:"]
+    frame_src = [
+        "'self'",
+        "https://www.youtube-nocookie.com",
+        "https://www.youtube.com",
+        "https://www.instagram.com",
+        "https://www.tiktok.com",
+    ]
+
+    for candidate in (
+        settings.supabase_url,
+        settings.sync_remote_base_url,
+        settings.public_base_url,
+    ):
+        origin = _origin_from_url(candidate)
+        if origin:
+            connect_src.append(origin)
+            if origin.startswith("https://"):
+                connect_src.append(f"wss://{origin[len('https://'):]}")
+
+    script_src.extend(settings.csp_script_src_extra)
+    style_src.extend(settings.csp_style_src_extra)
+    connect_src.extend(settings.csp_connect_src_extra)
+    img_src.extend(settings.csp_img_src_extra)
+    frame_src.extend(settings.csp_frame_src_extra)
+
+    directives = {
+        "default-src": ["'self'"],
+        "script-src": _dedupe(script_src),
+        "style-src": _dedupe(style_src),
+        "img-src": _dedupe(img_src),
+        "connect-src": _dedupe(connect_src),
+        "font-src": _dedupe(font_src),
+        "media-src": _dedupe(media_src),
+        "frame-src": _dedupe(frame_src),
+        "object-src": ["'none'"],
+        "frame-ancestors": ["'none'"],
+    }
+
+    return " ".join(
+        f"{name} {' '.join(values)};"
+        for name, values in directives.items()
+    )
 
 
 async def _proxy_remote_file_if_needed(request: Request, response):
@@ -209,30 +271,20 @@ async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response = await _proxy_remote_file_if_needed(request, response)
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    
-    # Build CSP based on auth mode
-    script_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
-    connect_src = "'self' https://www.instagram.com https://cdnjs.cloudflare.com"
-    frame_src = "'self' https://www.instagram.com https://www.tiktok.com"
-    
-    # Allow Supabase CDN and API when supabase auth is enabled
-    if settings.auth_mode in ("supabase", "both"):
-        script_src += " https://cdn.jsdelivr.net"
-        connect_src += " https://cdn.jsdelivr.net"
-        if settings.supabase_url:
-            connect_src += f" {settings.supabase_url}"
-    
-    response.headers["Content-Security-Policy"] = (
-        f"default-src 'self'; "
-        f"img-src 'self' data: blob:; "
-        f"media-src 'self' blob:; "
-        f"style-src 'self' 'unsafe-inline'; "
-        f"script-src {script_src}; "
-        f"connect-src {connect_src}; "
-        f"frame-src {frame_src}"
-    )
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    csp_header_name = "Content-Security-Policy-Report-Only" if settings.csp_report_only else "Content-Security-Policy"
+    response.headers[csp_header_name] = _build_csp_header()
+    auth_context = getattr(request.state, "auth_context", None)
+    if auth_context and settings.runtime_status_enabled:
+        response.headers["X-OVC-Auth-Context"] = str(auth_context)
     return response
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 
 def _require_user(request: Request):
@@ -243,7 +295,7 @@ def _require_user(request: Request):
 
 
 def _allow_anonymous() -> bool:
-    if settings.desktop_mode:
+    if settings.desktop_mode and settings.allow_desktop_dev_fallback:
         return True
     return settings.auth_mode in ("none", "supabase", "both")
 
@@ -264,6 +316,10 @@ def index(request: Request, note_id: str = None):
     user = _require_user(request)
     if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
+    if not user and not settings.desktop_mode and settings.auth_mode != "none":
+        response = templates.TemplateResponse("welcome.html", _template_context(request, user))
+        _ensure_csrf_cookie(request, response)
+        return response
     context = _template_context(request, user)
     context["note_id"] = note_id
     response = templates.TemplateResponse("editor.html", context)
@@ -327,3 +383,30 @@ def _ensure_csrf_cookie(request: Request, response) -> None:
         max_age=settings.refresh_token_expires_days * 86400,
         path="/",
     )
+
+
+@app.get("/api/runtime/status")
+def runtime_status(request: Request):
+    if not settings.runtime_status_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    identity_type = "unauthenticated"
+    identity_user_id = None
+    try:
+        from app.core.auth_provider import get_auth_user
+
+        auth_user = get_auth_user(request)
+        identity_type = auth_user.provider
+        identity_user_id = auth_user.id
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "config": settings.runtime_summary(),
+        "request": {
+            "authContext": getattr(request.state, "auth_context", None),
+            "identityType": identity_type,
+            "identityUserId": identity_user_id,
+        },
+    }

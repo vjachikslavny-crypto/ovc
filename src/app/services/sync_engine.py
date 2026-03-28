@@ -61,18 +61,19 @@ def _sync_guard():
 def start_sync_worker_once() -> None:
     global _worker_started, _sync_thread
 
-    if not settings.sync_remote_base_url:
-        logger.info("sync worker disabled: SYNC_REMOTE_BASE_URL is empty")
+    if settings.sync_mode in {"off", "shared-db", "remote-shell"}:
+        logger.info(
+            "sync worker disabled: mode=%s (remote_configured=%s)",
+            settings.sync_mode,
+            settings.sync_remote_configured,
+        )
         return
 
-    if not (settings.sync_enabled or settings.desktop_mode):
-        logger.info("sync worker disabled: set SYNC_ENABLED=true or DESKTOP_MODE=true")
-        return
-
-    # Desktop sync should run with user-bound bearer from /api/sync/trigger.
-    # Running background worker without token causes unauthorized pushes.
-    if settings.desktop_mode and not settings.sync_bearer_token:
-        logger.info("sync worker disabled in desktop mode without SYNC_BEARER_TOKEN")
+    if not settings.sync_worker_enabled:
+        logger.warning(
+            "sync worker disabled: mode=%s requires SYNC_BEARER_TOKEN for background sync",
+            settings.sync_mode,
+        )
         return
 
     with _worker_lock:
@@ -94,7 +95,12 @@ def start_sync_worker_once() -> None:
         _sync_thread = threading.Thread(target=_loop, name="ovc-sync-worker", daemon=True)
         _sync_thread.start()
         _worker_started = True
-        logger.info("sync worker started (poll=%ss)", settings.sync_poll_seconds)
+        logger.info(
+            "sync worker started (mode=%s poll=%ss remote=%s)",
+            settings.sync_mode,
+            settings.sync_poll_seconds,
+            bool(settings.sync_remote_base_url),
+        )
 
 
 def enqueue_sync_operation(
@@ -134,8 +140,14 @@ def trigger_sync_now(
     access_token: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if settings.sync_mode in {"off", "shared-db"}:
+        return {"ok": False, "reason": f"sync_mode_{settings.sync_mode}"}
     if not settings.sync_remote_base_url:
         return {"ok": False, "reason": "remote_base_url_empty"}
+    if user_id and settings.desktop_mode and not (access_token or "").strip():
+        return {"ok": False, "reason": "missing_user_access_token"}
+    if user_id and not (access_token or settings.sync_bearer_token):
+        return {"ok": False, "reason": "missing_sync_auth_token"}
 
     with _sync_guard():
         with get_session() as session:
@@ -182,7 +194,12 @@ def get_sync_status(*, user_id: Optional[str] = None) -> Dict[str, Any]:
         conflicts = session.execute(select(func.count(SyncConflict.id))).scalar_one() or 0
 
     return {
-        "enabled": bool(settings.sync_remote_base_url and (settings.desktop_mode or settings.sync_enabled)),
+        "enabled": bool(settings.sync_mode in {"remote-sync", "remote-shell"}),
+        "mode": settings.sync_mode,
+        "workerEnabled": settings.sync_worker_enabled,
+        "desktopMode": settings.desktop_mode,
+        "syncEnabledFlag": settings.sync_enabled,
+        "remoteConfigured": bool(settings.sync_remote_base_url),
         "remoteBaseUrl": settings.sync_remote_base_url,
         "pending": pending,
         "failed": failed,
