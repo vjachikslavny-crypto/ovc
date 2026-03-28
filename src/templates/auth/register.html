@@ -21,7 +21,7 @@
           name="password"
           placeholder="Пароль"
           required
-          minlength="8"
+          minlength="{{ password_min_length | default(8) }}"
           autocomplete="new-password"
         />
         <button
@@ -33,6 +33,7 @@
         >👁</button>
       </div>
       <button type="submit" class="pill-button pill-button--primary">Создать аккаунт</button>
+      <small class="muted">{{ password_policy_hint | default('Минимум 8 символов и минимум 3 из 4 классов: верхний/нижний регистр, цифры, символы.') }}</small>
       <span id="register-error" class="muted"></span>
     </form>
 

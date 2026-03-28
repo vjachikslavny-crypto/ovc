@@ -42,7 +42,7 @@ from app.schemas.auth import (
 )
 from app.services.audit import log_event
 from app.services.email import send_verification_email
-from app.services.password_policy import validate_password
+from app.services.password_policy import password_policy_hint, validate_password
 from app.services.rate_limit import LoginLockout, RateLimiter
 from sqlalchemy import text, func, or_
 from pathlib import Path
@@ -155,6 +155,8 @@ def _auth_template_context(request: Request) -> dict:
         "auth_mode": settings.auth_mode,
         "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
         "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
+        "password_min_length": settings.password_min_length,
+        "password_policy_hint": password_policy_hint(),
     }
 
 

@@ -24,6 +24,7 @@ for _env_path in _possible_env_paths:
         break
 
 AuthMode = Literal["none", "local", "supabase", "both"]
+SyncMode = Literal["off", "shared-db", "remote-sync", "remote-shell"]
 _PROJECT_ROOT = _project_root
 _DEFAULT_SQLITE_PATH = (_PROJECT_ROOT / "src" / "ovc.db").resolve()
 
@@ -50,6 +51,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 class Settings:
     def __init__(self) -> None:
+        self.startup_warnings: list[str] = []
         self.database_url = _normalize_database_url(
             os.getenv("DATABASE_URL")
             or os.getenv("SIMPLE_DB_URL")
@@ -73,14 +75,33 @@ class Settings:
         self.rate_limit_register_per_min = int(
             os.getenv("RATE_LIMIT_REGISTER_PER_MIN", str(self.rate_limit_login_per_min))
         )
-        self.password_min_length = int(os.getenv("PASSWORD_MIN_LENGTH", "6"))
+        self.password_min_length = int(os.getenv("PASSWORD_MIN_LENGTH", "8"))
+        if self.password_min_length < 6:
+            self._warn("PASSWORD_MIN_LENGTH < 6 is unsafe; forcing 6")
+            self.password_min_length = 6
+        self.password_min_character_classes = int(
+            os.getenv("PASSWORD_MIN_CHARACTER_CLASSES", "3")
+        )
+        if self.password_min_character_classes < 1:
+            self.password_min_character_classes = 1
+        if self.password_min_character_classes > 4:
+            self.password_min_character_classes = 4
         self.password_require_upper = _env_bool("PASSWORD_REQUIRE_UPPER", False)
         self.password_require_lower = _env_bool("PASSWORD_REQUIRE_LOWER", False)
         self.password_require_digit = _env_bool("PASSWORD_REQUIRE_DIGIT", False)
         self.password_require_symbol = _env_bool("PASSWORD_REQUIRE_SYMBOL", False)
         self.email_from = os.getenv("EMAIL_FROM", "no-reply@ovc.local")
         self.email_backend = os.getenv("EMAIL_BACKEND", "mock")
+        self.app_env = os.getenv("APP_ENV", "development").strip().lower()
         self.desktop_mode = _env_bool("DESKTOP_MODE", False)
+        self.allow_desktop_dev_fallback = _env_bool(
+            "ALLOW_DESKTOP_DEV_FALLBACK",
+            self.desktop_mode,
+        )
+        if self.allow_desktop_dev_fallback:
+            self._warn(
+                "ALLOW_DESKTOP_DEV_FALLBACK=true: desktop requests without token may use explicit dev user"
+            )
         self.sync_enabled = _env_bool("SYNC_ENABLED", False)
         self.sync_remote_base_url = os.getenv("SYNC_REMOTE_BASE_URL", "").strip()
         self.sync_bearer_token = os.getenv("SYNC_BEARER_TOKEN", "").strip()
@@ -91,6 +112,19 @@ class Settings:
             os.getenv("SYNC_REQUEST_TIMEOUT_SECONDS", "12")
         )
         self.sync_pull_enabled = _env_bool("SYNC_PULL_ENABLED", True)
+        self.sync_mode: SyncMode = self._resolve_sync_mode(
+            os.getenv("SYNC_MODE", "auto").strip().lower()
+        )
+        self.sync_remote_configured = bool(self.sync_remote_base_url)
+        self.sync_worker_enabled = (
+            self.sync_mode == "remote-sync"
+            and bool(self.sync_bearer_token)
+        )
+        if self.sync_mode == "remote-sync" and not self.sync_bearer_token:
+            self._warn(
+                "SYNC_MODE=remote-sync but SYNC_BEARER_TOKEN is empty; "
+                "background worker disabled (manual /api/sync/trigger still available with user token)"
+            )
         
         # Auth mode: "none" | "local" | "supabase" | "both"
         self.auth_mode: AuthMode = os.getenv("AUTH_MODE", "local").lower()  # type: ignore
@@ -116,6 +150,50 @@ class Settings:
                 raise ValueError(
                     "SUPABASE_URL and SUPABASE_ANON_KEY required when AUTH_MODE is 'supabase' or 'both'"
                 )
+
+        self.runtime_status_enabled = _env_bool(
+            "RUNTIME_STATUS_ENABLED",
+            self.desktop_mode or self.auth_mode == "none" or self.app_env != "production",
+        )
+        self.csp_report_only = _env_bool("CSP_REPORT_ONLY", False)
+        self.csp_script_src_extra = self._parse_csv_env("CSP_SCRIPT_SRC_EXTRA")
+        self.csp_style_src_extra = self._parse_csv_env("CSP_STYLE_SRC_EXTRA")
+        self.csp_connect_src_extra = self._parse_csv_env("CSP_CONNECT_SRC_EXTRA")
+        self.csp_img_src_extra = self._parse_csv_env("CSP_IMG_SRC_EXTRA")
+        self.csp_frame_src_extra = self._parse_csv_env("CSP_FRAME_SRC_EXTRA")
+
+    def _warn(self, message: str) -> None:
+        self.startup_warnings.append(message)
+
+    def _resolve_sync_mode(self, raw_mode: str) -> SyncMode:
+        mode = raw_mode or "auto"
+        if mode not in {"auto", "off", "shared-db", "remote-sync", "remote-shell"}:
+            self._warn(f"Unknown SYNC_MODE='{mode}', falling back to auto")
+            mode = "auto"
+
+        if mode == "auto":
+            if self.sync_remote_base_url:
+                if self.sync_enabled:
+                    return "remote-sync"
+                if self.desktop_mode:
+                    return "remote-shell"
+                self._warn(
+                    "SYNC_REMOTE_BASE_URL is set but both SYNC_ENABLED and DESKTOP_MODE are false; sync is off"
+                )
+                return "off"
+            return "shared-db" if self.desktop_mode else "off"
+
+        resolved: SyncMode = mode  # type: ignore[assignment]
+        if resolved in {"remote-sync", "remote-shell"} and not self.sync_remote_base_url:
+            raise ValueError(f"SYNC_MODE={resolved} requires SYNC_REMOTE_BASE_URL")
+        if resolved == "remote-sync" and not self.sync_enabled:
+            self._warn("SYNC_MODE=remote-sync forces SYNC_ENABLED=true")
+            self.sync_enabled = True
+        if resolved == "shared-db" and self.sync_remote_base_url:
+            self._warn("SYNC_MODE=shared-db ignores SYNC_REMOTE_BASE_URL")
+        if resolved == "off" and (self.sync_enabled or self.sync_remote_base_url):
+            self._warn("SYNC_MODE=off ignores SYNC_ENABLED/SYNC_REMOTE_BASE_URL")
+        return resolved
 
     def _parse_cors_origins(self) -> list[str]:
         defaults = [
@@ -162,6 +240,31 @@ class Settings:
         if normalized.endswith("]"):
             normalized = normalized[:-1].strip()
         return normalized
+
+    def _parse_csv_env(self, env_name: str) -> list[str]:
+        raw = os.getenv(env_name, "").strip()
+        if not raw:
+            return []
+        return [
+            item.strip()
+            for item in raw.split(",")
+            if item.strip()
+        ]
+
+    def runtime_summary(self) -> dict[str, object]:
+        return {
+            "appEnv": self.app_env,
+            "desktopMode": self.desktop_mode,
+            "authMode": self.auth_mode,
+            "allowDesktopDevFallback": self.allow_desktop_dev_fallback,
+            "syncMode": self.sync_mode,
+            "syncEnabledFlag": self.sync_enabled,
+            "syncWorkerEnabled": self.sync_worker_enabled,
+            "syncRemoteConfigured": self.sync_remote_configured,
+            "syncPullEnabled": self.sync_pull_enabled,
+            "runtimeStatusEnabled": self.runtime_status_enabled,
+            "startupWarnings": list(self.startup_warnings),
+        }
 
 
 settings = Settings()

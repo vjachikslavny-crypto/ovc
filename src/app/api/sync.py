@@ -12,11 +12,15 @@ router = APIRouter(tags=["sync"])
 
 @router.get("/sync/status")
 def sync_status(current_user: User = Depends(get_current_user)):
-    return get_sync_status(user_id=current_user.id)
+    status = get_sync_status(user_id=current_user.id)
+    status["requestedByUserId"] = current_user.id
+    return status
 
 
 @router.post("/sync/trigger")
 def sync_trigger(request: Request, current_user: User = Depends(get_current_user)):
+    if settings.sync_mode in {"off", "shared-db"}:
+        return {"ok": False, "reason": f"sync_mode_{settings.sync_mode}"}
     if not settings.sync_remote_base_url:
         return {"ok": False, "reason": "remote_base_url_empty"}
     bearer = get_bearer_token(request)

@@ -65,6 +65,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderList() {
     listEl.innerHTML = '';
+    const onNoteDeleted = (noteId) => {
+      notesCache = notesCache.filter((note) => note.id !== noteId);
+      if (deepSearchResults) {
+        deepSearchResults.items = deepSearchResults.items.filter((note) => note.id !== noteId);
+      }
+      renderList();
+    };
 
     if (deepSearchResults) {
       const info = document.createElement('div');
@@ -81,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       deepSearchResults.items.forEach((note) => {
-        listEl.appendChild(renderNoteCard(note));
+        listEl.appendChild(renderNoteCard(note, { onDeleted: onNoteDeleted }));
       });
       return;
     }
@@ -103,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     filtered.forEach((note) => {
-      listEl.appendChild(renderNoteCard(note));
+      listEl.appendChild(renderNoteCard(note, { onDeleted: onNoteDeleted }));
     });
   }
 

@@ -569,6 +569,46 @@ select.pill-button--compact:focus {
   display: none !important;
 }
 
+.audio-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(92vw, 460px);
+  pointer-events: none;
+}
+
+.audio-toast {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  border-radius: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-2);
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--elev-2);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.audio-toast--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.audio-toast--error {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border-2));
+}
+
+.audio-toast--warning {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-2));
+}
+
 .upload-progress {
   margin-top: 18px;
   display: flex;
@@ -3331,6 +3371,105 @@ body[data-desktop-mode="true"] #nav-refresh {
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid var(--border);
+}
+
+.note-card__delete {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.45rem;
+  font-weight: 300;
+  line-height: 0.9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: border-color 0.22s ease, color 0.22s ease, background-color 0.22s ease, opacity 0.22s ease;
+}
+
+.note-card__delete:hover {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ef8b8b;
+  background: rgba(239, 68, 68, 0.08);
+  opacity: 1;
+}
+
+.note-card__delete:active {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.note-card__delete:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 9, 16, 0.56);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.confirm-overlay.is-visible {
+  opacity: 1;
+}
+
+.confirm-dialog {
+  width: min(430px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.confirm-dialog__text {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-dialog__btn {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 14px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+
+.confirm-dialog__btn:hover {
+  transform: translateY(-1px);
+}
+
+.confirm-dialog__btn--danger {
+  border-color: #ef4444;
+  color: #ef4444;
 }
 
 .note-card .pill-button {

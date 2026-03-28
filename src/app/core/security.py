@@ -122,28 +122,24 @@ def get_current_user(request: Request) -> User:
     """
     from app.core.config import settings
     
-    # In desktop mode we also use the provider layer to allow local offline user fallback.
+    # In desktop mode we also use the provider layer to allow explicit local offline fallback.
     if settings.desktop_mode or settings.auth_mode in ("supabase", "both", "none"):
         from app.core.auth_provider import get_current_user_from_provider
         return get_current_user_from_provider(request)
     
     # Default: local-only mode (original behavior)
     token = get_bearer_token(request)
-    logger.info(f"[AUTH-DEBUG] get_current_user - token present: {token is not None}")
     if not token:
-        logger.warning("[AUTH-DEBUG] No bearer token in request")
         raise HTTPException(status_code=401, detail="Missing access token")
-    logger.info(f"[AUTH-DEBUG] Bearer token (first 20 chars): {token[:20]}...")
     payload = decode_access_token(token)
     user_id = payload.get("sub")
-    logger.info(f"[AUTH-DEBUG] User ID from token: {user_id}")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid access token")
     with get_session() as session:
         user = session.get(User, user_id)
-        logger.info(f"[AUTH-DEBUG] User found: {user is not None}, active: {user.is_active if user else 'N/A'}")
         if not user or not user.is_active:
             raise HTTPException(status_code=403, detail="User inactive")
+        request.state.auth_context = "local-user"
         return user
 
 
