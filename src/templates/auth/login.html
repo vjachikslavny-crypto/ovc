@@ -9,6 +9,14 @@
     {% if request.query_params.get('registered') %}
     <p class="muted" style="color: var(--accent)">✓ Регистрация завершена! Войдите.</p>
     {% endif %}
+    {% if request.query_params.get('verified') %}
+    <p class="muted" style="color: var(--accent)">✓ Email подтверждён. Теперь можно войти.</p>
+    {% endif %}
+    {% if request.query_params.get('verify') == 'expired' %}
+    <p class="muted" style="color: var(--danger, #ff6b6b)">Ссылка подтверждения истекла. Запросите письмо повторно.</p>
+    {% elif request.query_params.get('verify') == 'invalid' %}
+    <p class="muted" style="color: var(--danger, #ff6b6b)">Ссылка подтверждения недействительна.</p>
+    {% endif %}
 
     <p class="muted">Введите логин или email и пароль.</p>
     <form id="login-form" class="auth-form">
@@ -19,13 +27,22 @@
         required
         autocomplete="username"
       />
-      <input
-        type="password"
-        name="password"
-        placeholder="Пароль"
-        required
-        autocomplete="current-password"
-      />
+      <div class="password-field">
+        <input
+          type="password"
+          name="password"
+          placeholder="Пароль"
+          required
+          autocomplete="current-password"
+        />
+        <button
+          type="button"
+          class="password-toggle"
+          data-password-toggle
+          aria-label="Показать пароль"
+          title="Показать пароль"
+        >👁</button>
+      </div>
       <button type="submit" class="pill-button pill-button--primary">Войти</button>
       <span id="login-error" class="muted"></span>
     </form>
@@ -36,5 +53,6 @@
   </div>
 </section>
 
+<script src="/static/js/password_toggle.js" defer></script>
 <script src="/static/js/auth_login_page.js" defer></script>
 {% endblock %}

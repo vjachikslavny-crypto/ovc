@@ -1,3 +1,54 @@
+let audioToastHost = null;
+let audioToastTimer = null;
+let lastAudioToastMessage = '';
+let lastAudioToastAt = 0;
+
+function showAudioToast(message, type = 'error') {
+  if (!message) return;
+  const now = Date.now();
+  if (message === lastAudioToastMessage && now - lastAudioToastAt < 1800) {
+    return;
+  }
+  lastAudioToastMessage = message;
+  lastAudioToastAt = now;
+
+  if (!audioToastHost) {
+    audioToastHost = document.createElement('div');
+    audioToastHost.setAttribute('role', 'status');
+    audioToastHost.setAttribute('aria-live', 'polite');
+    audioToastHost.className = 'audio-toast-host';
+    document.body.appendChild(audioToastHost);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `audio-toast audio-toast--${type}`;
+  toast.textContent = message;
+  audioToastHost.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('audio-toast--visible');
+  });
+
+  if (audioToastTimer) {
+    window.clearTimeout(audioToastTimer);
+  }
+  audioToastTimer = window.setTimeout(() => {
+    toast.classList.remove('audio-toast--visible');
+    window.setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+      if (audioToastHost && !audioToastHost.hasChildNodes()) {
+        audioToastHost.remove();
+        audioToastHost = null;
+      }
+    }, 180);
+  }, 3200);
+}
+
+function setAudioError(button, message) {
+  button.title = message;
+  showAudioToast(message, 'error');
+}
+
 export function initAudioRecorder({ button, uploader, onReady }) {
   if (!button || !uploader) {
     return null;
@@ -9,7 +60,7 @@ export function initAudioRecorder({ button, uploader, onReady }) {
   if (!hasGetUserMedia || (!hasMediaRecorder && !hasAudioContext)) {
     button.dataset.voiceStatus = 'error';
     button.classList.add('fab--error');
-    button.title = 'Запись недоступна в текущем окружении';
+    setAudioError(button, 'Запись недоступна в текущем окружении');
     return null;
   }
 
@@ -60,7 +111,7 @@ export function initAudioRecorder({ button, uploader, onReady }) {
       activeStream.getAudioTracks().forEach((track) => {
         track.addEventListener('ended', () => {
           if (state === 'recording' && !stopRequested) {
-            button.title = 'Запись прервалась. Проверь доступ к микрофону.';
+            setAudioError(button, 'Запись прервалась. Проверь доступ к микрофону.');
             failAndReset();
           }
         });
@@ -92,7 +143,7 @@ export function initAudioRecorder({ button, uploader, onReady }) {
 
       mediaRecorder.onerror = (event) => {
         console.error('MediaRecorder error', event);
-        button.title = 'Ошибка записи аудио.';
+        setAudioError(button, 'Ошибка записи аудио.');
         failAndReset();
       };
 
@@ -107,11 +158,11 @@ export function initAudioRecorder({ button, uploader, onReady }) {
     } catch (error) {
       const errName = error?.name || 'Error';
       if (errName === 'NotAllowedError') {
-        button.title = 'Нет доступа к микрофону. Разреши доступ в настройках macOS.';
+        setAudioError(button, 'Нет доступа к микрофону. Разреши доступ в настройках macOS.');
       } else if (errName === 'NotFoundError') {
-        button.title = 'Микрофон не найден.';
+        setAudioError(button, 'Микрофон не найден.');
       } else {
-        button.title = 'Ошибка доступа к микрофону.';
+        setAudioError(button, 'Ошибка доступа к микрофону.');
       }
       console.error('Microphone access denied', error);
       failAndReset();
@@ -133,6 +184,7 @@ export function initAudioRecorder({ button, uploader, onReady }) {
     }
 
     if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+      setAudioError(button, 'Не удалось остановить запись. Попробуй снова.');
       failAndReset();
       return;
     }
@@ -147,13 +199,13 @@ export function initAudioRecorder({ button, uploader, onReady }) {
 
   async function handleMediaStop(userInitiated) {
     if (!userInitiated) {
-      button.title = 'Запись прервалась. Попробуй снова.';
+      setAudioError(button, 'Запись прервалась. Попробуй снова.');
       failAndReset();
       return;
     }
 
     if (!mediaChunks.length) {
-      button.title = 'Аудио не записалось. Попробуй ещё раз.';
+      setAudioError(button, 'Аудио не записалось. Попробуй ещё раз.');
       failAndReset();
       return;
     }
@@ -166,7 +218,7 @@ export function initAudioRecorder({ button, uploader, onReady }) {
   async function finalizeRecording(blob, mimeType) {
     try {
       if (!blob || !blob.size || blob.size < MIN_BLOB_BYTES) {
-        button.title = 'Слишком короткая запись.';
+        setAudioError(button, 'Слишком короткая запись.');
         failAndReset();
         return;
       }
@@ -183,12 +235,14 @@ export function initAudioRecorder({ button, uploader, onReady }) {
       } catch (transcribeError) {
         // Transcription is optional; do not fail saved audio.
         console.warn('Voice transcription failed, continuing without transcript', transcribeError);
+        showAudioToast('Аудио сохранено, но распознавание сейчас недоступно.', 'warning');
       }
 
       if (typeof onReady === 'function') onReady();
       resetState();
     } catch (error) {
       console.error('Failed to upload recording', error);
+      setAudioError(button, 'Ошибка загрузки аудио. Проверь сеть и попробуй снова.');
       failAndReset();
     }
   }
@@ -276,7 +330,8 @@ export function initAudioRecorder({ button, uploader, onReady }) {
       body: form,
     });
     if (!response.ok) {
-      throw new Error(await response.text());
+      const text = await response.text();
+      throw new Error(text || 'Транскрибация недоступна');
     }
     return response.text();
   }
@@ -446,6 +501,14 @@ function initBrowserRecorder({ button, uploader, onReady }) {
       button.textContent = '●';
     } catch (error) {
       console.error('Microphone access denied', error);
+      const errName = error?.name || 'Error';
+      if (errName === 'NotAllowedError') {
+        setAudioError(button, 'Нет доступа к микрофону. Разрешите доступ в браузере.');
+      } else if (errName === 'NotFoundError') {
+        setAudioError(button, 'Микрофон не найден.');
+      } else {
+        setAudioError(button, 'Не удалось начать запись.');
+      }
       resetState();
     }
   }
@@ -462,6 +525,7 @@ function initBrowserRecorder({ button, uploader, onReady }) {
   async function handleStop() {
     try {
       if (!chunks.length) {
+        setAudioError(button, 'Аудио не записалось. Попробуйте ещё раз.');
         resetState();
         return;
       }
@@ -472,6 +536,7 @@ function initBrowserRecorder({ button, uploader, onReady }) {
       if (typeof onReady === 'function') onReady();
     } catch (error) {
       console.error('Failed to upload recording', error);
+      setAudioError(button, 'Ошибка загрузки аудио. Проверьте сеть и попробуйте снова.');
     } finally {
       resetState();
     }

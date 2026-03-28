@@ -1,0 +1,7 @@
+tunnel: <TUNNEL_ID>
+credentials-file: /absolute/path/to/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: <YOUR_HOSTNAME>
+    service: http://127.0.0.1:8000
+  - service: http_status:404

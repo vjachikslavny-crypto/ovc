@@ -31,7 +31,7 @@ class AuthUser:
     """Unified user object returned by auth providers."""
     id: str
     email: Optional[str] = None
-    provider: str = "local"  # "local" or "supabase"
+    provider: str = "local"  # "local" | "supabase" | "none" | "dev-fallback"
     raw_claims: Optional[Dict[str, Any]] = None
 
 
@@ -192,6 +192,23 @@ def get_bearer_token(request: Request) -> Optional[str]:
     return None
 
 
+def _set_auth_context(request: Request, value: str) -> None:
+    request.state.auth_context = value
+
+
+def _can_use_dev_fallback(request: Request, *, has_access_token: bool) -> bool:
+    if not settings.desktop_mode:
+        return False
+    if has_access_token:
+        return False
+    if not settings.allow_desktop_dev_fallback:
+        return False
+    # In supabase-only mode fallback would mask real auth failures.
+    if settings.auth_mode == "supabase":
+        return False
+    return True
+
+
 def local_auth_get_user(request: Request) -> Optional[AuthUser]:
     """
     Authenticate using local JWT tokens.
@@ -202,6 +219,20 @@ def local_auth_get_user(request: Request) -> Optional[AuthUser]:
     token = get_bearer_token(request)
     if not token:
         return None
+
+    # Skip obvious Supabase tokens in mixed mode to avoid noisy decode failures.
+    try:
+        headers = jwt.get_unverified_header(token)
+        alg = str(headers.get("alg") or "").upper()
+        if alg in {"ES256", "RS256"}:
+            return None
+        claims = jwt.get_unverified_claims(token)
+        issuer = str(claims.get("iss") or "")
+        if _is_supabase_issuer(issuer):
+            return None
+    except Exception:
+        # Let regular local decode produce the proper auth error when needed.
+        pass
     
     try:
         payload = decode_access_token(token)
@@ -314,6 +345,8 @@ def get_auth_user(request: Request) -> AuthUser:
     has_access_token = bool(get_bearer_token(request))
     # Mode: none - anonymous/dev access
     if mode == "none":
+        logger.warning("AUTH_MODE=none is active: requests are mapped to explicit dev user")
+        _set_auth_context(request, "none-mode-dev-user")
         return AuthUser(id="dev-user", email=None, provider="none")
     
     # Mode: local only
@@ -322,13 +355,22 @@ def get_auth_user(request: Request) -> AuthUser:
             user = local_auth_get_user(request)
         except HTTPException:
             # Desktop offline fallback is allowed only when no access token was provided.
-            if settings.desktop_mode and not has_access_token:
-                return AuthUser(id="dev-user", email=None, provider="none")
+            if _can_use_dev_fallback(request, has_access_token=has_access_token):
+                logger.warning(
+                    "AUTH fallback: local mode desktop request without token -> dev-fallback user"
+                )
+                _set_auth_context(request, "desktop-dev-fallback")
+                return AuthUser(id="dev-user", email=None, provider="dev-fallback")
             raise
         if user:
+            _set_auth_context(request, "local-user")
             return user
-        if settings.desktop_mode and not has_access_token:
-            return AuthUser(id="dev-user", email=None, provider="none")
+        if _can_use_dev_fallback(request, has_access_token=has_access_token):
+            logger.warning(
+                "AUTH fallback: local mode desktop request without token -> dev-fallback user"
+            )
+            _set_auth_context(request, "desktop-dev-fallback")
+            return AuthUser(id="dev-user", email=None, provider="dev-fallback")
         raise HTTPException(status_code=401, detail="Missing access token")
     
     # Mode: supabase only
@@ -336,6 +378,7 @@ def get_auth_user(request: Request) -> AuthUser:
         user = supabase_auth_get_user(request)
         if not user:
             raise HTTPException(status_code=401, detail="Missing Supabase access token")
+        _set_auth_context(request, "supabase-user")
         return user
     
     # Mode: both - try local first, then supabase
@@ -347,6 +390,7 @@ def get_auth_user(request: Request) -> AuthUser:
         try:
             user = local_auth_get_user(request)
             if user:
+                _set_auth_context(request, "local-user")
                 return user
         except HTTPException as exc:
             local_error = exc  # Local token invalid, try Supabase
@@ -355,6 +399,7 @@ def get_auth_user(request: Request) -> AuthUser:
         try:
             user = supabase_auth_get_user(request)
             if user:
+                _set_auth_context(request, "supabase-user")
                 return user
         except HTTPException as exc:
             supabase_error = exc  # Supabase token invalid too
@@ -366,8 +411,12 @@ def get_auth_user(request: Request) -> AuthUser:
         
         # No valid authentication found.
         # Desktop fallback is only for explicit offline/no-token usage.
-        if settings.desktop_mode and not has_access_token:
-            return AuthUser(id="dev-user", email=None, provider="none")
+        if _can_use_dev_fallback(request, has_access_token=has_access_token):
+            logger.warning(
+                "AUTH fallback: both mode desktop request without token -> dev-fallback user"
+            )
+            _set_auth_context(request, "desktop-dev-fallback")
+            return AuthUser(id="dev-user", email=None, provider="dev-fallback")
         raise HTTPException(status_code=401, detail="Missing or invalid access token")
     
     # Fallback - should not reach here
@@ -382,21 +431,22 @@ def get_current_user_from_provider(request: Request) -> User:
     """
     auth_user = get_auth_user(request)
     
-    # Dev mode - return a mock user or first user
-    if auth_user.provider == "none":
+    # Explicit dev mode / desktop fallback user.
+    if auth_user.provider in {"none", "dev-fallback"}:
         with get_session() as session:
-            user = session.query(User).first()
-            if user:
-                return user
-            # Create dev user if no users exist
-            user = User(
-                username="dev-user",
-                email="dev@localhost",
-                password_hash="",
-                is_active=True
+            user = session.query(User).filter(User.username == "dev-user").first()
+            if user is None:
+                user = User(
+                    username="dev-user",
+                    email=None,
+                    password_hash="dev-fallback",
+                    is_active=True,
+                )
+                session.add(user)
+                session.flush()
+            request.state.auth_context = (
+                "none-mode-dev-user" if auth_user.provider == "none" else "desktop-dev-fallback"
             )
-            session.add(user)
-            session.flush()
             return user
     
     # Local auth - user ID is the actual DB user ID

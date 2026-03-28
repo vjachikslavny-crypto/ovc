@@ -1,4 +1,5 @@
-export function renderNoteCard(note) {
+export function renderNoteCard(note, options = {}) {
+  const { onDeleted } = options;
   const article = document.createElement('article');
   article.className = 'note-card';
   article.dataset.noteId = note.id;
@@ -117,10 +118,112 @@ export function renderNoteCard(note) {
   const updated = new Date(note.updatedAt || note.updated_at || Date.now());
   meta.textContent = formatDate(updated);
 
-  footer.append(meta);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'note-card__delete';
+  deleteBtn.setAttribute('aria-label', 'Удалить заметку');
+  deleteBtn.title = 'Удалить заметку';
+  deleteBtn.textContent = '×';
+
+  deleteBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const confirmed = await confirmDeleteNote(note.title || 'Без названия');
+    if (!confirmed) return;
+
+    deleteBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/notes/${note.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      if (typeof onDeleted === 'function') {
+        onDeleted(note.id);
+      } else {
+        article.remove();
+      }
+    } catch (error) {
+      console.error('Failed to delete note', error);
+      window.alert('Не удалось удалить заметку. Попробуйте ещё раз.');
+    } finally {
+      deleteBtn.disabled = false;
+    }
+  });
+
+  footer.append(meta, deleteBtn);
 
   article.append(title, preview, footer);
   return article;
+}
+
+function confirmDeleteNote(title) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'confirm-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', 'Подтверждение удаления');
+
+    const heading = document.createElement('h3');
+    heading.className = 'confirm-dialog__title';
+    heading.textContent = 'Удалить заметку?';
+
+    const message = document.createElement('p');
+    message.className = 'confirm-dialog__text';
+    message.textContent = `Заметка «${title}» будет удалена безвозвратно.`;
+
+    const actions = document.createElement('div');
+    actions.className = 'confirm-dialog__actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'confirm-dialog__btn confirm-dialog__btn--ghost';
+    cancelBtn.textContent = 'Отменить';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'confirm-dialog__btn confirm-dialog__btn--danger';
+    confirmBtn.textContent = 'Удалить';
+
+    let closed = false;
+    const cleanup = (result) => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKeydown);
+      overlay.remove();
+      resolve(result);
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        cleanup(false);
+      }
+    };
+
+    cancelBtn.addEventListener('click', () => cleanup(false));
+    confirmBtn.addEventListener('click', () => cleanup(true));
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        cleanup(false);
+      }
+    });
+
+    actions.append(cancelBtn, confirmBtn);
+    dialog.append(heading, message, actions);
+    overlay.append(dialog);
+    document.body.append(overlay);
+    document.addEventListener('keydown', onKeydown);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('is-visible');
+      cancelBtn.focus();
+    });
+  });
 }
 
 function formatDate(date) {

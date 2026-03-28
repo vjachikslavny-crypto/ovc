@@ -57,6 +57,56 @@ cd ~/OVC
 
 Открыть: `http://127.0.0.1:8000`
 
+## Public hosting from laptop (Cloudflare Tunnel)
+
+Этот режим открывает сайт в интернет по HTTPS, при этом backend продолжает работать на ноутбуке.
+
+Подготовка:
+
+```bash
+brew install cloudflared
+cloudflared tunnel login
+cloudflared tunnel create ovc-laptop
+cloudflared tunnel route dns ovc-laptop <YOUR_HOSTNAME>
+```
+
+Далее:
+1. Скопируйте `deploy/cloudflare_tunnel/config.yml.template` в локальный `config.yml`.
+2. Заполните `tunnel`, `credentials-file`, `hostname`.
+3. В `.env` задайте:
+
+```env
+PUBLIC_BASE_URL=https://<YOUR_HOSTNAME>
+CORS_ORIGINS=["https://<YOUR_HOSTNAME>","http://127.0.0.1:8000"]
+COOKIE_DOMAIN=<YOUR_HOSTNAME>
+COOKIE_SECURE=true
+CLOUDFLARED_CONFIG_PATH=/absolute/path/to/config.yml
+```
+
+Запуск:
+
+```bash
+./deploy/cloudflare_tunnel/start_public_server.sh
+./deploy/cloudflare_tunnel/start_tunnel.sh
+```
+
+Проверка:
+
+```bash
+./deploy/cloudflare_tunnel/verify_public.sh
+```
+
+Дополнительная инструкция: `deploy/cloudflare_tunnel/README_TUNNEL.md`.
+
+Быстрый временный вариант без домена:
+
+```bash
+./deploy/cloudflare_tunnel/start_public_server.sh
+QUICK_TUNNEL=true ./deploy/cloudflare_tunnel/start_tunnel.sh
+```
+
+Cloudflared выдаст URL вида `https://<random>.trycloudflare.com` (меняется при каждом запуске).
+
 ## Запуск desktop (macOS)
 
 Требования:
@@ -103,6 +153,14 @@ OVC_DESKTOP_DATABASE_URL=sqlite:////absolute/path/to/db.sqlite npm run desktop:d
 - `both` — принимаются оба варианта
 - `none` — dev-режим без обязательного логина (использовать только для отладки)
 
+Для desktop fallback без токена контролируется явно:
+
+```env
+ALLOW_DESKTOP_DEV_FALLBACK=true|false
+```
+
+Если fallback включён, backend помечает запросы контекстом `desktop-dev-fallback`.
+
 Рекомендуемо для обычной работы:
 
 ```env
@@ -119,6 +177,7 @@ Desktop sync использует outbox-модель:
 Основные переменные:
 
 ```env
+SYNC_MODE=auto
 SYNC_ENABLED=false
 SYNC_REMOTE_BASE_URL=
 SYNC_BEARER_TOKEN=
@@ -127,6 +186,13 @@ SYNC_OUTBOX_MAX=10000
 SYNC_BATCH_SIZE=100
 SYNC_PULL_ENABLED=true
 ```
+
+`SYNC_MODE`:
+- `off` — удалённый sync выключен
+- `shared-db` — desktop/web работают с одной локальной БД, без remote sync
+- `remote-shell` — remote URL есть, sync запускается вручную через `/api/sync/trigger`
+- `remote-sync` — фоновый воркер (требует `SYNC_BEARER_TOKEN`)
+- `auto` — режим выводится из `DESKTOP_MODE`, `SYNC_ENABLED`, `SYNC_REMOTE_BASE_URL`
 
 Пример включения синка на удалённый backend:
 
@@ -144,6 +210,8 @@ SECRET_KEY=CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANGE_ME
 AUTH_MODE=both
 COOKIE_SECURE=false
 COOKIE_SAMESITE=strict
+PASSWORD_MIN_LENGTH=8
+PASSWORD_MIN_CHARACTER_CLASSES=3
 ```
 
 Полный список — в `.env.example` и `docs/env.example.md`.
@@ -164,10 +232,26 @@ API:
 ## Безопасность
 
 - Пароли: Argon2id
+- Политика паролей: минимум `PASSWORD_MIN_LENGTH` и минимум `PASSWORD_MIN_CHARACTER_CLASSES` классов символов
 - Refresh-token в HttpOnly cookie
 - Access token короткоживущий
 - CSRF для cookie-флоу
 - Ограничение попыток логина + lockout
+- CSP ограничен реальными origin (без широкого `https:` wildcard)
+
+## Диагностика runtime
+
+В dev/desktop доступен endpoint:
+
+```text
+GET /api/runtime/status
+```
+
+Показывает безопасный срез конфигурации:
+- `authMode`, `syncMode`, `desktopMode`
+- включён ли sync worker
+- активен ли dev fallback
+- request auth context
 
 ## Полезные документы
 

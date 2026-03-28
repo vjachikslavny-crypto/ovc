@@ -6,12 +6,12 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-# itsdangerous не используется в username-based auth
-# from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.core.config import settings
+from app.core.auth_provider import supabase_auth_get_user, get_current_user_from_provider
 from app.core.security import (
     ACCESS_COOKIE,
     CSRF_COOKIE,
@@ -34,15 +34,15 @@ from app.models.session import RefreshToken
 from app.models.user import User
 from app.schemas.auth import (
     AuthOkResponse,
+    ForgotRequest,
     LoginRequest,
     RefreshResponse,
     RegisterRequest,
     ChangePasswordRequest,
 )
 from app.services.audit import log_event
-# Email services не используются в username-based auth
-# from app.services.email import send_password_reset, send_verification_email
-from app.services.password_policy import validate_password
+from app.services.email import send_verification_email
+from app.services.password_policy import password_policy_hint, validate_password
 from app.services.rate_limit import LoginLockout, RateLimiter
 from sqlalchemy import text, func, or_
 from pathlib import Path
@@ -59,23 +59,61 @@ _login_lock = LoginLockout()
 _USERNAME_SANITIZE_RE = re.compile(r"[^a-z0-9._-]+")
 
 
-# Serializer и link builders не используются в username-based auth
-# def _serializer() -> URLSafeTimedSerializer:
-#     return URLSafeTimedSerializer(settings.secret_key)
-# 
-# def _build_verify_link(request: Request, token: str) -> str:
-#     return str(request.url_for("auth_verify").include_query_params(token=token))
-# 
-# def _build_reset_link(request: Request, token: str) -> str:
-#     return str(request.url_for("auth_reset_view").include_query_params(token=token))
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(settings.secret_key)
 
 
-def _set_refresh_cookie(response: Response, raw_token: str) -> None:
+def _build_verify_link(request: Request, token: str) -> str:
+    if settings.public_base_url:
+        base = settings.public_base_url.rstrip("/")
+        return f"{base}/auth/verify?token={token}"
+    return str(request.url_for("auth_verify").include_query_params(token=token))
+
+
+def _ensure_email_verified_column(session) -> None:
+    try:
+        dialect = session.bind.dialect.name
+        if dialect == "sqlite":
+            rows = session.execute(text("PRAGMA table_info(users)")).fetchall()
+            columns = {row[1] for row in rows}
+            if "email_verified_at" not in columns:
+                session.execute(text("ALTER TABLE users ADD COLUMN email_verified_at DATETIME"))
+        else:
+            session.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP")
+            )
+    except Exception:
+        # Keep auth flow operational even if migration isn't applied yet.
+        pass
+
+
+def _cookie_secure_for_request(request: Request) -> bool:
+    """
+    Keep secure cookies for public HTTPS, but allow localhost HTTP dev login.
+    """
+    if not settings.cookie_secure:
+        return False
+
+    host = (request.headers.get("host") or "").split(":", 1)[0].lower()
+    if host in {"127.0.0.1", "localhost"}:
+        return False
+
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto == "https"
+
+    if request.url.scheme:
+        return request.url.scheme.lower() == "https"
+
+    return True
+
+
+def _set_refresh_cookie_for_request(request: Request, response: Response, raw_token: str) -> None:
     response.set_cookie(
         REFRESH_COOKIE,
         raw_token,
         httponly=True,
-        secure=settings.cookie_secure,
+        secure=_cookie_secure_for_request(request),
         samesite=settings.cookie_samesite,
         domain=settings.cookie_domain,
         max_age=settings.refresh_token_expires_days * 86400,
@@ -83,12 +121,12 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     )
 
 
-def _set_csrf_cookie(response: Response, token: str) -> None:
+def _set_csrf_cookie_for_request(request: Request, response: Response, token: str) -> None:
     response.set_cookie(
         CSRF_COOKIE,
         token,
         httponly=False,
-        secure=settings.cookie_secure,
+        secure=_cookie_secure_for_request(request),
         samesite=settings.cookie_samesite,
         domain=settings.cookie_domain,
         max_age=settings.refresh_token_expires_days * 86400,
@@ -117,6 +155,8 @@ def _auth_template_context(request: Request) -> dict:
         "auth_mode": settings.auth_mode,
         "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
         "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
+        "password_min_length": settings.password_min_length,
+        "password_policy_hint": password_policy_hint(),
     }
 
 
@@ -126,6 +166,13 @@ def _normalize_username_candidate(raw: str) -> str:
     if len(value) < 3:
         value = "user"
     return value[:24]
+
+
+def _client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    forwarded_for = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return forwarded_for or "unknown"
 
 
 def _username_exists(session, username: str) -> bool:
@@ -161,11 +208,46 @@ def register_view(request: Request):
     return templates.TemplateResponse("auth/register.html", _auth_template_context(request))
 
 
+@router.get("/auth/verify", name="auth_verify")
+def auth_verify(token: str, request: Request):
+    try:
+        data = _serializer().loads(token, salt="email-verify", max_age=60 * 60 * 24)
+    except SignatureExpired:
+        return RedirectResponse(url="/login?verify=expired", status_code=302)
+    except BadSignature:
+        return RedirectResponse(url="/login?verify=invalid", status_code=302)
+
+    user_id = str(data.get("sub") or "").strip()
+    email = str(data.get("email") or "").strip().lower()
+    if not user_id:
+        return RedirectResponse(url="/login?verify=invalid", status_code=302)
+
+    with get_session() as session:
+        _ensure_email_verified_column(session)
+        user = session.get(User, user_id)
+        if not user:
+            return RedirectResponse(url="/login?verify=invalid", status_code=302)
+        if email and (user.email or "").lower() != email:
+            return RedirectResponse(url="/login?verify=invalid", status_code=302)
+
+        session.execute(
+            text("UPDATE users SET email_verified_at = :ts WHERE id = :uid"),
+            {"ts": dt.datetime.now(dt.timezone.utc), "uid": user.id},
+        )
+        log_event(session, "EMAIL_VERIFIED", user_id=user.id, request=request)
+
+    return RedirectResponse(url="/login?verified=1", status_code=302)
+
+
 
 
 @router.post("/auth/register", response_model=AuthOkResponse, status_code=201)
 def register(payload: RegisterRequest, request: Request):
-    if not _rate_limiter.allow(f"register:{request.client.host}", 10, 60):
+    if not _rate_limiter.allow(
+        f"register:{_client_ip(request)}",
+        settings.rate_limit_register_per_min,
+        60,
+    ):
         raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
 
     email_lower = payload.email.lower().strip()
@@ -178,6 +260,7 @@ def register(payload: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail=" ".join(errors))
 
     with get_session() as session:
+        _ensure_email_verified_column(session)
         email_exists = session.query(User).filter(
             func.lower(User.email) == email_lower
         ).first()
@@ -209,12 +292,50 @@ def register(payload: RegisterRequest, request: Request):
                 pass  # Таблица может не существовать или не иметь user_id
             log_event(session, "LEGACY_DATA_MIGRATED", user_id=user.id, request=request)
 
+        verify_token = _serializer().dumps(
+            {"sub": str(user.id), "email": email_lower},
+            salt="email-verify",
+        )
+        verify_link = _build_verify_link(request, verify_token)
+        send_verification_email(user, verify_link)
+        log_event(session, "EMAIL_VERIFY_SENT", user_id=user.id, request=request)
+
     return AuthOkResponse(ok=True)
+
+
+@router.post("/auth/resend-verification", response_model=AuthOkResponse)
+def resend_verification(payload: ForgotRequest, request: Request):
+    email_lower = payload.email.lower().strip()
+    if not email_lower:
+        return AuthOkResponse(ok=True, detail="Если email существует, письмо отправлено.")
+
+    limiter_key = f"resend-verify:{_client_ip(request)}:{email_lower}"
+    if not _rate_limiter.allow(limiter_key, 1, 60):
+        raise HTTPException(status_code=429, detail="Подождите минуту перед повторной отправкой")
+
+    with get_session() as session:
+        _ensure_email_verified_column(session)
+        user = session.query(User).filter(func.lower(User.email) == email_lower).first()
+        if user:
+            verify_token = _serializer().dumps(
+                {"sub": str(user.id), "email": email_lower},
+                salt="email-verify",
+            )
+            verify_link = _build_verify_link(request, verify_token)
+            send_verification_email(user, verify_link)
+            log_event(session, "EMAIL_VERIFY_RESENT", user_id=user.id, request=request)
+
+    # Anti-enumeration response.
+    return AuthOkResponse(ok=True, detail="Если email существует, письмо отправлено.")
 
 
 @router.post("/auth/login", response_model=AuthOkResponse)
 def login(payload: LoginRequest, request: Request, response: Response):
-    if not _rate_limiter.allow(f"login:{request.client.host}", 10, 60):
+    if not _rate_limiter.allow(
+        f"login:{_client_ip(request)}",
+        settings.rate_limit_login_per_min,
+        60,
+    ):
         raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
 
     identifier = payload.identifier.strip().lower()
@@ -261,9 +382,54 @@ def login(payload: LoginRequest, request: Request, response: Response):
         session.add(refresh)
         log_event(session, "LOGIN_SUCCESS", user_id=user.id, request=request)
 
-    _set_refresh_cookie(response, raw_token)
+    _set_refresh_cookie_for_request(request, response, raw_token)
     csrf_token = issue_csrf_token()
-    _set_csrf_cookie(response, csrf_token)
+    _set_csrf_cookie_for_request(request, response, csrf_token)
+    return AuthOkResponse(ok=True)
+
+
+@router.post("/auth/supabase/session", response_model=AuthOkResponse)
+def supabase_session_bridge(request: Request, response: Response):
+    """
+    Create local refresh/csrf cookies from a valid Supabase access token.
+    Required for server-side endpoints consumed outside fetch wrapper
+    (e.g. media/file URLs in <img>/<audio>/<video>) and stable web sessions.
+    """
+    if settings.auth_mode not in ("supabase", "both"):
+        raise HTTPException(status_code=400, detail="Supabase auth mode is not enabled")
+
+    sb_user = supabase_auth_get_user(request)
+    if not sb_user:
+        raise HTTPException(status_code=401, detail="Missing Supabase access token")
+
+    # Resolves/creates local user link using existing provider logic.
+    user = get_current_user_from_provider(request)
+    now = dt.datetime.now(dt.timezone.utc)
+    raw_token = generate_refresh_token()
+    token_hash = hash_refresh_token(raw_token)
+    expires = now + dt.timedelta(days=settings.refresh_token_expires_days)
+
+    with get_session() as session:
+        refresh = RefreshToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires,
+            fingerprint_hash=_fingerprint_hash(request),
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        session.add(refresh)
+        log_event(
+            session,
+            "SUPABASE_SESSION_BRIDGE",
+            user_id=user.id,
+            request=request,
+            metadata={"supabase_user_id": sb_user.id},
+        )
+
+    _set_refresh_cookie_for_request(request, response, raw_token)
+    csrf_token = issue_csrf_token()
+    _set_csrf_cookie_for_request(request, response, csrf_token)
     return AuthOkResponse(ok=True)
 
 
@@ -314,10 +480,16 @@ def refresh(request: Request, response: Response):
         if not user or not user.is_active:
             raise HTTPException(status_code=403, detail="User inactive")
 
-    _set_refresh_cookie(response, raw_next)
+    _set_refresh_cookie_for_request(request, response, raw_next)
     csrf_token = issue_csrf_token()
-    _set_csrf_cookie(response, csrf_token)
-    access_token = create_access_token(str(user.id))
+    _set_csrf_cookie_for_request(request, response, csrf_token)
+    access_token = create_access_token(
+        str(user.id),
+        extra_claims={
+            "email": user.email,
+            "username": user.username,
+        },
+    )
     return RefreshResponse(accessToken=access_token)
 
 
