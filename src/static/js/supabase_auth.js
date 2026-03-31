@@ -71,20 +71,15 @@ function initSupabase() {
   }
   
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  console.log('[Supabase] Client initialized');
   
   // Listen for auth state changes
   supabaseClient.auth.onAuthStateChange((event, session) => {
-    console.log('[Supabase] Auth state changed:', event);
     if (session?.access_token) {
       supabaseAccessToken = session.access_token;
-      window.__supabaseAccessToken = supabaseAccessToken;
       persistAccessCookie(supabaseAccessToken);
-      console.log('[Supabase] Access token updated');
       bridgeBackendSession(supabaseAccessToken);
     } else {
       supabaseAccessToken = null;
-      window.__supabaseAccessToken = null;
       clearAccessCookie();
     }
     window.dispatchEvent(new CustomEvent('ovc:supabase-auth', {
@@ -96,9 +91,7 @@ function initSupabase() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session?.access_token) {
     supabaseAccessToken = session.access_token;
-    window.__supabaseAccessToken = supabaseAccessToken;
     persistAccessCookie(supabaseAccessToken);
-    console.log('[Supabase] Existing session found');
     await bridgeBackendSession(supabaseAccessToken);
   }
   
@@ -127,7 +120,6 @@ async function supabaseSignUp(email, password) {
     throw new Error(error.message);
   }
   
-  console.log('[Supabase] Sign up successful');
   return data;
 }
 
@@ -152,12 +144,9 @@ async function supabaseSignIn(email, password) {
   
   if (data.session?.access_token) {
     supabaseAccessToken = data.session.access_token;
-    window.__supabaseAccessToken = supabaseAccessToken;
     persistAccessCookie(supabaseAccessToken);
     await bridgeBackendSession(supabaseAccessToken);
   }
-  
-  console.log('[Supabase] Sign in successful');
   return data;
 }
 
@@ -176,9 +165,7 @@ async function supabaseSignOut() {
   }
   
   supabaseAccessToken = null;
-  window.__supabaseAccessToken = null;
   clearAccessCookie();
-  console.log('[Supabase] Signed out');
 }
 
 /**
@@ -205,7 +192,6 @@ async function refreshSupabaseSession() {
   
   if (data.session?.access_token) {
     supabaseAccessToken = data.session.access_token;
-    window.__supabaseAccessToken = supabaseAccessToken;
     persistAccessCookie(supabaseAccessToken);
     await bridgeBackendSession(supabaseAccessToken);
   }

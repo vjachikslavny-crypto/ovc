@@ -233,7 +233,7 @@ export function initUploader({
   async function sendFile(noteId, file, onProgress, uploadOpId) {
     const token = typeof window.ensureAccessToken === 'function'
       ? await window.ensureAccessToken()
-      : (window.__accessToken || localStorage.getItem('accessToken'));
+      : null;
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();

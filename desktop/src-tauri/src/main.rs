@@ -135,15 +135,17 @@ fn main() {
             let parsed = url::Url::parse(&target_url)
                 .with_context(|| format!("invalid target URL: {}", target_url))?;
 
-            if app.get_window("main").is_none() {
+            if let Some(window) = app.get_window("main") {
+                window.eval(&format!(
+                    "window.location.replace({})",
+                    serde_json::to_string(parsed.as_str()).unwrap_or_default()
+                ))?;
+            } else {
                 tauri::WindowBuilder::new(app, "main", WindowUrl::External(parsed))
                     .title("OVC")
                     .inner_size(1440.0, 920.0)
                     .min_inner_size(1100.0, 700.0)
                     .build()?;
-            } else if let Some(window) = app.get_window("main") {
-                let escaped = target_url.replace('\\', "\\\\").replace('\'', "\\'");
-                window.eval(&format!("window.location.replace('{}')", escaped))?;
             }
 
             Ok(())

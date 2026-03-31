@@ -22,6 +22,7 @@ from app.db.models import FileAsset, Note, NoteChunk, NoteLink, NoteSource, Note
 from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
@@ -38,6 +39,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["notes"])
 
 
+def _owner_filter(user: User):
+    """Return SQLAlchemy filter for notes owned by user.
+
+    In desktop/none mode also includes orphan notes (user_id IS NULL)
+    for backward compatibility.  In multi-user production only strict ownership.
+    """
+    if settings.desktop_mode or settings.auth_mode == "none":
+        return or_(Note.user_id == user.id, Note.user_id.is_(None))
+    return Note.user_id == user.id
+
+
 @router.get("/tags")
 async def list_all_tags(current_user: User = Depends(get_current_user)):
     """Возвращает список всех уникальных тегов в системе"""
@@ -46,7 +58,7 @@ async def list_all_tags(current_user: User = Depends(get_current_user)):
             session.execute(
                 select(NoteTag.tag)
                 .join(Note, Note.id == NoteTag.note_id)
-                .where(or_(Note.user_id == current_user.id, Note.user_id.is_(None)))
+                .where(_owner_filter(current_user))
                 .distinct()
                 .order_by(NoteTag.tag)
             )
@@ -65,16 +77,14 @@ async def list_notes(
     with get_session() as session:
         total = (
             session.execute(
-                select(func.count(Note.id)).where(
-                    or_(Note.user_id == current_user.id, Note.user_id.is_(None))
-                )
+                select(func.count(Note.id)).where(_owner_filter(current_user))
             )
             .scalar_one()
         )
         notes = (
             session.execute(
                 select(Note)
-                .where(or_(Note.user_id == current_user.id, Note.user_id.is_(None)))
+                .where(_owner_filter(current_user))
                 .order_by(Note.updated_at.desc())
                 .limit(limit)
                 .offset(offset)
@@ -83,10 +93,11 @@ async def list_notes(
             .all()
         )
 
-        for note in notes:
-            if note.user_id is None:
-                note.user_id = current_user.id
-                session.add(note)
+        if settings.desktop_mode or settings.auth_mode == "none":
+            for note in notes:
+                if note.user_id is None:
+                    note.user_id = current_user.id
+                    session.add(note)
 
         items = [_serialize_summary(note) for note in notes]
         return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
@@ -114,9 +125,7 @@ async def search_notes_full(
         user_note_ids = set(
             row[0]
             for row in session.execute(
-                select(Note.id).where(
-                    or_(Note.user_id == current_user.id, Note.user_id.is_(None))
-                )
+                select(Note.id).where(_owner_filter(current_user))
             ).all()
         )
 
@@ -124,7 +133,7 @@ async def search_notes_full(
         title_matches = (
             session.execute(
                 select(Note.id).where(
-                    or_(Note.user_id == current_user.id, Note.user_id.is_(None)),
+                    _owner_filter(current_user),
                     func.lower(Note.title).contains(query_lower),
                 )
             )
@@ -392,10 +401,12 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
 
 def _ensure_note_owner(note: Note, user: User, session) -> None:
     if note.user_id is None:
-        note.user_id = user.id
-        session.add(note)
-        session.flush()
-        return
+        if settings.desktop_mode or settings.auth_mode == "none":
+            note.user_id = user.id
+            session.add(note)
+            session.flush()
+            return
+        raise HTTPException(status_code=404, detail="Note not found")
     if note.user_id != user.id:
         raise HTTPException(status_code=404, detail="Note not found")
 

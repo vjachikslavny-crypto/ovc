@@ -71,11 +71,9 @@ def create_access_token(subject: str, *, extra_claims: Optional[dict[str, Any]] 
 def decode_access_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALG])
-        logger.info(f"[AUTH-DEBUG] Token decoded successfully. Payload: {payload}")
         return payload
-    except JWTError as exc:
-        logger.error(f"[AUTH-DEBUG] Failed to decode token: {exc}")
-        raise HTTPException(status_code=401, detail="Invalid access token") from exc
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid access token")
 
 
 def _pepper() -> bytes:
@@ -103,9 +101,6 @@ def get_bearer_token(request: Request) -> Optional[str]:
     cookie_token = request.cookies.get(ACCESS_COOKIE)
     if cookie_token:
         return cookie_token.strip()
-    query_token = request.query_params.get("access_token")
-    if query_token:
-        return query_token.strip()
     return None
 
 
