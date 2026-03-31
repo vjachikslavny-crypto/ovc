@@ -178,7 +178,7 @@ def _get_signing_key(token: str) -> Any:
 # ============================================================================
 
 def get_bearer_token(request: Request) -> Optional[str]:
-    """Extract access token from Authorization header, cookie, or query."""
+    """Extract access token from Authorization header or cookie."""
     auth = request.headers.get("Authorization") or ""
     parts = auth.split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
@@ -186,9 +186,6 @@ def get_bearer_token(request: Request) -> Optional[str]:
     cookie_token = request.cookies.get("ovc_access_token")
     if cookie_token:
         return cookie_token.strip()
-    query_token = request.query_params.get("access_token")
-    if query_token:
-        return query_token.strip()
     return None
 
 

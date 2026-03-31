@@ -130,6 +130,7 @@ const CODE_MAX_LINES = 10000;
 const CODE_PREVIEW_LINES = 25;
 const CODE_EXPANDED_LINES = 300;
 const SAFE_DOWNLOAD_PROTOCOLS = new Set(['http:', 'https:', 'blob:', 'data:']);
+const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
@@ -209,13 +210,22 @@ function renderParagraph(data) {
     if (a.strike) span.classList.add('rt-strike');
     if (a.code) span.classList.add('rt-code');
     if (a.href) {
-      const link = document.createElement('a');
-      link.href = a.href;
-      link.rel = 'noreferrer';
-      link.target = '_blank';
-      link.textContent = span.textContent;
-      if (span.className) link.className = span.className;
-      el.appendChild(link);
+      let hrefSafe = false;
+      try {
+        const parsed = new URL(a.href, window.location.origin);
+        hrefSafe = SAFE_LINK_PROTOCOLS.has(parsed.protocol);
+      } catch (_) { /* malformed URL — treat as unsafe */ }
+      if (hrefSafe) {
+        const link = document.createElement('a');
+        link.href = a.href;
+        link.rel = 'noreferrer';
+        link.target = '_blank';
+        link.textContent = span.textContent;
+        if (span.className) link.className = span.className;
+        el.appendChild(link);
+      } else {
+        el.appendChild(span);
+      }
     } else {
       el.appendChild(span);
     }

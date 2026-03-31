@@ -148,17 +148,19 @@ function renderMarkdownInto(container, rawText) {
     renderedHTML = escapeHtml(rawText || '');
   }
   const purifier = window.DOMPurify;
-  const safeHTML = purifier
-    ? purifier.sanitize(renderedHTML, {
-        ALLOWED_TAGS: [
-          'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li',
-          'a', 'em', 'strong', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-          'img', 'hr', 'sup', 'sub', 'input', 'span', 'div', 'section', 'figure', 'figcaption'
-        ],
-        ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'class', 'target', 'rel', 'checked', 'type'],
-        ADD_ATTR: ['loading'],
-      })
-    : renderedHTML;
+  if (!purifier) {
+    container.textContent = rawText || '';
+    return;
+  }
+  const safeHTML = purifier.sanitize(renderedHTML, {
+    ALLOWED_TAGS: [
+      'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li',
+      'a', 'em', 'strong', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'img', 'hr', 'sup', 'sub', 'input', 'span', 'div', 'section', 'figure', 'figcaption'
+    ],
+    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'class', 'target', 'rel', 'checked', 'type'],
+    ADD_ATTR: ['loading'],
+  });
   container.innerHTML = safeHTML;
   enhanceRendered(container);
 }

@@ -95,6 +95,8 @@
 12. [Полный список API-эндпоинтов](#12-полный-список-api-эндпоинтов)
 13. [Схема базы данных](#13-схема-базы-данных)
 14. [Потоки данных](#14-потоки-данных)
+15. [Security Hardening — Лог исправлений](#15-security-hardening--лог-исправлений-безопасности)
+16. [Оставшиеся задачи — MEDIUM и LOW](#16-оставшиеся-задачи--medium-и-low)
 
 ---
 
@@ -433,7 +435,7 @@ Origins по умолчанию:
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
-| `Permissions-Policy` | `camera=(), geolocation=(), payment=()` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
 | `Content-Security-Policy` | Динамический (см. ниже) |
 | `X-OVC-Auth-Context` | (опционально, если `runtime_status_enabled`) |
 
@@ -453,7 +455,7 @@ CSP директивы:
 
 #### Дополнительная логика middleware
 
-- `_proxy_remote_file_if_needed(request, response)` — для десктоп-режима: если ответ на `/files/*` — 404, проксирует запрос к `SYNC_REMOTE_BASE_URL`. Передаёт заголовки авторизации, Range, Cache-Control. Генерирует короткоживущий access token из refresh cookie.
+- `_proxy_remote_file_if_needed(request, response)` — для десктоп-режима: если ответ на `/files/*` — 404, проксирует запрос к `SYNC_REMOTE_BASE_URL`. Передаёт только Range/Accept/Cache заголовки (без cookies и Authorization пользователя). **Для авторизации на remote использует `SYNC_BEARER_TOKEN`** (если настроен), либо свежий access token из refresh cookie.
 
 #### Страничные маршруты
 
@@ -503,7 +505,7 @@ SyncMode = Literal["off", "shared-db", "remote-sync", "remote-shell"]
 | Настройка | Env-переменная | Значение по умолчанию | Описание |
 |-----------|----------------|----------------------|----------|
 | `database_url` | `DATABASE_URL` / `SIMPLE_DB_URL` | `sqlite:///.../src/ovc.db` | URL базы данных. Нормализует относительные sqlite пути |
-| `secret_key` | `SECRET_KEY` | `CHANGE_ME_...` | Ключ подписи JWT. Минимум 32 символа |
+| `secret_key` | `SECRET_KEY` | `CHANGE_ME_...` | Ключ подписи JWT. Минимум 32 символа. **При APP_ENV=production с дефолтным значением — отказ запуска (ValueError)**. В development — предупреждение в startup_warnings |
 | `access_token_expires_min` | `ACCESS_TOKEN_EXPIRES_MIN` | `15` | TTL access token в минутах |
 | `refresh_token_expires_days` | `REFRESH_TOKEN_EXPIRES_DAYS` | `30` | TTL refresh token в днях |
 | `cookie_domain` | `COOKIE_DOMAIN` | `None` | Домен для cookies |
@@ -525,7 +527,7 @@ SyncMode = Literal["off", "shared-db", "remote-sync", "remote-shell"]
 | `email_backend` | `EMAIL_BACKEND` | `mock` | Бэкенд email |
 | `app_env` | `APP_ENV` | `development` | Окружение |
 | `desktop_mode` | `DESKTOP_MODE` | `False` | Режим десктоп-приложения |
-| `allow_desktop_dev_fallback` | `ALLOW_DESKTOP_DEV_FALLBACK` | = desktop_mode | Разрешить dev-user без аутентификации |
+| `allow_desktop_dev_fallback` | `ALLOW_DESKTOP_DEV_FALLBACK` | `False` | Разрешить dev-user без аутентификации. **Требует явного opt-in** (`ALLOW_DESKTOP_DEV_FALLBACK=true`), даже при `DESKTOP_MODE=true` |
 | `sync_enabled` | `SYNC_ENABLED` | `False` | Включить синхронизацию |
 | `sync_remote_base_url` | `SYNC_REMOTE_BASE_URL` | `""` | URL удалённого сервера |
 | `sync_bearer_token` | `SYNC_BEARER_TOKEN` | `""` | Токен для sync |
@@ -601,7 +603,7 @@ SyncMode = Literal["off", "shared-db", "remote-sync", "remote-shell"]
 | `hash_refresh_token` | `(raw_token: str) -> str` | SHA256 + pepper (secret_key), base64 |
 | `generate_refresh_token` | `() -> str` | `secrets.token_urlsafe(48)` |
 | `issue_csrf_token` | `() -> str` | `secrets.token_urlsafe(32)` |
-| `get_bearer_token` | `(request) -> Optional[str]` | Из `Authorization` заголовка, `ovc_access_token` cookie, или `access_token` query param |
+| `get_bearer_token` | `(request) -> Optional[str]` | Из `Authorization` заголовка или `ovc_access_token` cookie. **Query-параметр `access_token` удалён из соображений безопасности** |
 | `require_csrf` | `(request) -> None` | Валидация `X-CSRF-Token` заголовка vs `csrf_token` cookie |
 | `get_current_user` | `(request) -> User` | Главная функция аутентификации. Делегирует в provider layer |
 | `get_user_from_refresh_cookie` | `(request) -> User` | Валидация refresh_token cookie (не отозван, не ротирован, не истёк) |
@@ -639,7 +641,7 @@ SyncMode = Literal["off", "shared-db", "remote-sync", "remote-shell"]
 | `_is_supabase_issuer(issuer)` | Проверка совпадения issuer с конфигурацией Supabase |
 | `_verify_supabase_token_via_userinfo(token)` | Валидация через Supabase `/auth/v1/user` API |
 | `_get_signing_key(token)` | Получение JWKS signing key по `kid` из кеша или запроса |
-| `get_bearer_token(request)` | Извлечение токена из header/cookie/query |
+| `get_bearer_token(request)` | Извлечение токена из Authorization header или ovc_access_token cookie |
 | `local_auth_get_user(request)` | Декодирование локального JWT, пропуск Supabase-подобных токенов (ES256/RS256) |
 | `supabase_auth_get_user(request)` | Верификация Supabase JWT (JWKS для ES256/RS256, userinfo для HS256 + fallback) |
 | `get_auth_user(request)` | Унифицированный диспатчер по `auth_mode` |
@@ -913,7 +915,8 @@ Relationships:
 |---------|----------|
 | `_serialize_summary(note)` | Преобразование Note → NoteSummary |
 | `_serialize_detail(note, session, user_id)` | Преобразование Note → NoteDetail (связи фильтруются по владельцу) |
-| `_ensure_note_owner(note, user, session)` | Проверка/назначение владельца. 404 если чужая заметка |
+| `_owner_filter(user)` | Возвращает SQLAlchemy фильтр для заметок пользователя. В desktop/none-режиме включает orphan-заметки (`user_id IS NULL`), в production multi-user — строго по owner |
+| `_ensure_note_owner(note, user, session)` | Проверка владельца. В desktop/none — авто-назначает owner для orphan. В multi-user — 404 для orphan и чужих |
 | `_reindex_note(session, note)` | Перечанкинг блоков, upsert в TF-IDF индекс |
 | `_blocks_to_text(blocks)` | Извлечение чистого текста из всех типов блоков |
 | `_load_blocks(raw_json)` | JSON парсинг + валидация схемы через `parse_blocks` |
@@ -1177,7 +1180,7 @@ PDF-рендеринг через PyMuPDF или pdf2image, кешировани
 
 **YouTube:** youtube.com, youtu.be, youtube-nocookie.com. Извлекает videoId (11 символов) + start time.
 
-**TikTok:** tiktok.com, vt.tiktok.com, vm.tiktok.com. Короткие URL резолвятся через HTTP redirect.
+**TikTok:** tiktok.com, vt.tiktok.com, vm.tiktok.com. Короткие URL резолвятся через HTTP redirect. **После редиректа hostname финального URL валидируется против `_TIKTOK_HOSTS`** — защита от SSRF через произвольные redirect-цепочки.
 
 ---
 
@@ -1688,7 +1691,7 @@ Relationships: `refresh_tokens` (cascade all, delete-orphan), `notes`, `files`
 | Тип | Функция | DOM-структура |
 |-----|---------|--------------|
 | heading | `renderHeading(data)` | `<h2>`–`<h4>` contenteditable |
-| paragraph | `renderParagraph(data)` | `<p>` contenteditable с rich text parts |
+| paragraph | `renderParagraph(data)` | `<p>` contenteditable с rich text parts. **href валидируется через `SAFE_LINK_PROTOCOLS`** — небезопасные протоколы рендерятся как plain text |
 | bulletList | `renderList(data, 'ul')` | `<ul>` с `<li>` |
 | numberList | `renderList(data, 'ol')` | `<ol>` с `<li>` |
 | quote | `renderQuote(data)` | `<figure><blockquote>` + `<figcaption>` |
@@ -1715,7 +1718,8 @@ Relationships: `refresh_tokens` (cascade all, delete-orphan), `notes`, `files`
 | `MEDIA_BLOCK_TYPES` | `Set(['tiktok', 'instagram', 'youtube', 'video'])` |
 | `CODE_MAX_LINES` | `5000` |
 | `CODE_PREVIEW_LINES` | `10` |
-| `SAFE_DOWNLOAD_PROTOCOLS` | `Set(['http:', 'https:'])` |
+| `SAFE_DOWNLOAD_PROTOCOLS` | `Set(['http:', 'https:', 'blob:', 'data:'])` |
+| `SAFE_LINK_PROTOCOLS` | `Set(['http:', 'https:', 'mailto:'])` — **Валидация href в paragraph links** для защиты от `javascript:` XSS |
 
 ---
 
@@ -1864,7 +1868,7 @@ play/pause, audioEl events (playing, pause, waiting, stalled, ended, timeupdate,
 
 | Эндпоинт | Метод | Назначение |
 |----------|-------|------------|
-| `/api/upload?noteId=X` | POST (FormData, XHR) | Загрузка файла с прогрессом |
+| `/api/upload?noteId=X` | POST (FormData, XHR) | Загрузка файла с прогрессом. Токен получается через `window.ensureAccessToken()`. **Fallback на `window.__accessToken` и `localStorage` удалён** |
 
 ---
 
@@ -2092,7 +2096,7 @@ API: `GET /files/{fileId}/page/{pageNum}?scale={zoom}`
 
 **Экспорты:** `initMarkdownViewers(container)`
 
-markdown-it + плагины (task-lists, sub, sup, footnote), DOMPurify, Prism.js.
+markdown-it + плагины (task-lists, sub, sup, footnote), DOMPurify, Prism.js. **Если DOMPurify недоступен — контент отображается как plain text (`textContent`)**, без innerHTML, предотвращая XSS.
 
 ---
 
@@ -2101,6 +2105,8 @@ markdown-it + плагины (task-lists, sub, sup, footnote), DOMPurify, Prism.
 **Файл:** `src/static/js/auth.js`
 
 **Назначение:** Обёртка `window.fetch` для инъекции Bearer token и CSRF header. Обработка 401 → refresh → retry.
+
+**Безопасность:** Access token хранится только в модульной переменной `accessToken` (замыкание). **`window.__accessToken` удалён** — токен недоступен через глобальную область. Debug `console.log` с информацией о токенах/CSRF **удалены**.
 
 #### Глобальные экспорты
 
@@ -2127,6 +2133,8 @@ markdown-it + плагины (task-lists, sub, sup, footnote), DOMPurify, Prism.
 **Глобальные экспорты:** `window.supabaseAuth = { init, signUp, signIn, signOut, getAccessToken, refreshSession }`
 
 Мост Supabase → backend через `POST /auth/supabase/session`.
+
+**Безопасность:** **`window.__supabaseAccessToken` удалён** — токен хранится только в модульной переменной `supabaseAccessToken`. Debug `console.log` **удалены**.
 
 ---
 
@@ -2381,7 +2389,7 @@ struct BackendState {
 | `pick_env(name)` | Чтение переменной окружения |
 | `resolve_database_url(project_root, app_data_dir)` | Приоритет: `OVC_DESKTOP_DATABASE_URL` → `DATABASE_URL` → `sqlite:///./src/ovc.db` |
 | `spawn_local_backend(app_data_dir)` | Запуск `python3 -m uvicorn app.main:app --app-dir src --host 127.0.0.1 --port 18741` |
-| `main()` | Tauri setup: spawn backend → wait for port → create window 1440x920 (min 1100x700). On exit: kill child |
+| `main()` | Tauri setup: spawn backend → wait for port → create window 1440x920 (min 1100x700). Навигация через `WindowUrl::External` (новое окно) или `serde_json::to_string` для eval (существующее окно — **безопасное JSON-экранирование вместо ручного escaping**). On exit: kill child |
 
 #### Env-переменные (устанавливаемые)
 
@@ -2878,6 +2886,101 @@ Background worker (sync_engine.py)
         → Если local.updated_at < remote → обновить
         → Если local pending + remote newer → conflict copy
 ```
+
+---
+
+## 15. Security Hardening — Лог исправлений безопасности
+
+> Все исправления выполнены 14 февраля 2026
+
+### 15.1. CRITICAL — Исправлено (5 шт.)
+
+| # | Проблема | Файл | Решение |
+|---|---------|------|---------|
+| C1 | Дефолтный SECRET_KEY позволяет подделать JWT | `src/app/core/config.py` | При `APP_ENV=production` — `ValueError` если SECRET_KEY дефолтный. В development — warning в `startup_warnings` |
+| C2 | Dev-fallback включен по умолчанию в desktop | `src/app/core/config.py` | `ALLOW_DESKTOP_DEV_FALLBACK` по умолчанию `False`. Требует явного `ALLOW_DESKTOP_DEV_FALLBACK=true` |
+| C3 | XSS через `javascript:` URL в ссылках параграфов | `src/static/js/blocks_render.js` | Добавлен `SAFE_LINK_PROTOCOLS = Set(['http:', 'https:', 'mailto:'])`. Небезопасные URL рендерятся как `<span>` (plain text) |
+| C4 | XSS в markdown при отсутствии DOMPurify | `src/static/js/markdown_viewer.js` | При отсутствии `window.DOMPurify` → `container.textContent = rawText` (plain text, без innerHTML) |
+| C5 | JS-инъекция через Tauri `window.eval()` | `desktop/src-tauri/src/main.rs` | Ручное экранирование заменено на `serde_json::to_string()` — корректное JSON-экранирование всех спецсимволов |
+
+### 15.2. HIGH — Исправлено (8 шт.)
+
+| # | Проблема | Файл | Решение |
+|---|---------|------|---------|
+| H1 | `window.__accessToken` — токен доступен через глобальную область | `src/static/js/auth.js` | Все `window.__accessToken = ...` удалены. Токен хранится только в модульной переменной (замыкание) |
+| H2 | `console.log` утечка auth-состояния | `src/static/js/auth.js`, `supabase_auth.js` | Удалены все debug `console.log` с информацией о токенах, CSRF, ответах refresh |
+| H3 | `window.__supabaseAccessToken` экспонирован | `src/static/js/supabase_auth.js` | Все `window.__supabaseAccessToken = ...` удалены. Доступ только через `getSupabaseAccessToken()` |
+| H4 | JWT payload логируется на INFO | `src/app/core/security.py` | `logger.info("[AUTH-DEBUG] ... Payload: {payload}")` полностью удалён |
+| H5 | Access token в query string | `src/app/core/security.py`, `auth_provider.py` | Блок `query_token = request.query_params.get("access_token")` удалён из обоих `get_bearer_token()` |
+| H6 | SSRF через TikTok redirect | `src/app/api/resolve.py` | После follow_redirects — hostname финального URL проверяется против `_TIKTOK_HOSTS`. Если не совпадает → 400 |
+| H7 | Proxy пересылает cookies/auth на remote | `src/app/main.py` | Заголовки `authorization` и `cookie` пользователя больше не пересылаются. Используется `SYNC_BEARER_TOKEN` или свежий access token из refresh cookie |
+| H8 | Авто-усыновление orphan-заметок в multi-user | `src/app/api/notes.py` | Введена `_owner_filter(user)` — orphan-заметки (`user_id IS NULL`) видны только в `desktop_mode` / `auth_mode == "none"`. В production multi-user — строгая фильтрация |
+
+### 15.3. Uploader — смежный фикс
+
+| Проблема | Файл | Решение |
+|---------|------|---------|
+| Fallback на `window.__accessToken` и `localStorage` | `src/static/js/uploader.js` | Fallback удалён. Используется только `window.ensureAccessToken()` — штатный auth путь |
+
+---
+
+## 16. Оставшиеся задачи — MEDIUM и LOW
+
+### 16.1. MEDIUM — Желательно исправить (19 шт.)
+
+| # | Проблема | Файл | Суть |
+|---|---------|------|------|
+| M1 | `style-src 'unsafe-inline'` в CSP | `main.py`, `tauri.conf.json` | Позволяет CSS injection. Решение: перенести inline-стили в файлы, использовать nonce |
+| M2 | Tauri CSP содержит `https://YOUR_REMOTE_DOMAIN` placeholder | `tauri.conf.json` | Незаменённый placeholder в `connect-src`. Заменить на реальный домен или убрать |
+| M3 | Tauri CSP frame-src без `youtube-nocookie.com` | `tauri.conf.json` | YouTube embed'ы не загрузятся в desktop. Добавить `https://www.youtube-nocookie.com` |
+| M4 | Tauri allowlist: `window.all`, `path.all`, `dialog.all` | `tauri.conf.json` | Слишком широкие разрешения. Ограничить до необходимых операций |
+| M5 | Невалидированный YouTube `videoId` | `blocks_render.js` | `videoId` подставляется в iframe src без regex-проверки. Добавить `/^[A-Za-z0-9_-]{11}$/` на клиенте |
+| M6 | `innerHTML` с неэкранированными ID в connections_panel | `connections_panel.js` | `data-link-id` и `<option>` содержат raw ID. Перейти на `createElement`/`textContent` |
+| M7 | DOMPurify слишком пермиссивен для Word docs | `word_viewer.js` | `USE_PROFILES: { html: true }` разрешает `<form>`, `<input>`. Добавить явный `ALLOWED_TAGS` |
+| M8 | SSRF через `/api/resolve/youtube` и `/api/resolve/tiktok` | `resolve.py` | Backend делает HTTP-запросы по URL от пользователя. Добавить whitelist IP-диапазонов или запретить private IP |
+| M9 | Потеря данных при save (debounce + нет beforeunload) | `editor.js` | 600ms debounce без `beforeunload` предупреждения. Добавить `window.onbeforeunload` при unsaved changes |
+| M10 | `/api/runtime/status` утекает конфигурацию без auth | `main.py` | Эндпоинт раскрывает `authMode`, `syncMode`, `desktopMode`. Добавить аутентификацию или убрать в production |
+| M11 | Cookie `csrf_token` не HttpOnly | `main.py` | `httponly=False` — уязвимо при XSS. Но CSRF cookie ДОЛЖЕН быть читаем из JS (для header). Рассмотреть double-submit с random cookie name |
+| M12 | CSRF простое сравнение строк | `security.py` | Header == cookie — при XSS оба доступны. Рассмотреть HMAC-подписанный CSRF |
+| M13 | Регистрация: email enumeration через 409 | `routes/auth.py` | Возвращает 409 для существующего email. Использовать generic "check your email" |
+| M14 | Логин: timing side-channel | `routes/auth.py` | Для несуществующего пользователя ответ быстрее. Добавить dummy `verify_password` при отсутствии |
+| M15 | Refresh token race condition | `routes/auth.py` | Без row lock два concurrent refresh могут оба пройти. Добавить `SELECT ... FOR UPDATE` |
+| M16 | `_client_ip` доверяет X-Forwarded-For | `routes/auth.py` | IP spoofing для обхода rate limit. Не доверять X-Forwarded-For без trusted proxy list |
+| M17 | Полная пересборка TF-IDF на каждый upsert | `tfidf_index.py` | O(N) на каждое сохранение. Рассмотреть инкрементальный индекс или отложенную пересборку |
+| M18 | Файловый поиск не фильтруется по user_id | `notes.py` | `search_notes_full` ищет по `FileAsset.filename` без `FileAsset.user_id` фильтра. Может утечь инфо о файлах других пользователей |
+| M19 | `cookie_secure` по умолчанию False | `config.py` | В production cookies могут ходить по HTTP. Поставить `True` по умолчанию при `APP_ENV=production` |
+
+### 16.2. LOW — На перспективу (14 шт.)
+
+| # | Проблема | Файл | Суть |
+|---|---------|------|------|
+| L1 | TF-IDF индекс не персистится | `tfidf_index.py` | Теряется при перезапуске. Рассмотреть сериализацию или ленивую загрузку |
+| L2 | `media-src https:` wildcard | `tauri.conf.json` | Разрешает загрузку медиа с любого HTTPS. Ограничить до нужных доменов |
+| L3 | Instagram embed загружает third-party скрипт | `blocks_render.js` | `instagram.com/embed.js` получает полный доступ к странице. Рассмотреть sandbox iframe |
+| L4 | Regex HTML stripping в getPreviewText | `notes_renderer.js` | Ненадёжно, но безопасно (присваивается в `textContent`) |
+| L5 | `getCookie` regex injection | `auth.js` | `name` в `new RegExp` не экранирован. Для текущих cookie-имён неопасно, но формально уязвимо |
+| L6 | Нет client-side file size/type validation | `uploader.js` | Опирается на серверную валидацию. Добавить проверку на клиенте для UX |
+| L7 | Doc link hrefs не валидированы | `blocks_render.js` | "open original" ссылки в doc-блоках используют `data.src` без проверки протокола |
+| L8 | `subprocess.run` без timeout в files.py | `services/files.py` | ffprobe/ffmpeg без timeout. Добавить `timeout=30` |
+| L9 | Весь файл читается в память при upload | `services/files.py` | До 500MB в RAM. Рассмотреть streaming |
+| L10 | `Note.user_id` nullable | `db/models.py` | Позволяет orphan-заметки. Рассмотреть NOT NULL + миграцию |
+| L11 | `FileAsset` cascade mismatch | `db/models.py` | `ondelete="SET NULL"` + `cascade="all, delete-orphan"`. Потенциально конфликтует |
+| L12 | SQLite без connection pool limit | `session.py` | Может давать "database is locked" при параллельных запросах |
+| L13 | `_now()` использует `datetime.utcnow()` паттерн | `sync_engine.py` | Устаревший подход. Использовать `datetime.now(timezone.utc)` везде |
+| L14 | Refresh token pepper привязан к SECRET_KEY | `security.py` | Ротация SECRET_KEY инвалидирует все refresh tokens. Использовать отдельный pepper |
+
+### 16.3. Приоритеты для следующего этапа
+
+**Рекомендуемый порядок:**
+
+1. **M9** — `beforeunload` при unsaved changes (потеря данных пользователей)
+2. **M18** — файловый поиск: фильтр по `user_id`
+3. **M19** — `cookie_secure=True` в production
+4. **M2 + M3** — Tauri CSP: убрать placeholder, добавить youtube-nocookie
+5. **M5** — YouTube videoId валидация на клиенте
+6. **M8** — SSRF: private IP blacklist для resolve endpoints
+7. **L8** — timeout для subprocess (ffprobe/ffmpeg)
+8. **L6** — client-side file validation для UX
 
 ---
 
