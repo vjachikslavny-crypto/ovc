@@ -28,24 +28,17 @@ async function refreshAccessToken() {
     const refreshCookie = getCookie('refresh_token');
     if (refreshCookie) {
       const csrf = getCookie('csrf_token');
-      console.log('[AUTH] refreshAccessToken called, csrf:', csrf ? 'present' : 'missing');
       if (csrf) {
         const res = await fetch('/auth/refresh', {
           method: 'POST',
           headers: { 'X-CSRF-Token': csrf },
         });
-        console.log('[AUTH] /auth/refresh response:', res.status, res.ok);
         if (res.ok) {
           const data = await res.json();
-          console.log('[AUTH] Refresh response data:', data);
           accessToken = data.accessToken;
-          window.__accessToken = accessToken;
           persistAccessCookie(accessToken);
-          console.log('[AUTH] Access token saved:', accessToken ? 'YES' : 'NO');
           return accessToken;
         }
-      } else {
-        console.log('[AUTH] No csrf_token cookie, cannot refresh local token');
       }
     }
   }
@@ -54,14 +47,12 @@ async function refreshAccessToken() {
     const existing = window.supabaseAuth.getAccessToken();
     if (existing) {
       accessToken = existing;
-      window.__accessToken = accessToken;
       persistAccessCookie(accessToken);
       return accessToken;
     }
     const refreshed = await window.supabaseAuth.refreshSession();
     if (refreshed) {
       accessToken = refreshed;
-      window.__accessToken = accessToken;
       persistAccessCookie(accessToken);
       return accessToken;
     }
@@ -94,7 +85,6 @@ async function ensureAccessToken() {
     const sbToken = window.supabaseAuth.getAccessToken();
     if (sbToken) {
       accessToken = sbToken;
-      window.__accessToken = accessToken;
       persistAccessCookie(accessToken);
       return accessToken;
     }
@@ -118,8 +108,8 @@ window.fetch = async (input, init = {}) => {
 
   try {
     resolvedUrl = new URL(inputUrl, window.location.href);
-  } catch (e) {
-    console.error('[AUTH] Failed to parse URL:', inputUrl);
+  } catch (_) {
+    // malformed URL — pass through without auth headers
   }
 
   if (resolvedUrl && resolvedUrl.origin !== window.location.origin) {
@@ -150,11 +140,8 @@ window.fetch = async (input, init = {}) => {
     // Для /auth/refresh не запрашиваем access токен, чтобы не попасть в рекурсию.
     if (!isRefresh) {
       const token = await ensureAccessToken();
-      console.log('[AUTH] Request to', path, '- token:', token ? 'present' : 'missing');
       if (token) {
         headers.set('Authorization', `Bearer ${token}`);
-      } else {
-        console.warn('[AUTH] No access token available for', path);
       }
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
@@ -169,21 +156,16 @@ window.fetch = async (input, init = {}) => {
   const response = await originalFetch(input, options);
   
   if (response.status === 401 && isApi && !options._retry && !isRefresh) {
-    console.log('[AUTH] Got 401, attempting to refresh token...');
     const newToken = await refreshAccessToken();
     if (newToken) {
-      console.log('[AUTH] Token refreshed, retrying request to', path);
       const retryHeaders = new Headers(options.headers);
       retryHeaders.set('Authorization', `Bearer ${newToken}`);
       const retryOptions = { ...options, headers: retryHeaders, _retry: true };
       return originalFetch(input, retryOptions);
-    } else {
-      console.log('[AUTH] Failed to refresh token');
     }
   }
   
   if (response.status === 401 && isApi && !path.startsWith('/auth')) {
-    console.log('[AUTH] Redirecting to login due to 401');
     window.location.href = '/login';
   }
   

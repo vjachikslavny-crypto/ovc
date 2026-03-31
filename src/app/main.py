@@ -208,11 +208,8 @@ async def _proxy_remote_file_if_needed(request: Request, response):
     if request.url.query:
         target += f"?{request.url.query}"
 
-    # Forward auth context and range/cache headers for media playback.
     proxy_headers = {}
     for header_name in (
-        "authorization",
-        "cookie",
         "range",
         "accept",
         "if-none-match",
@@ -223,9 +220,9 @@ async def _proxy_remote_file_if_needed(request: Request, response):
         if value:
             proxy_headers[header_name] = value
 
-    # Browser media tags (<img>/<audio>/<video>) do not send Authorization.
-    # In desktop mode, derive a short-lived access token from local refresh cookie.
-    if "authorization" not in proxy_headers:
+    if settings.sync_bearer_token:
+        proxy_headers["authorization"] = f"Bearer {settings.sync_bearer_token}"
+    else:
         try:
             proxy_user = get_user_from_refresh_cookie(request)
             proxy_headers["authorization"] = f"Bearer {create_access_token(str(proxy_user.id))}"

@@ -160,8 +160,11 @@ def _extract_tiktok_video_id(url: str) -> tuple[str, str]:
                 })
                 final_url = str(response.url)
                 parsed = urlparse(final_url)
-        except httpx.HTTPError as e:
-            raise HTTPException(status_code=502, detail=f"Failed to resolve TikTok URL: {e}")
+                final_host = (parsed.hostname or "").lower()
+                if final_host not in _TIKTOK_HOSTS:
+                    raise HTTPException(status_code=400, detail="Redirect resolved to non-TikTok domain")
+        except httpx.HTTPError:
+            raise HTTPException(status_code=502, detail="Failed to resolve TikTok short URL")
     else:
         final_url = url
     

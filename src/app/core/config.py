@@ -57,11 +57,20 @@ class Settings:
             or os.getenv("SIMPLE_DB_URL")
             or ""
         )
-        self.secret_key = os.getenv(
-            "SECRET_KEY", "CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANGE_ME"
-        )
+        _DEFAULT_SECRET_KEY = "CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANGE_ME"
+        self.secret_key = os.getenv("SECRET_KEY", _DEFAULT_SECRET_KEY)
         if len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY должен быть не короче 32 символов.")
+        if self.secret_key == _DEFAULT_SECRET_KEY:
+            _env = os.getenv("APP_ENV", "development").strip().lower()
+            if _env == "production":
+                raise ValueError(
+                    "SECRET_KEY использует дефолтное значение. "
+                    "Установите уникальный SECRET_KEY для production."
+                )
+            self.startup_warnings.append(
+                "SECRET_KEY использует дефолтное значение — ОБЯЗАТЕЛЬНО замените перед production deploy"
+            )
         self.access_token_expires_min = int(os.getenv("ACCESS_TOKEN_EXPIRES_MIN", "15"))
         self.refresh_token_expires_days = int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30"))
         self.cookie_domain = os.getenv("COOKIE_DOMAIN") or None
@@ -96,7 +105,7 @@ class Settings:
         self.desktop_mode = _env_bool("DESKTOP_MODE", False)
         self.allow_desktop_dev_fallback = _env_bool(
             "ALLOW_DESKTOP_DEV_FALLBACK",
-            self.desktop_mode,
+            False,
         )
         if self.allow_desktop_dev_fallback:
             self._warn(
