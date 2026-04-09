@@ -14,6 +14,7 @@ import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
 import { initMarkdownViewers } from './markdown_viewer.js';
 import { initConnectionsPanel } from './connections_panel.js';
+import { initAiChat } from './ai_chat.js';
 import { initMiniGraph } from './mini-graph.js';
 
 const SAVE_DEBOUNCE = 600;
@@ -83,6 +84,13 @@ document.addEventListener('DOMContentLoaded', () => {
     button: fabVoice,
     uploader,
     onReady: () => {},
+  });
+
+  const aiChatEl = document.getElementById('ai-chat-panel');
+  initAiChat({
+    rootEl: aiChatEl,
+    getNoteId: () => noteState.id,
+    onBlocksCommitted: refreshNoteState,
   });
 
   canvas.addEventListener('click', (event) => {
@@ -2173,25 +2181,16 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (isEmpty) {
       if (isNewNoteInitialLayout) {
-        // Новая заметка: сразу боковое положение как после создания первого блока.
         floatingActions.classList.remove('floating-actions--centered');
         floatingActions.classList.remove('floating-actions--new-note-initial');
-        floatingActions.style.setProperty('--floating-actions-offset', '24px');
       } else {
         floatingActions.classList.add('floating-actions--centered');
         floatingActions.classList.remove('floating-actions--new-note-initial');
-        floatingActions.style.setProperty('--floating-actions-offset', 'auto');
       }
     } else {
-      // Если есть блоки - показываем кнопки справа с динамическим отступом
       isNewNoteInitialLayout = false;
       floatingActions.classList.remove('floating-actions--centered');
       floatingActions.classList.remove('floating-actions--new-note-initial');
-      const dynamicOffset = Math.min(18 + blockCount * 6, 140);
-      floatingActions.style.setProperty(
-        '--floating-actions-offset',
-        `${dynamicOffset}px`,
-      );
     }
   }
 

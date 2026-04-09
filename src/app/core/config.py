@@ -164,6 +164,14 @@ class Settings:
             "RUNTIME_STATUS_ENABLED",
             self.desktop_mode or self.auth_mode == "none" or self.app_env != "production",
         )
+        # LLM / Agent
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
+        self.llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+        self.llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.4"))
+        self.llm_context_budget = int(os.getenv("LLM_CONTEXT_BUDGET", "6000"))
+        self.llm_timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+
         self.csp_report_only = _env_bool("CSP_REPORT_ONLY", False)
         self.csp_script_src_extra = self._parse_csv_env("CSP_SCRIPT_SRC_EXTRA")
         self.csp_style_src_extra = self._parse_csv_env("CSP_STYLE_SRC_EXTRA")

@@ -3,229 +3,221 @@
 
 {% block content %}
 <div class="editor-layout">
-<div class="editor" data-note-id="{{ note_id or '' }}">
-  <section class="editor__header">
-    <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
-    <button class="icon-button icon-button--mini" id="nav-refresh" type="button" aria-label="Обновить редактор" title="Обновить">↻</button>
-    <div class="editor__title-wrapper">
-      <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
-      <button class="editor__title-more" id="title-toggle" type="button">···</button>
-    </div>
-    <button
-      class="icon-button icon-button--ghost editor__mobile-actions-toggle"
-      id="mobile-header-actions-toggle"
-      type="button"
-      aria-label="Действия заметки"
-      aria-expanded="false"
-      aria-controls="editor-header-actions"
-    >⋯</button>
-    <div class="editor__header-actions" id="editor-header-actions">
-      <button class="icon-button icon-button--ghost" id="connections-toggle" aria-label="Связи">↔</button>
-      <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>
-      <select id="theme-switcher" class="pill-button pill-button--compact" aria-label="Выбор темы">
-        <option value="default">Фиолетовая</option>
-        <option value="dark">Тёмная</option>
-        <option value="milk">Молочная</option>
-        <option value="light">Светлая</option>
-      </select>
-      <button class="pill-button pill-button--compact" id="note-share">Поделиться</button>
-    </div>
-  </section>
+  <div class="editor" data-note-id="{{ note_id or '' }}">
+    <section class="editor__header">
+      <button class="icon-button" id="nav-back" aria-label="К заметкам">←</button>
+      <button class="icon-button icon-button--mini" id="nav-refresh" type="button" aria-label="Обновить редактор"
+        title="Обновить">↻</button>
+      <div class="editor__title-wrapper">
+        <div class="editor__title" id="note-title" contenteditable="true" spellcheck="false">Без названия</div>
+        <button class="editor__title-more" id="title-toggle" type="button">···</button>
+      </div>
+      <button class="icon-button icon-button--ghost editor__mobile-actions-toggle" id="mobile-header-actions-toggle"
+        type="button" aria-label="Действия заметки" aria-expanded="false"
+        aria-controls="editor-header-actions">⋯</button>
+      <div class="editor__header-actions" id="editor-header-actions">
+        <button class="icon-button icon-button--ghost" id="connections-toggle" aria-label="Связи">↔</button>
+        <button class="icon-button icon-button--info" id="note-info" aria-label="Паспорт заметки">i</button>
+        <select id="theme-switcher" class="pill-button pill-button--compact" aria-label="Выбор темы">
+          <option value="default">Фиолетовая</option>
+          <option value="dark">Тёмная</option>
+          <option value="milk">Молочная</option>
+          <option value="light">Светлая</option>
+        </select>
+        <button class="pill-button pill-button--compact" id="note-share">Поделиться</button>
+      </div>
+    </section>
 
-  <div class="editor__body">
-    <section class="editor__main" aria-label="Редактор заметки">
-  <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
-    <button class="toolbar__btn" data-action="bold">B</button>
-    <button class="toolbar__btn" data-action="italic"><em>I</em></button>
-    <button class="toolbar__btn" data-action="link">Link</button>
-    <button class="toolbar__btn" data-action="list">List</button>
-    <button class="toolbar__btn" data-action="quote">Quote</button>
-    <button class="toolbar__btn" data-action="align">Align</button>
-  </section>
+    <div class="editor__body">
+      <section class="editor__main" aria-label="Редактор заметки">
+        <section class="toolbar" id="format-toolbar" role="toolbar" aria-label="Форматирование">
+          <button class="toolbar__btn" data-action="bold">B</button>
+          <button class="toolbar__btn" data-action="italic"><em>I</em></button>
+          <button class="toolbar__btn" data-action="link">Link</button>
+          <button class="toolbar__btn" data-action="list">List</button>
+          <button class="toolbar__btn" data-action="quote">Quote</button>
+          <button class="toolbar__btn" data-action="align">Align</button>
+        </section>
 
-      <aside class="connections-panel connections-panel--compact" id="connections-panel" aria-label="Связи" aria-hidden="true">
-        <header class="connections-panel__header">
-          <div>
-            <p class="connections-panel__title">Связи</p>
-            <p class="connections-panel__count" id="connections-count">0</p>
+        <aside class="connections-panel connections-panel--compact" id="connections-panel" aria-label="Связи"
+          aria-hidden="true">
+          <header class="connections-panel__header">
+            <div>
+              <p class="connections-panel__title">Связи</p>
+              <p class="connections-panel__count" id="connections-count">0</p>
+            </div>
+          </header>
+          <div class="connections-panel__body" id="connections-body">
+            <p class="connections-panel__empty muted">Загрузка...</p>
           </div>
-        </header>
-        <div class="connections-panel__body" id="connections-body">
-          <p class="connections-panel__empty muted">Загрузка...</p>
-        </div>
-      </aside>
+        </aside>
 
-  <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
-    <div id="note-blocks" class="note-blocks"></div>
-    <div class="floating-actions" aria-live="polite">
-      <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
-      <button class="fab" id="fab-connections" aria-label="Открыть связи">↔</button>
-      <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
-      <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
-          <input
-            type="file"
-            id="file-input"
-            class="hidden"
-            accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.mkv,.avi,.pdf,.docx,.rtf,.pptx,.xls,.xlsx,.csv,.py,.js,.ts,.tsx,.jsx,.json,.md,.markdown,.html,.htm,.css,.scss,.yml,.yaml,.sh,.bash,.zsh,.sql,.c,.h,.cpp,.hpp,.java,.kt,.go,.rs,.php,.rb,.lua,.r,.tex,.toml,.ini,.cfg,.pl,.cs,.swift,text/plain,application/json,application/x-yaml"
-            multiple
-          />
+        <section class="editor__canvas" id="note-canvas" aria-label="Содержимое заметки">
+          <div id="note-blocks" class="note-blocks"></div>
+          <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
+          <div class="drop-overlay" id="drop-overlay" aria-hidden="true" hidden>
+            <div class="drop-overlay__content">
+              <p>Перетащите файлы сюда</p>
+              <span>Поддерживаются изображения, видео, PDF, Word, презентации, таблицы (Excel/CSV), Markdown и
+                код</span>
+            </div>
+          </div>
+        </section>
+      </section>
     </div>
-    <div class="upload-progress" id="upload-progress" aria-live="polite" hidden></div>
-        <div class="drop-overlay" id="drop-overlay" aria-hidden="true" hidden>
-          <div class="drop-overlay__content">
-            <p>Перетащите файлы сюда</p>
-            <span>Поддерживаются изображения, видео, PDF, Word, презентации, таблицы (Excel/CSV), Markdown и код</span>
+
+    <aside class="ai-chat" id="ai-chat-panel" aria-hidden="true">
+      <header class="ai-chat__header">
+        <span class="ai-chat__title">AI Ассистент</span>
+        <select class="ai-chat__mode" id="ai-chat-mode" aria-label="Режим AI">
+          <option value="chat">Чат</option>
+          <option value="explain">Объяснение</option>
+          <option value="summarize_text">Краткий конспект</option>
+          <option value="detailed">Полный конспект</option>
+        </select>
+        <button class="icon-button" data-close-chat aria-label="Закрыть">×</button>
+      </header>
+      <div class="ai-chat__messages" id="ai-chat-messages">
+        <div class="ai-chat__msg ai-chat__msg--assistant">
+          <span class="ai-chat__msg-label">AI</span>
+          <span class="ai-chat__msg-text">Привет! Я AI-ассистент. Выбери режим и задай вопрос.</span>
+        </div>
+      </div>
+      <div class="ai-chat__input-area">
+        <textarea class="ai-chat__input" id="ai-chat-input" placeholder="Введите сообщение..." rows="2"></textarea>
+        <button class="ai-chat__send" id="ai-chat-send" aria-label="Отправить">→</button>
+      </div>
+    </aside>
+
+    <div class="bottom-sheet" id="block-palette" aria-hidden="true">
+      <div class="bottom-sheet__handle"></div>
+      <h3>Добавить блок</h3>
+      <div class="block-palette">
+        <button data-block="heading" data-level="1">Заголовок</button>
+        <button data-block="paragraph">Текст</button>
+        <button data-block="bulletList">Список</button>
+        <button data-block="quote">Цитата</button>
+        <button data-block="table">Таблица</button>
+        <button data-block="image">Изображение</button>
+        <button data-block="source">Источник</button>
+        <button data-block="todo">Задача</button>
+        <button data-block="summary">Сводка</button>
+        <button data-block="divider">Разделитель</button>
+      </div>
+    </div>
+
+    <aside class="note-inspector" id="note-inspector" aria-hidden="true">
+      <header>
+        <h3>Паспорт заметки</h3>
+        <button class="icon-button" data-close-inspector>×</button>
+      </header>
+      <section>
+        <h4>Теги заметки</h4>
+        <div id="inspector-tags" class="chip-list"></div>
+        <h5 class="inspector-section-subtitle">Доступные теги</h5>
+        <div id="inspector-available-tags" class="chip-list chip-list--suggestions"></div>
+        <h5 class="inspector-section-subtitle">Добавить новый</h5>
+        <form id="inspector-tag-form" class="inspector-link-form inspector-tag-form">
+          <input type="text" id="inspector-tag-input" placeholder="Введите новый тег" aria-label="Добавить тег" />
+          <div class="inspector-tag-actions">
+            <button type="submit" class="pill-button">Добавить тег</button>
+            <span id="inspector-tag-status" class="muted" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+      <section>
+        <h4>Связи</h4>
+        <ul id="inspector-links" class="link-list"></ul>
+        <form id="inspector-link-form" class="inspector-link-form">
+          <select id="inspector-link-target" aria-label="Целевая заметка для связи"></select>
+          <input type="text" id="inspector-link-reason" placeholder="Описание связи (опционально)"
+            aria-label="Описание связи" />
+          <div class="inspector-link-actions">
+            <button type="submit" class="pill-button">Добавить связь</button>
+            <span id="inspector-link-status" class="muted" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+      <section>
+        <h4>Размер узла</h4>
+        <div class="inspector-size">
+          <input type="range" id="inspector-size" min="0.3" max="5" step="0.1" aria-label="Вес узла" />
+          <div class="inspector-size-controls">
+            <input type="number" id="inspector-size-value" min="0.3" max="5" step="0.1"
+              aria-label="Числовой вес узла" />
+            <span class="muted">Вес влияет на размер точки на графе.</span>
           </div>
         </div>
       </section>
-  </section>
-  </div>
+      <section>
+        <h4>Свойства</h4>
+        <dl id="inspector-properties" class="property-list"></dl>
+      </section>
+      <section>
+        <h4>Автоматизация</h4>
+        <label class="toggle">
+          <input type="checkbox" id="llm-toggle" />
+          <span>Авто-оформление моделью (эксперимент)</span>
+        </label>
+      </section>
+    </aside>
 
-  <div class="bottom-sheet" id="block-palette" aria-hidden="true">
-    <div class="bottom-sheet__handle"></div>
-    <h3>Добавить блок</h3>
-    <div class="block-palette">
-      <button data-block="heading" data-level="1">Заголовок</button>
-      <button data-block="paragraph">Текст</button>
-      <button data-block="bulletList">Список</button>
-      <button data-block="quote">Цитата</button>
-      <button data-block="table">Таблица</button>
-      <button data-block="image">Изображение</button>
-      <button data-block="source">Источник</button>
-      <button data-block="todo">Задача</button>
-      <button data-block="summary">Сводка</button>
-      <button data-block="divider">Разделитель</button>
+    <div class="inline-bubble" id="inline-bubble" role="toolbar" aria-hidden="true">
+      <button data-action="bold">B</button>
+      <button data-action="italic"><em>I</em></button>
+      <button data-action="link">Link</button>
+      <button data-action="quote">Quote</button>
+      <button data-action="list">List</button>
+      <button data-action="heading">H</button>
     </div>
+
   </div>
 
-  <aside class="note-inspector" id="note-inspector" aria-hidden="true">
-    <header>
-      <h3>Паспорт заметки</h3>
-      <button class="icon-button" data-close-inspector>×</button>
-    </header>
-    <section>
-      <h4>Теги заметки</h4>
-      <div id="inspector-tags" class="chip-list"></div>
-      <h5 class="inspector-section-subtitle">Доступные теги</h5>
-      <div id="inspector-available-tags" class="chip-list chip-list--suggestions"></div>
-      <h5 class="inspector-section-subtitle">Добавить новый</h5>
-      <form id="inspector-tag-form" class="inspector-link-form inspector-tag-form">
-        <input
-          type="text"
-          id="inspector-tag-input"
-          placeholder="Введите новый тег"
-          aria-label="Добавить тег"
-        />
-        <div class="inspector-tag-actions">
-          <button type="submit" class="pill-button">Добавить тег</button>
-          <span id="inspector-tag-status" class="muted" aria-live="polite"></span>
-        </div>
-      </form>
-    </section>
-    <section>
-      <h4>Связи</h4>
-      <ul id="inspector-links" class="link-list"></ul>
-      <form id="inspector-link-form" class="inspector-link-form">
-        <select id="inspector-link-target" aria-label="Целевая заметка для связи"></select>
-        <input
-          type="text"
-          id="inspector-link-reason"
-          placeholder="Описание связи (опционально)"
-          aria-label="Описание связи"
-        />
-        <div class="inspector-link-actions">
-          <button type="submit" class="pill-button">Добавить связь</button>
-          <span id="inspector-link-status" class="muted" aria-live="polite"></span>
-        </div>
-      </form>
-    </section>
-    <section>
-      <h4>Размер узла</h4>
-      <div class="inspector-size">
-        <input
-          type="range"
-          id="inspector-size"
-          min="0.3"
-          max="5"
-          step="0.1"
-          aria-label="Вес узла"
-        />
-        <div class="inspector-size-controls">
-          <input
-            type="number"
-            id="inspector-size-value"
-            min="0.3"
-            max="5"
-            step="0.1"
-            aria-label="Числовой вес узла"
-          />
-          <span class="muted">Вес влияет на размер точки на графе.</span>
+  <button class="icon-button icon-button--ghost mini-graph-toggle-floating" id="mini-graph-toggle" type="button"
+    aria-label="Скрыть мини-граф" aria-pressed="false" title="Скрыть мини-граф">▦</button>
+
+  <aside class="graph-sidebar" id="graph-sidebar" aria-label="Граф связей">
+    <div class="graph-sidebar__content">
+      <div class="graph-sidebar__canvas" id="mini-graph-canvas">
+        <svg id="mini-graph-svg" class="mini-graph-svg"></svg>
+        <div class="graph-sidebar__empty">
+          <p class="muted">Граф загружается...</p>
         </div>
       </div>
-    </section>
-    <section>
-      <h4>Свойства</h4>
-      <dl id="inspector-properties" class="property-list"></dl>
-    </section>
-    <section>
-      <h4>Автоматизация</h4>
-      <label class="toggle">
-        <input type="checkbox" id="llm-toggle" />
-        <span>Авто-оформление моделью (эксперимент)</span>
-      </label>
-    </section>
+      <div class="graph-sidebar__controls">
+        <div class="graph-sidebar__control-group">
+          <label class="graph-sidebar__label">Цвет группы</label>
+          <input type="color" id="group-color-picker" class="color-picker" value="#8b5cf6"
+            aria-label="Цвет группы заметки" />
+        </div>
+        <div class="graph-sidebar__control-group">
+          <label class="graph-sidebar__label">ВЕС НА ГРАФЕ</label>
+          <div class="zoom-controls">
+            <button class="icon-button icon-button--compact" id="zoom-out" aria-label="Уменьшить вес">−</button>
+            <span class="zoom-value" id="zoom-value">1.0</span>
+            <button class="icon-button icon-button--compact" id="zoom-in" aria-label="Увеличить вес">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 
-  <div class="inline-bubble" id="inline-bubble" role="toolbar" aria-hidden="true">
-    <button data-action="bold">B</button>
-    <button data-action="italic"><em>I</em></button>
-    <button data-action="link">Link</button>
-    <button data-action="quote">Quote</button>
-    <button data-action="list">List</button>
-    <button data-action="heading">H</button>
+  <div class="floating-actions" aria-live="polite">
+    <button class="fab fab--primary" id="fab-plus" aria-label="Добавить блок">＋</button>
+    <button class="fab" id="fab-connections" aria-label="Открыть связи">↔</button>
+    <button class="fab" id="fab-voice" aria-label="Добавить голосовую заметку">🎙</button>
+    <button class="fab" id="fab-attach" aria-label="Прикрепить файл">📎</button>
+    <button class="fab fab--ai" id="fab-ai" aria-label="AI ассистент">AI</button>
+    <input type="file" id="file-input" class="hidden"
+      accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.mkv,.avi,.pdf,.docx,.rtf,.pptx,.xls,.xlsx,.csv,.py,.js,.ts,.tsx,.jsx,.json,.md,.markdown,.html,.htm,.css,.scss,.yml,.yaml,.sh,.bash,.zsh,.sql,.c,.h,.cpp,.hpp,.java,.kt,.go,.rs,.php,.rb,.lua,.r,.tex,.toml,.ini,.cfg,.pl,.cs,.swift,text/plain,application/json,application/x-yaml"
+      multiple />
   </div>
-
-</div>
-
-<button
-  class="icon-button icon-button--ghost mini-graph-toggle-floating"
-  id="mini-graph-toggle"
-  type="button"
-  aria-label="Скрыть мини-граф"
-  aria-pressed="false"
-  title="Скрыть мини-граф"
->▦</button>
-
-<aside class="graph-sidebar" id="graph-sidebar" aria-label="Граф связей">
-  <div class="graph-sidebar__content">
-    <div class="graph-sidebar__canvas" id="mini-graph-canvas">
-      <svg id="mini-graph-svg" class="mini-graph-svg"></svg>
-      <div class="graph-sidebar__empty">
-        <p class="muted">Граф загружается...</p>
-      </div>
-    </div>
-    <div class="graph-sidebar__controls">
-      <div class="graph-sidebar__control-group">
-        <label class="graph-sidebar__label">Цвет группы</label>
-        <input type="color" id="group-color-picker" class="color-picker" value="#8b5cf6" aria-label="Цвет группы заметки" />
-      </div>
-      <div class="graph-sidebar__control-group">
-        <label class="graph-sidebar__label">ВЕС НА ГРАФЕ</label>
-        <div class="zoom-controls">
-          <button class="icon-button icon-button--compact" id="zoom-out" aria-label="Уменьшить вес">−</button>
-          <span class="zoom-value" id="zoom-value">1.0</span>
-          <button class="icon-button icon-button--compact" id="zoom-in" aria-label="Увеличить вес">+</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</aside>
 
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
-  <script src="/static/js/vendor/d3.v7.min.js"></script>
-  <script type="module" src="/static/js/editor.js"></script>
-  <script type="module" src="/static/js/mini-graph.js"></script>
+<script src="/static/js/vendor/d3.v7.min.js"></script>
+<script type="module" src="/static/js/editor.js"></script>
+<script type="module" src="/static/js/mini-graph.js"></script>
 {% endblock %}

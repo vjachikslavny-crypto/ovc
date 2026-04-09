@@ -1,8 +1,11 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
 *.sqlite
+*.sqlite3
 *.db
 *.log
 src/ovc.db
@@ -10,5 +13,9 @@ src/*.db
 src/**/*.db
 .DS_Store
 data/
+node_modules/
+*.pem
+*.key
+.claude/
 deploy/cloudflare_tunnel/config.yml
 deploy/cloudflare_tunnel/*.json

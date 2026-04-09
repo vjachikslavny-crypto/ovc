@@ -100,8 +100,10 @@ class SyncEngineTests(unittest.TestCase):
         self._old_remote = settings.sync_remote_base_url
         self._old_pull = settings.sync_pull_enabled
         self._old_batch = settings.sync_batch_size
+        self._old_sync_mode = settings.sync_mode
 
         settings.sync_enabled = True
+        settings.sync_mode = "remote-sync"
         settings.sync_remote_base_url = "https://sync.test"
         settings.sync_pull_enabled = False
         settings.sync_batch_size = 100
@@ -122,6 +124,7 @@ class SyncEngineTests(unittest.TestCase):
         db_session.engine = self._old_engine
         db_session.SessionLocal = self._old_session_local
         settings.sync_enabled = self._old_sync_enabled
+        settings.sync_mode = self._old_sync_mode
         settings.sync_remote_base_url = self._old_remote
         settings.sync_pull_enabled = self._old_pull
         settings.sync_batch_size = self._old_batch
@@ -218,20 +221,29 @@ class SyncEngineTests(unittest.TestCase):
 
     def test_upload_waits_for_note_mapping(self):
         with db_session.get_session() as session:
-            session.add(
-                SyncOutbox(
-                    op_type=sync_engine.OP_CREATE_NOTE,
-                    note_id="note-upload",
-                    payload_json="{}",
-                    status=sync_engine.STATUS_PENDING,
-                )
+            pending_create = SyncOutbox(
+                op_type=sync_engine.OP_CREATE_NOTE,
+                note_id="note-upload",
+                payload_json="{}",
+                status=sync_engine.STATUS_PENDING,
             )
+            session.add(pending_create)
+            session.flush()
+
+            upload_item = SyncOutbox(
+                op_type=sync_engine.OP_UPLOAD_FILE,
+                note_id="note-upload",
+                payload_json="{}",
+                status=sync_engine.STATUS_PENDING,
+            )
+            session.add(upload_item)
             session.flush()
 
             with self.assertRaises(sync_engine.RetryableSyncError):
                 sync_engine._flush_upload_file(
                     session,
                     _FakeClient(),
+                    upload_item,
                     {
                         "localNoteId": "note-upload",
                         "filePath": "/tmp/not-used",
