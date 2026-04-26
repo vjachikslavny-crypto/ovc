@@ -303,6 +303,9 @@ def _template_context(request: Request, user):
         "user": user,
         "auth_mode": settings.auth_mode,
         "desktop_mode": settings.desktop_mode,
+        "workspace_access": bool(user)
+        or settings.auth_mode == "none"
+        or (settings.desktop_mode and settings.allow_desktop_dev_fallback),
         "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
         "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
     }
@@ -310,13 +313,20 @@ def _template_context(request: Request, user):
 
 @app.get("/")
 def index(request: Request, note_id: str = None):
+    if note_id:
+        return RedirectResponse(url=f"/notes/{note_id}")
+
+    user = _require_user(request)
+    response = templates.TemplateResponse("welcome.html", _template_context(request, user))
+    _ensure_csrf_cookie(request, response)
+    return response
+
+
+@app.get("/editor")
+def editor_page(request: Request, note_id: str = None):
     user = _require_user(request)
     if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    if not user and not settings.desktop_mode and settings.auth_mode != "none":
-        response = templates.TemplateResponse("welcome.html", _template_context(request, user))
-        _ensure_csrf_cookie(request, response)
-        return response
     context = _template_context(request, user)
     context["note_id"] = note_id
     response = templates.TemplateResponse("editor.html", context)

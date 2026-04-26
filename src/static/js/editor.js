@@ -229,6 +229,8 @@ document.addEventListener('DOMContentLoaded', () => {
       styleTheme: note.styleTheme,
       layoutHints: note.layoutHints ?? {},
       passport: note.passport ?? {},
+      createdAt: note.createdAt || note.created_at || null,
+      updatedAt: note.updatedAt || note.updated_at || null,
       blocks: cleanIncomingBlocks(note.blocks),
       tags: note.tags || [],
       linksFrom: note.linksFrom || [],
@@ -1640,6 +1642,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     await refreshNoteState();
+    initMiniGraph({ force: true });
+    window.dispatchEvent(new CustomEvent('ovc:links-updated', {
+      detail: { noteId },
+    }));
   }
 
   async function addManualTags(tags) {

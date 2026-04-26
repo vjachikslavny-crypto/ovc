@@ -58,6 +58,10 @@ export function initMiniGraph(options = {}) {
   }, 50);
 }
 
+window.addEventListener('ovc:links-updated', () => {
+  initMiniGraph({ force: true });
+});
+
 function doInitMiniGraph() {
   console.log('[MiniGraph] doInitMiniGraph called, isInitializing:', isInitializing);
   
@@ -351,7 +355,7 @@ function renderMiniGraph() {
         isInitializing = false;
         
         // Переходим к заметке
-        window.location.href = `/?note_id=${d.id}`;
+        window.location.href = `/notes/${d.id}`;
       }
     })
     .on('mouseenter', function(event, d) {

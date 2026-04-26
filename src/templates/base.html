@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}OVC Human Notes{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/styles.css" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=design-fixes-20260426-3" />
     <link rel="stylesheet" href="/static/vendor/prism/prism-tomorrow.css" />
     <link rel="stylesheet" href="/static/css/prism-ovc.css" />
   </head>
@@ -22,8 +22,9 @@
         <span class="app-shell__subtitle">Human Notes</span>
       </div>
       <nav class="app-shell__nav">
+        <a href="/" class="nav-link">Главная</a>
         <a href="/notes" class="nav-link">База</a>
-        <a href="/" class="nav-link">Редактор</a>
+        <a href="/editor" class="nav-link">Редактор</a>
         <a href="/graph" class="nav-link">Граф</a>
         {% if user %}
           <span class="nav-link nav-link--user">{{ user.username }}</span>
@@ -33,8 +34,12 @@
           <span class="nav-link nav-link--user" id="nav-user" style="display: none;"></span>
           <a href="/change-password" class="nav-link" id="nav-password" style="display: none;">Пароль</a>
           <button class="nav-link nav-link--button" id="auth-logout" style="display: none;">Выйти</button>
-          <a href="/login" class="nav-link" id="nav-login">Войти</a>
-          <a href="/register" class="nav-link" id="nav-register">Регистрация</a>
+          {% if auth_mode == 'none' %}
+            <span class="nav-link nav-link--user">Без входа</span>
+          {% else %}
+            <a href="/login" class="nav-link" id="nav-login">Войти</a>
+            <a href="/register" class="nav-link" id="nav-register">Регистрация</a>
+          {% endif %}
         {% endif %}
       </nav>
     </header>

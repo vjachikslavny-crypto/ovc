@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import audioop
 import csv
 import gzip
 import hashlib
@@ -51,6 +50,11 @@ from app.agent.block_models import (
     dump_block,
 )
 from app.db.models import FileAsset, generate_uuid
+
+try:
+    import audioop
+except ImportError:  # pragma: no cover
+    audioop = None
 
 try:
     import bleach
@@ -776,6 +780,31 @@ def _default_waveform(points: int = 64) -> list[float]:
     return [0.2 for _ in range(points)]
 
 
+def _pcm_peak_without_audioop(chunk: bytes, sample_width: int, channels: int) -> int:
+    frame_size = sample_width * max(channels, 1)
+    if frame_size <= 0:
+        return 0
+
+    peak = 0.0
+    for offset in range(0, len(chunk) - frame_size + 1, frame_size):
+        samples: list[int] = []
+        for channel_idx in range(channels):
+            start = offset + (channel_idx * sample_width)
+            sample_bytes = chunk[start:start + sample_width]
+            if len(sample_bytes) < sample_width:
+                continue
+            if sample_width == 1:
+                sample = sample_bytes[0] - 128
+            else:
+                sample = int.from_bytes(sample_bytes, byteorder="little", signed=True)
+            samples.append(sample)
+        if not samples:
+            continue
+        mono_sample = sum(samples) / len(samples)
+        peak = max(peak, abs(mono_sample))
+    return int(peak)
+
+
 def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], list[float]]:
     duration = None
     waveform: list[float] = []
@@ -794,24 +823,29 @@ def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], li
                 frames = wav_file.readframes(wav_file.getnframes())
                 sample_width = wav_file.getsampwidth()
                 channels = wav_file.getnchannels()
-                if channels > 1:
+                frame_size = sample_width * max(channels, 1)
+                if channels > 1 and audioop is not None:
                     frames = audioop.tomono(frames, sample_width, 0.5, 0.5)
-                total_samples = len(frames) // sample_width
+                    frame_size = sample_width
+                total_samples = len(frames) // frame_size
                 if total_samples == 0:
                     raise ValueError("empty audio")
                 bucket = max(total_samples // AUDIO_WAVE_POINTS, 1)
                 waveform = []
-                max_sample = float((1 << (8 * sample_width - 1)) - 1) or 1.0
+                max_sample = float(127 if sample_width == 1 else (1 << (8 * sample_width - 1)) - 1) or 1.0
                 for idx in range(AUDIO_WAVE_POINTS):
-                    start = idx * bucket * sample_width
+                    start = idx * bucket * frame_size
                     if start >= len(frames):
                         break
-                    end = min(len(frames), start + bucket * sample_width)
+                    end = min(len(frames), start + bucket * frame_size)
                     chunk = frames[start:end]
                     if not chunk:
                         waveform.append(0.0)
                         continue
-                    peak = audioop.max(chunk, sample_width)
+                    if audioop is not None:
+                        peak = audioop.max(chunk, sample_width)
+                    else:
+                        peak = _pcm_peak_without_audioop(chunk, sample_width, channels)
                     waveform.append(round(min(1.0, peak / max_sample), 4))
     except Exception:
         waveform = []
