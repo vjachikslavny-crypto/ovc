@@ -3,6 +3,8 @@
 > Дата генерации: 14 февраля 2026
 > Версия: 0.1.0
 
+> Актуализация: см. `docs/current_release_notes.md` (сводка последних merge и UI/runtime обновлений).
+
 ---
 
 ## Оглавление
@@ -2214,7 +2216,7 @@ Jinja2 базовый layout. Русский locale (`lang="ru"`).
 
 **Body атрибуты:** `class="theme-clean"`, `data-theme`, `data-auth-mode`, `data-desktop-mode`, `data-supabase-url`, `data-supabase-anon-key`
 
-**Header:** `.app-shell__topbar` — бренд "OVC Human Notes", навигация: База (/notes), Редактор (/notes/), Граф (/graph), условные ссылки (user/login/register/logout/password)
+**Header:** `.app-shell__topbar` — бренд "OVC Human Notes", навигация: Главная (`/`), База (`/notes`), Редактор (`/editor`), Граф (`/graph`), условные ссылки (user/login/register/logout/password)
 
 **Main:** `<main id="app-root" class="app-shell__body">` → content block
 
@@ -2236,7 +2238,7 @@ Jinja2 базовый layout. Русский locale (`lang="ru"`).
 - Toolbar: Bold, Italic, Link, List, Quote, Align
 - Connections panel
 - Canvas → `#note-blocks`
-- Floating actions: +, connections, voice, attach
+- Floating actions: +, connections, voice, attach, AI
 - Hidden file input
 - Upload progress
 - Drop overlay
@@ -2257,6 +2259,7 @@ Scripts: d3.v7.min.js, editor.js (module), mini-graph.js (module)
 - Header: "Мои заметки", search input, deep-search-toggle, theme switcher, create button
 - Deep search panel (hidden): input, find button, close button, status
 - Notes list
+- В карточке заметки есть встроенная кнопка удаления (`.note-card__delete`) с confirm-диалогом (`.confirm-overlay`, `.confirm-dialog`)
 - Footer: load more
 
 Script: notes_page.js (module)
@@ -2287,13 +2290,18 @@ Scripts: d3.v7.min.js, graph.js
 
 ### 6.6. welcome.html — Приветственная страница
 
-Бренд "OVCnotes" + слоган. Две карточки: вход и регистрация.
+Текущая версия `welcome.html` — это рабочий dashboard:
+
+- левая колонка: профиль/действия/недавние заметки;
+- правая колонка: переключаемые вкладки «Список заметок» и «Граф»;
+- для авторизованного пользователя подгружаются карточки заметок и граф;
+- для гостя показываются сценарии входа/регистрации и пустые состояния.
 
 ---
 
 ## 7. CSS — Стили
 
-**Файл:** `src/static/css/styles.css` (~4600 строк)
+**Файл:** `src/static/css/styles.css` (~5700+ строк)
 
 ### Основные секции
 
@@ -2356,6 +2364,9 @@ Scripts: d3.v7.min.js, graph.js
 24. **Mini-Graph Sidebar:** `.graph-sidebar`, `.mini-graph-svg`, `.mini-graph-toggle-floating`
 
 25. **Mobile Responsive (max-width: 899px):** Стек layout, скрытие graph sidebar, full-width блоки
+    - верхняя навигация `.app-shell__nav` в одну горизонтально скроллируемую строку;
+    - touch-friendly высота nav-кнопок (`min-height: 44px`);
+    - уменьшение визуального шума в topbar для телефонов.
 
 26. **Утилиты:** `.hidden`, `.muted`, `.spacer`, `.sr-only`, `.text-center`, `.danger`
 
