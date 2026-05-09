@@ -1,22 +1,168 @@
 {% extends "base.html" %}
-{% block title %}OVCnotes — Добро пожаловать{% endblock %}
+{% set profile_name = (user.display_name or user.username or user.email) if user else "Гость" %}
+{% set profile_caption = user.email if user and user.email else ("@" ~ user.username if user and user.username else "Войдите, чтобы увидеть свои заметки") %}
+{% set profile_initial = (profile_name[:1] if profile_name else "G") | upper %}
+{% block title %}OVCnotes — Главное меню{% endblock %}
 
 {% block content %}
-<section class="welcome-page">
-  <div class="welcome-card">
-    <h1 class="welcome-brand">OVCnotes</h1>
-    <p class="welcome-slogan">Заметки нового уровня</p>
+<section
+  class="home-dashboard-page"
+  data-home-dashboard
+  data-workspace-access="{{ 'true' if workspace_access else 'false' }}"
+>
+  <aside class="home-dashboard__sidebar">
+    <section class="home-panel home-panel--account">
+      <div class="home-panel__topline">
+        {% if workspace_access %}
+          <a href="/change-password" class="home-panel__link">Настройки</a>
+        {% else %}
+          <a href="/login" class="home-panel__link">Войти</a>
+        {% endif %}
+      </div>
 
-    <div class="welcome-actions">
-      <a href="/login" class="welcome-action-card">
-        <h3>Войти в аккаунт</h3>
-        <p class="muted">Продолжить работу с вашими заметками.</p>
-      </a>
-      <a href="/register" class="welcome-action-card">
-        <h3>Зарегистрировать аккаунт</h3>
-        <p class="muted">Создать новый профиль OVCnotes.</p>
-      </a>
+      <div class="home-account">
+        <div class="home-account__avatar">{{ profile_initial }}</div>
+        <div class="home-account__copy">
+          <h1>{{ profile_name }}</h1>
+          <p>{{ profile_caption }}</p>
+        </div>
+      </div>
+
+      <div class="home-account__actions">
+        {% if workspace_access %}
+          <button type="button" class="pill-button pill-button--primary" id="home-create-note">Новая заметка</button>
+          <a href="/notes" class="pill-button">Все заметки</a>
+        {% else %}
+          <a href="/login" class="pill-button pill-button--primary">Войти</a>
+          <a href="/register" class="pill-button">Регистрация</a>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="home-panel home-panel--recent">
+      <div class="home-panel__header">
+        <div>
+          <h2>Недавние заметки</h2>
+        </div>
+      </div>
+
+      {% if workspace_access %}
+        <div class="home-recent-list" id="home-recent-notes">
+          <div class="home-skeleton home-skeleton--line"></div>
+          <div class="home-skeleton home-skeleton--line"></div>
+          <div class="home-skeleton home-skeleton--line"></div>
+          <div class="home-skeleton home-skeleton--line"></div>
+        </div>
+      {% else %}
+        <div class="home-empty-card">
+          <strong>Пока пусто</strong>
+          <p>После входа здесь будут последние изменения, быстрые переходы и заметки, к которым ты возвращался недавно.</p>
+        </div>
+      {% endif %}
+    </section>
+  </aside>
+
+  <section class="home-dashboard__stage">
+    <header class="home-stage__header">
+      <div class="home-stage__copy">
+        <h2>Рабочее пространство</h2>
+      </div>
+
+      <div class="home-window-switcher" role="tablist" aria-label="Выбор окна">
+        <button
+          type="button"
+          class="home-window-tab is-active"
+          data-home-tab="notes"
+          role="tab"
+          aria-selected="true"
+        >
+          Список заметок
+        </button>
+        <button
+          type="button"
+          class="home-window-tab"
+          data-home-tab="graph"
+          role="tab"
+          aria-selected="false"
+        >
+          Граф
+        </button>
+      </div>
+    </header>
+
+    <div class="home-stage__body">
+      <section class="home-view is-active" data-home-panel="notes">
+        <div class="home-view__toolbar">
+          <a href="{{ '/notes' if workspace_access else '/login' }}" class="home-view__link">
+            {{ 'Открыть базу' if workspace_access else 'Перейти ко входу' }}
+          </a>
+        </div>
+
+        {% if workspace_access %}
+          <div class="home-note-grid" id="home-note-grid">
+            <div class="home-skeleton home-skeleton--card"></div>
+            <div class="home-skeleton home-skeleton--card"></div>
+            <div class="home-skeleton home-skeleton--card"></div>
+            <div class="home-skeleton home-skeleton--card"></div>
+          </div>
+        {% else %}
+          <div class="home-guest-grid">
+            <article class="home-guest-card">
+              <span class="home-guest-card__kicker">После входа</span>
+              <h3>Список заметок</h3>
+              <p>В этом окне будут последние заметки, быстрые переходы и кнопка продолжить работу.</p>
+            </article>
+            <article class="home-guest-card">
+              <span class="home-guest-card__kicker">Поиск</span>
+              <h3>Быстрый обзор</h3>
+              <p>Сразу видно, где ты остановился, какие записи обновлялись недавно и что открыть дальше.</p>
+            </article>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="home-view" data-home-panel="graph" hidden>
+        <div class="home-view__toolbar">
+          <div class="home-graph-stats" id="home-graph-stats">
+            <span class="home-stat-chip">Узлы: —</span>
+            <span class="home-stat-chip">Связи: —</span>
+            <span class="home-stat-chip">Группы: —</span>
+          </div>
+        </div>
+
+        {% if workspace_access %}
+          <div class="home-graph-layout">
+            <div class="home-graph-card">
+              <div class="home-graph-canvas" id="home-graph-canvas">
+                <svg id="home-graph-svg" class="home-graph-svg"></svg>
+                <div class="home-graph-empty" id="home-graph-empty">Граф загружается...</div>
+              </div>
+            </div>
+
+            <aside class="home-graph-side">
+              <section class="home-graph-meta">
+                <h3>Фокус графа</h3>
+                <ul class="home-insight-list" id="home-graph-insights">
+                  <li class="home-insight-item home-insight-item--muted">Подготавливаю связи между заметками...</li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+        {% else %}
+          <div class="home-empty-card home-empty-card--graph">
+            <strong>Граф появится после входа</strong>
+            <p>Во втором окне будет карта связей между заметками, чтобы можно было переключаться между сетью идей и обычным списком.</p>
+          </div>
+        {% endif %}
+      </section>
     </div>
-  </div>
+  </section>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+  {% if workspace_access %}
+    <script src="/static/js/vendor/d3.v7.min.js"></script>
+  {% endif %}
+  <script type="module" src="/static/js/welcome_dashboard.js"></script>
 {% endblock %}
