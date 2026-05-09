@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-try:
-    import audioop
-except ModuleNotFoundError:
-    audioop = None  # Removed in Python 3.13+
 import csv
 import gzip
 import hashlib
@@ -798,23 +794,20 @@ def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], li
                 sample_width = wav_file.getsampwidth()
                 channels = wav_file.getnchannels()
                 if channels > 1:
-                    if audioop is not None:
-                        frames = audioop.tomono(frames, sample_width, 0.5, 0.5)
-                    else:
-                        # Pure-Python mono downmix: average channels
-                        import struct
-                        fmt = {1: 'b', 2: '<h', 4: '<i'}.get(sample_width, '<h')
-                        frame_size = sample_width * channels
-                        mono_frames = bytearray()
-                        for i in range(0, len(frames), frame_size):
-                            total = 0
-                            for ch in range(channels):
-                                offset = i + ch * sample_width
-                                sample = struct.unpack_from(fmt, frames, offset)[0]
-                                total += sample
-                            avg = total // channels
-                            mono_frames.extend(struct.pack(fmt, avg))
-                        frames = bytes(mono_frames)
+                    # Pure-Python mono downmix: average channels
+                    import struct
+                    fmt = {1: 'b', 2: '<h', 4: '<i'}.get(sample_width, '<h')
+                    frame_size = sample_width * channels
+                    mono_frames = bytearray()
+                    for i in range(0, len(frames), frame_size):
+                        total = 0
+                        for ch in range(channels):
+                            offset = i + ch * sample_width
+                            sample = struct.unpack_from(fmt, frames, offset)[0]
+                            total += sample
+                        avg = total // channels
+                        mono_frames.extend(struct.pack(fmt, avg))
+                    frames = bytes(mono_frames)
                 total_samples = len(frames) // sample_width
                 if total_samples == 0:
                     raise ValueError("empty audio")
@@ -830,17 +823,14 @@ def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], li
                     if not chunk:
                         waveform.append(0.0)
                         continue
-                    if audioop is not None:
-                        peak = audioop.max(chunk, sample_width)
-                    else:
-                        # Pure-Python peak detection
-                        import struct
-                        fmt = {1: 'b', 2: '<h', 4: '<i'}.get(sample_width, '<h')
-                        peak = 0
-                        for si in range(0, len(chunk), sample_width):
-                            val = abs(struct.unpack_from(fmt, chunk, si)[0])
-                            if val > peak:
-                                peak = val
+                    # Pure-Python peak detection
+                    import struct
+                    fmt = {1: 'b', 2: '<h', 4: '<i'}.get(sample_width, '<h')
+                    peak = 0
+                    for si in range(0, len(chunk), sample_width):
+                        val = abs(struct.unpack_from(fmt, chunk, si)[0])
+                        if val > peak:
+                            peak = val
                     waveform.append(round(min(1.0, peak / max_sample), 4))
     except Exception:
         waveform = []

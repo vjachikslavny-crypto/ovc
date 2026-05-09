@@ -42,10 +42,13 @@ router = APIRouter(tags=["notes"])
 def _owner_filter(user: User):
     """Return SQLAlchemy filter for notes owned by user.
 
-    In desktop/none mode also includes orphan notes (user_id IS NULL)
-    for backward compatibility.  In multi-user production only strict ownership.
+    In none mode all notes are accessible (single-user dev).
+    In desktop mode also includes orphan notes (user_id IS NULL).
+    In multi-user production only strict ownership.
     """
-    if settings.desktop_mode or settings.auth_mode == "none":
+    if settings.auth_mode == "none":
+        return True
+    if settings.desktop_mode:
         return or_(Note.user_id == user.id, Note.user_id.is_(None))
     return Note.user_id == user.id
 
@@ -400,8 +403,14 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
 
 
 def _ensure_note_owner(note: Note, user: User, session) -> None:
+    if settings.auth_mode == "none":
+        if note.user_id is None:
+            note.user_id = user.id
+            session.add(note)
+            session.flush()
+        return
     if note.user_id is None:
-        if settings.desktop_mode or settings.auth_mode == "none":
+        if settings.desktop_mode:
             note.user_id = user.id
             session.add(note)
             session.flush()

@@ -290,9 +290,9 @@ def stream_user_message(
 def _stub_reply(mode: str = "chat") -> AgentReply:
     """Заглушка при отсутствии LLM."""
     stubs = {
-        "summarize": "Конспект временно недоступен — нет подключения к AI.",
+        "summarize_text": "Конспект временно недоступен — нет подключения к AI.",
         "detailed": "Подробный конспект временно недоступен — нет подключения к AI.",
         "explain": "Объяснение временно недоступно — нет подключения к AI.",
     }
-    reply = stubs.get(mode, "Нет подключения к AI. Установите GEMINI_API_KEY.")
+    reply = stubs.get(mode, "Нет подключения к AI. Установите GROQ_API_KEY.")
     return AgentReply(reply=reply, draft=[], mode=mode)

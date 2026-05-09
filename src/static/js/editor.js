@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const fabConnections = document.getElementById('fab-connections');
   const fabVoice = document.getElementById('fab-voice');
   const fabAttach = document.getElementById('fab-attach');
+  const fabAi = document.getElementById('fab-ai');
   const fileInput = document.getElementById('file-input');
   const dropOverlay = document.getElementById('drop-overlay');
   const uploadStatusEl = document.getElementById('upload-progress');
@@ -89,6 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const aiChatEl = document.getElementById('ai-chat-panel');
   initAiChat({
     rootEl: aiChatEl,
+    toggleBtn: fabAi,
     getNoteId: () => noteState.id,
     onBlocksCommitted: refreshNoteState,
   });
