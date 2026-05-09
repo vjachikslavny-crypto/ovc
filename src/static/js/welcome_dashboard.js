@@ -34,6 +34,11 @@ if (dashboardRoot) {
         renderGraphPreview();
       }
     }, 180));
+    document.addEventListener('theme-change', () => {
+      if (state.currentTab === 'graph' && state.graph) {
+        requestAnimationFrame(() => renderGraphPreview());
+      }
+    });
   }
 
   function initTabs() {
@@ -332,6 +337,7 @@ if (dashboardRoot) {
     const width = Math.max(elements.graphCanvas.clientWidth || 0, 420);
     const height = Math.max(elements.graphCanvas.clientHeight || 0, 420);
     svg.attr('width', width).attr('height', height);
+    const themeColors = getThemeColors();
 
     if (elements.graphEmpty) {
       elements.graphEmpty.hidden = true;
@@ -361,7 +367,7 @@ if (dashboardRoot) {
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', (edge) => (edge.type === 'tag' ? 'rgba(255,255,255,0.18)' : 'rgba(139,92,246,0.34)'))
+      .attr('stroke', (edge) => (edge.type === 'tag' ? themeColors.mutedEdge : themeColors.accentEdge))
       .attr('stroke-width', (edge) => (edge.type === 'tag' ? 1 : 1.5))
       .attr('stroke-dasharray', (edge) => (edge.type === 'tag' ? '6 6' : null));
 
@@ -379,9 +385,8 @@ if (dashboardRoot) {
       .append('circle')
       .attr('r', (node) => 8 + Math.min(16, Math.max(0, Number(node.sizeScore || 0) * 2.2)))
       .attr('fill', (node) => node.color || 'var(--accent)')
-      .attr('stroke', 'rgba(255,255,255,0.7)')
-      .attr('stroke-width', 1.25)
-      .attr('filter', 'url(#home-graph-glow)');
+      .attr('stroke', themeColors.nodeStroke)
+      .attr('stroke-width', 1.25);
 
     nodeGroup
       .append('text')
@@ -414,8 +419,72 @@ if (dashboardRoot) {
       nodeGroup.attr('transform', (node) => `translate(${node.x}, ${node.y})`);
     });
 
+    nodeGroup.call(dragGraphNode(simulation));
     state.graphSimulation = simulation;
     state.graphRendered = true;
+  }
+
+  function getThemeColors() {
+    const styles = window.getComputedStyle(document.documentElement);
+    const accent = styles.getPropertyValue('--accent').trim() || '#8b5cf6';
+    const muted = styles.getPropertyValue('--muted').trim() || '#b7b7bc';
+    const text = styles.getPropertyValue('--text').trim() || '#e9e9eb';
+    return {
+      accentEdge: colorWithAlpha(accent, 0.42),
+      mutedEdge: colorWithAlpha(muted, 0.28),
+      nodeStroke: colorWithAlpha(text, 0.72),
+    };
+  }
+
+  function colorWithAlpha(color, alpha) {
+    if (!color) return `rgba(139, 92, 246, ${alpha})`;
+    if (color.startsWith('#')) {
+      const rgb = hexToRgb(color);
+      return rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})` : color;
+    }
+    if (color.startsWith('rgb(')) {
+      return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+    }
+    if (color.startsWith('rgba(')) {
+      return color.replace(/rgba\(([^)]+)\)/, (_, value) => {
+        const parts = value.split(',').slice(0, 3).join(',');
+        return `rgba(${parts}, ${alpha})`;
+      });
+    }
+    return color;
+  }
+
+  function hexToRgb(hex) {
+    const clean = hex.replace('#', '').trim();
+    const normalized = clean.length === 3 ? clean.split('').map((char) => char + char).join('') : clean;
+    const value = Number.parseInt(normalized, 16);
+    if (!Number.isFinite(value)) return null;
+    return {
+      r: (value >> 16) & 255,
+      g: (value >> 8) & 255,
+      b: value & 255,
+    };
+  }
+
+  function dragGraphNode(simulation) {
+    function started(event, node) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      node.fx = node.x;
+      node.fy = node.y;
+    }
+
+    function dragged(event, node) {
+      node.fx = event.x;
+      node.fy = event.y;
+    }
+
+    function ended(event, node) {
+      if (!event.active) simulation.alphaTarget(0);
+      node.fx = null;
+      node.fy = null;
+    }
+
+    return window.d3.drag().on('start', started).on('drag', dragged).on('end', ended);
   }
 
   function countGroups(nodes) {
