@@ -8,6 +8,8 @@ OVC — заметки на **FastAPI + SQLite** с блочным редакт�
 
 Ключевой принцип: desktop добавлен **аддитивно**, без ломки web-поведения.
 
+Последнее обновление UI (2026-05-10): re-merge `ok10010` в `vanya+max/develop` с theme-aware правками dashboard/graph. Детали: `docs/current_release_notes.md`.
+
 ## Что есть в проекте
 
 - Главная рабочая страница (`/`) + блочный редактор (`/editor`, `/notes/{id}`)
