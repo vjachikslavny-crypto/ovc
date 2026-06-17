@@ -14,6 +14,7 @@ import { initSlidesViewers } from './slides_viewer.js';
 import { initTableViewers } from './table_viewer.js';
 import { initMarkdownViewers } from './markdown_viewer.js';
 import { initConnectionsPanel } from './connections_panel.js';
+import { initAiChat } from './ai_chat.js';
 import { initMiniGraph } from './mini-graph.js';
 
 const SAVE_DEBOUNCE = 600;
@@ -38,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const fabConnections = document.getElementById('fab-connections');
   const fabVoice = document.getElementById('fab-voice');
   const fabAttach = document.getElementById('fab-attach');
+  const fabAi = document.getElementById('fab-ai');
   const fileInput = document.getElementById('file-input');
   const dropOverlay = document.getElementById('drop-overlay');
   const uploadStatusEl = document.getElementById('upload-progress');
@@ -83,6 +85,14 @@ document.addEventListener('DOMContentLoaded', () => {
     button: fabVoice,
     uploader,
     onReady: () => {},
+  });
+
+  const aiChatEl = document.getElementById('ai-chat-panel');
+  initAiChat({
+    rootEl: aiChatEl,
+    toggleBtn: fabAi,
+    getNoteId: () => noteState.id,
+    onBlocksCommitted: refreshNoteState,
   });
 
   canvas.addEventListener('click', (event) => {
@@ -229,6 +239,8 @@ document.addEventListener('DOMContentLoaded', () => {
       styleTheme: note.styleTheme,
       layoutHints: note.layoutHints ?? {},
       passport: note.passport ?? {},
+      createdAt: note.createdAt || note.created_at || null,
+      updatedAt: note.updatedAt || note.updated_at || null,
       blocks: cleanIncomingBlocks(note.blocks),
       tags: note.tags || [],
       linksFrom: note.linksFrom || [],
@@ -1640,6 +1652,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     await refreshNoteState();
+    initMiniGraph({ force: true });
+    window.dispatchEvent(new CustomEvent('ovc:links-updated', {
+      detail: { noteId },
+    }));
   }
 
   async function addManualTags(tags) {
@@ -2173,25 +2189,16 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (isEmpty) {
       if (isNewNoteInitialLayout) {
-        // Новая заметка: сразу боковое положение как после создания первого блока.
         floatingActions.classList.remove('floating-actions--centered');
         floatingActions.classList.remove('floating-actions--new-note-initial');
-        floatingActions.style.setProperty('--floating-actions-offset', '24px');
       } else {
         floatingActions.classList.add('floating-actions--centered');
         floatingActions.classList.remove('floating-actions--new-note-initial');
-        floatingActions.style.setProperty('--floating-actions-offset', 'auto');
       }
     } else {
-      // Если есть блоки - показываем кнопки справа с динамическим отступом
       isNewNoteInitialLayout = false;
       floatingActions.classList.remove('floating-actions--centered');
       floatingActions.classList.remove('floating-actions--new-note-initial');
-      const dynamicOffset = Math.min(18 + blockCount * 6, 140);
-      floatingActions.style.setProperty(
-        '--floating-actions-offset',
-        `${dynamicOffset}px`,
-      );
     }
   }
 

@@ -8,13 +8,16 @@ OVC — заметки на **FastAPI + SQLite** с блочным редакт�
 
 Ключевой принцип: desktop добавлен **аддитивно**, без ломки web-поведения.
 
+Последнее обновление UI (2026-05-10): re-merge `ok10010` в `vanya+max/develop` с theme-aware правками dashboard/graph. Детали: `docs/current_release_notes.md`.
+
 ## Что есть в проекте
 
-- Блочный редактор заметок (`/`, `/notes/{id}`)
+- Главная рабочая страница (`/`) + блочный редактор (`/editor`, `/notes/{id}`)
 - Граф заметок и связей (`/graph`)
 - Теги, связи, «паспорт заметки»
 - Загрузка файлов (изображения, PDF, DOCX/RTF, PPTX, Excel/CSV, audio/video, code/markdown)
 - Аудиозапись и аудиоплеер
+- Удаление заметки из базы с подтверждением
 - Локальная авторизация + Supabase (режим задаётся через `AUTH_MODE`)
 - Desktop local-first синхронизация (outbox + pull/push)
 
@@ -257,6 +260,8 @@ GET /api/runtime/status
 
 - `docs/quick_start.md` — быстрый старт
 - `docs/repo_map.md` — карта репозитория
+- `docs/current_release_notes.md` — отдельная сводка всех последних нововведений
+- `docs/design-fixes.md` — точечные правки по дизайну и UX
 - `docs/auth_migration.md` — заметки по миграции auth
 - `docs/pdf/debug.md` — отладка PDF
 - `docs/pdf/performance.md` — производительность PDF

@@ -308,6 +308,17 @@ def upgrade() -> None:
             except Exception as e:
                 print(f"Error adding last_client_ts column to notes table: {e}")
 
+        # Миграция messages: добавляем поля для диалогового логирования
+        result = conn.execute(text("PRAGMA table_info(messages)"))
+        msg_columns = [row[1] for row in result.fetchall()]
+        for col, col_type in [("user_id", "VARCHAR"), ("note_id", "VARCHAR"), ("mode", "VARCHAR")]:
+            if col not in msg_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE messages ADD COLUMN {col} {col_type}"))
+                    print(f"Added {col} column to messages table")
+                except Exception as e:
+                    print(f"Error adding {col} to messages: {e}")
+
         # Если таблицы не существует, создаем все таблицы
         try:
             Base.metadata.create_all(bind=conn)

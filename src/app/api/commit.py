@@ -188,11 +188,19 @@ async def commit_endpoint(
 
 
 def _require_note(session, note_id: Optional[str], user: User) -> Note:
+    from app.core.config import settings
+
     if not note_id:
         raise HTTPException(status_code=400, detail="Draft action missing noteId")
     note = session.get(Note, note_id)
     if not note:
         raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+    if settings.auth_mode == "none":
+        if note.user_id is None:
+            note.user_id = user.id
+            session.add(note)
+            session.flush()
+        return note
     if note.user_id is None:
         note.user_id = user.id
         session.add(note)

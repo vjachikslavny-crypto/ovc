@@ -118,6 +118,9 @@ class MessageLog(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     role = Column(String, nullable=False)
     text = Column(Text, nullable=False)
+    user_id = Column(String, nullable=True, index=True)
+    note_id = Column(String, nullable=True, index=True)
+    mode = Column(String, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
 
 

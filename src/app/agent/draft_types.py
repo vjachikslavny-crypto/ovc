@@ -5,6 +5,13 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
+class ChatMessage(BaseModel):
+    """Одно сообщение в истории диалога."""
+    role: Literal["user", "assistant"]
+    text: str
+
+
+
 class DraftActionBase(BaseModel):
     type: str
     note_id: Optional[str] = Field(default=None, alias="noteId")
@@ -76,3 +83,6 @@ DraftAction = Union[
 class AgentReply(BaseModel):
     reply: str
     draft: list[DraftAction]
+    mode: str = "chat"
+    # Для create_note: предлагаемый заголовок новой заметки
+    suggested_title: Optional[str] = None

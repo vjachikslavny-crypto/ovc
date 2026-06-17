@@ -13,9 +13,16 @@ from app.db.models import GroupPreference, Note, NoteLink, NoteTag
 from app.db.session import get_session
 from app.utils.layout_hints import parse_layout_hints
 from app.core.security import get_current_user
+from app.core.config import settings
 from app.models.user import User
 
 router = APIRouter(tags=["graph"])
+
+
+def _user_notes_query(user: User):
+    if settings.auth_mode == "none":
+        return select(Note)
+    return select(Note).where(Note.user_id == user.id)
 
 
 DEFAULT_COLOR = "#8b5cf6"
@@ -35,7 +42,7 @@ class GroupLabelRequest(BaseModel):
 async def graph_endpoint(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
-            session.execute(select(Note).where(Note.user_id == current_user.id))
+            session.execute(_user_notes_query(current_user))
             .scalars()
             .all()
         )
@@ -58,7 +65,7 @@ async def graph_endpoint(current_user: User = Depends(get_current_user)):
             session.execute(
                 select(NoteTag.note_id, NoteTag.tag)
                 .join(Note, Note.id == NoteTag.note_id)
-                .where(Note.user_id == current_user.id)
+                .where(Note.user_id == current_user.id if settings.auth_mode != "none" else True)
             )
             .all()
         )
@@ -115,7 +122,7 @@ async def graph_endpoint(current_user: User = Depends(get_current_user)):
 async def graph_groups(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
-            session.execute(select(Note).where(Note.user_id == current_user.id))
+            session.execute(_user_notes_query(current_user))
             .scalars()
             .all()
         )
