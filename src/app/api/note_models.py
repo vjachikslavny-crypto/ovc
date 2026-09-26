@@ -43,6 +43,7 @@ class NoteSummary(_BaseModel):
     style_theme: str = Field(alias="styleTheme")
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
+    revision: int = 0
 
 
 class NoteDetail(NoteSummary):

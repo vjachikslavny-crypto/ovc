@@ -16,6 +16,7 @@ from app.agent.prompts import (
 )
 from app.agent.token_counter import count_tokens
 from app.core.config import settings
+from app.core.ownership import is_owned, owned_notes_filter
 from app.db.models import Note, NoteLink, NoteTag
 from app.rag.tfidf_index import index as tfidf_index
 
@@ -68,7 +69,7 @@ def get_note_context(
     note = session.get(Note, note_id)
     if not note:
         return None
-    if user_id and note.user_id and note.user_id != user_id:
+    if not is_owned(note, user_id):
         return None
 
     blocks = json.loads(note.blocks_json or "[]")
@@ -86,7 +87,7 @@ def get_note_context(
         select(NoteLink.to_id).where(NoteLink.from_id == note_id)
     ).all():
         linked = session.get(Note, link.to_id)
-        if linked:
+        if is_owned(linked, user_id):
             link_titles.append(linked.title)
 
     return NoteContext(
@@ -108,6 +109,8 @@ def get_linked_notes(
 
     Отличие от TF-IDF: это явные ссылки пользователя, не автоматический поиск.
     """
+    if not is_owned(session.get(Note, note_id), user_id):
+        return []
     result: list[LinkedNote] = []
     for link_row in session.execute(
         select(NoteLink.to_id).where(NoteLink.from_id == note_id)
@@ -117,7 +120,7 @@ def get_linked_notes(
         linked_note = session.get(Note, link_row.to_id)
         if not linked_note:
             continue
-        if user_id and linked_note.user_id and linked_note.user_id != user_id:
+        if not is_owned(linked_note, user_id):
             continue
 
         blocks = json.loads(linked_note.blocks_json or "[]")
@@ -147,7 +150,8 @@ def get_related_notes(
     exclude_note_id: Optional[str] = None,
 ) -> list[RelatedNote]:
     """Ищет похожие заметки через TF-IDF индекс."""
-    results = tfidf_index.search(query, limit=limit + 5)
+    live_note_ids = set(session.execute(select(Note.id).where(owned_notes_filter(user_id))).scalars())
+    results = tfidf_index.search(query, limit=limit + 5, allowed_note_ids=live_note_ids)
     related: list[RelatedNote] = []
     seen_ids: set[str] = set()
 
@@ -162,7 +166,7 @@ def get_related_notes(
         note = session.get(Note, nid)
         if not note:
             continue
-        if user_id and note.user_id and note.user_id != user_id:
+        if not is_owned(note, user_id):
             continue
 
         snippet = str(hit.get("text", ""))[:200]

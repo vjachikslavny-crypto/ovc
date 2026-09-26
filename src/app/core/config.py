@@ -74,8 +74,13 @@ class Settings:
         self.access_token_expires_min = int(os.getenv("ACCESS_TOKEN_EXPIRES_MIN", "15"))
         self.refresh_token_expires_days = int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30"))
         self.cookie_domain = os.getenv("COOKIE_DOMAIN") or None
-        self.cookie_secure = _env_bool("COOKIE_SECURE", False)
+        self.cookie_secure = _env_bool("COOKIE_SECURE", os.getenv("APP_ENV", "development").lower() == "production")
         self.cookie_samesite = os.getenv("COOKIE_SAMESITE", "lax")
+        self.cookie_samesite = self.cookie_samesite.lower()
+        if self.cookie_samesite not in {"lax", "strict", "none"}:
+            raise ValueError("COOKIE_SAMESITE must be lax, strict or none")
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            raise ValueError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true")
         self.public_base_url = os.getenv("PUBLIC_BASE_URL", "").strip()
         self.cors_origins = self._parse_cors_origins()
         self.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -102,6 +107,9 @@ class Settings:
         self.email_from = os.getenv("EMAIL_FROM", "no-reply@ovc.local")
         self.email_backend = os.getenv("EMAIL_BACKEND", "mock")
         self.app_env = os.getenv("APP_ENV", "development").strip().lower()
+        self.db_auto_migrate = _env_bool("DB_AUTO_MIGRATE", False)
+        if self.db_auto_migrate and self.app_env not in {"development", "test"}:
+            raise ValueError("DB_AUTO_MIGRATE is allowed only in development/test; production requires explicit migrations")
         self.desktop_mode = _env_bool("DESKTOP_MODE", False)
         self.allow_desktop_dev_fallback = _env_bool(
             "ALLOW_DESKTOP_DEV_FALLBACK",
@@ -138,8 +146,14 @@ class Settings:
         # Auth mode: "none" | "local" | "supabase" | "both"
         self.auth_mode: AuthMode = os.getenv("AUTH_MODE", "local").lower()  # type: ignore
         if self.auth_mode not in ("none", "local", "supabase", "both"):
-            self.auth_mode = "local"
+            raise ValueError("Unknown AUTH_MODE")
         
+        self.public_mode = _env_bool("PUBLIC_MODE") or self.app_env == "production" or bool(self.public_base_url)
+        if self.public_mode and self.auth_mode == "none":
+            if not _env_bool("ALLOW_UNSAFE_PUBLIC_NO_AUTH"):
+                raise ValueError("Public AUTH_MODE=none is unsafe; use authentication (override: ALLOW_UNSAFE_PUBLIC_NO_AUTH)")
+            self._warn("DANGER: public authentication disabled by ALLOW_UNSAFE_PUBLIC_NO_AUTH")
+
         # Supabase configuration
         self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
         self.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY", "")

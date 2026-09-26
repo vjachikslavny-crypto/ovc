@@ -27,7 +27,7 @@ CSRF_COOKIE = "csrf_token"
 REFRESH_COOKIE = "refresh_token"
 ACCESS_COOKIE = "ovc_access_token"
 USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9._-]{3,24}$')
-FORBIDDEN_USERNAMES = {'admin', 'root', 'system', 'api', 'auth', 'login', 'register', 'logout', 'me'}
+FORBIDDEN_USERNAMES = {'admin', 'root', 'system', 'api', 'auth', 'login', 'register', 'logout', 'me', 'dev-user'}
 
 _ph = PasswordHasher(type=Type.ID)
 
@@ -98,6 +98,8 @@ def get_bearer_token(request: Request) -> Optional[str]:
     parts = auth.split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return parts[1]
+    if auth:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
     cookie_token = request.cookies.get(ACCESS_COOKIE)
     if cookie_token:
         return cookie_token.strip()
@@ -107,7 +109,7 @@ def get_bearer_token(request: Request) -> Optional[str]:
 def require_csrf(request: Request) -> None:
     header = request.headers.get("X-CSRF-Token")
     cookie = request.cookies.get(CSRF_COOKIE)
-    if not header or not cookie or header != cookie:
+    if not header or not cookie or not secrets.compare_digest(header, cookie):
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid")
 
 
@@ -127,6 +129,8 @@ def get_current_user(request: Request) -> User:
     if not token:
         raise HTTPException(status_code=401, detail="Missing access token")
     payload = decode_access_token(token)
+    if payload.get("auth_provider", "local") != "local":
+        raise HTTPException(status_code=401, detail="Local authentication required")
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid access token")
@@ -139,6 +143,8 @@ def get_current_user(request: Request) -> User:
 
 
 def get_user_from_refresh_cookie(request: Request) -> User:
+    if settings.auth_mode == "none":
+        raise HTTPException(status_code=401, detail="Cookie authentication is disabled")
     raw_token = request.cookies.get(REFRESH_COOKIE)
     if not raw_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
@@ -157,20 +163,28 @@ def get_user_from_refresh_cookie(request: Request) -> User:
         )
         if not token:
             raise HTTPException(status_code=401, detail="Refresh token invalid")
+        allowed = {"local", "supabase"} if settings.auth_mode == "both" else {settings.auth_mode}
+        if token.auth_provider not in allowed:
+            raise HTTPException(status_code=401, detail="Session provider is disabled")
         user = session.get(User, token.user_id)
         if not user or not user.is_active:
             raise HTTPException(status_code=403, detail="User inactive")
+        if token.auth_provider == "supabase" and not user.supabase_id:
+            raise HTTPException(status_code=401, detail="Supabase account is not linked")
+        request.state.auth_context = f"{token.auth_provider}-session"
         return user
 
 
 def get_current_user_or_refresh(request: Request) -> User:
-    # Prefer bearer/cookie token, but gracefully fallback to refresh cookie when token is stale.
-    token = get_bearer_token(request)
-    if token:
+    if settings.auth_mode == "none":
+        return get_current_user(request)
+    if get_bearer_token(request):
         try:
             return get_current_user(request)
-        except HTTPException:
-            pass
+        except HTTPException as exc:
+            # Explicit Authorization must never silently switch identities.
+            if request.headers.get("Authorization") or exc.status_code != 401:
+                raise
     return get_user_from_refresh_cookie(request)
 
 
@@ -183,10 +197,15 @@ def validate_username(username: str) -> bool:
     return True
 
 
+def as_utc(value: dt.datetime) -> dt.datetime:
+    return value.replace(tzinfo=dt.timezone.utc) if value.tzinfo is None else value.astimezone(dt.timezone.utc)
+
+
 def check_user_locked(user: User) -> tuple[bool, Optional[dt.datetime]]:
     """Проверка, заблокирован ли пользователь"""
-    if user.locked_until and user.locked_until > _now():
-        return True, user.locked_until
+    until = as_utc(user.locked_until) if user.locked_until else None
+    if until and until > _now():
+        return True, until
     return False, None
 
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse, JSONResponse
 
 from app.db.models import FileAsset
+from app.core.ownership import get_owned_file
 from app.db.session import get_session
 from app.core.config import settings
 from app.core.security import get_current_user, get_current_user_or_refresh
@@ -34,16 +35,7 @@ router = APIRouter(tags=["files"])
 
 def _fetch_asset(file_id: str, user: User) -> FileAsset:
     with get_session() as session:
-        asset = session.get(FileAsset, file_id)
-        if not asset:
-            raise HTTPException(status_code=404, detail="File not found")
-        if asset.user_id is None:
-            asset.user_id = user.id
-            session.add(asset)
-            session.flush()
-        if asset.user_id != user.id:
-            raise HTTPException(status_code=404, detail="File not found")
-        return asset
+        return get_owned_file(session, file_id, user.id)
 
 
 @router.get("/files/{file_id}/original")

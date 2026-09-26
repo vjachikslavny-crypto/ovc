@@ -23,6 +23,8 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.users import router as users_router
 from app.core.security import (
     CSRF_COOKIE,
+    ACCESS_COOKIE, REFRESH_COOKIE, require_csrf,
+    get_current_user_or_refresh, get_bearer_token,
     create_access_token,
     get_user_from_refresh_cookie,
     issue_csrf_token,
@@ -54,12 +56,13 @@ async def startup_event():
     logger.info(f"PDF rendering libraries: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE}")
     if not HAS_PYMUPDF and not HAS_PDF2IMAGE:
         logger.warning("PDF rendering not available! Install pymupdf: pip install pymupdf")
-    try:
+    from app.db.session import engine
+    from app.db.readiness import require_ready
+    from app.services.files import UPLOAD_ROOT
+    if settings.db_auto_migrate:
         from app.db.migrate import upgrade
-
-        upgrade()
-    except Exception as exc:
-        logger.warning("Schema migration failed on startup: %s", exc)
+        upgrade(engine)
+    require_ready(engine, UPLOAD_ROOT)
     logger.info("runtime config: %s", settings.runtime_summary())
     for warning in settings.startup_warnings:
         logger.warning("config warning: %s", warning)
@@ -220,26 +223,49 @@ async def _proxy_remote_file_if_needed(request: Request, response):
         if value:
             proxy_headers[header_name] = value
 
-    if settings.sync_bearer_token:
-        proxy_headers["authorization"] = f"Bearer {settings.sync_bearer_token}"
-    else:
-        try:
-            proxy_user = get_user_from_refresh_cookie(request)
-            proxy_headers["authorization"] = f"Bearer {create_access_token(str(proxy_user.id))}"
-        except Exception:
-            pass
+    # A 404 can mean an ownership rejection. Never retry with a global identity.
+    from app.db.session import get_session
+    from app.db.models import FileAsset, Note
+    from app.core.ownership import get_owned_file, owned_notes_filter
+    import json
+    try:
+        proxy_user = get_current_user_or_refresh(request)
+        file_id = request.url.path.split("/")[2]
+        with get_session() as session:
+            asset = session.get(FileAsset, file_id)
+            if asset is not None:
+                get_owned_file(session, file_id, proxy_user.id)
+            else:
+                # Remote-only media must at least be referenced by an owned note.
+                def references(value):
+                    if isinstance(value, str):
+                        return value.startswith(f"/files/{file_id}/")
+                    if isinstance(value, dict):
+                        return any(references(v) for v in value.values())
+                    if isinstance(value, list):
+                        return any(references(v) for v in value)
+                    return False
+                notes = session.query(Note).filter(owned_notes_filter(proxy_user.id)).all()
+                if not any(references(json.loads(n.blocks_json or "[]")) for n in notes):
+                    return response
+        token = get_bearer_token(request)
+        if not token or settings.auth_mode == "none":
+            return response
+        proxy_headers["authorization"] = f"Bearer {token}"
+    except (HTTPException, ValueError):
+        return response
 
     try:
         async with httpx.AsyncClient(
             timeout=settings.sync_request_timeout_seconds,
-            follow_redirects=True,
+            follow_redirects=False,
         ) as client:
             proxied = await client.get(target, headers=proxy_headers)
     except Exception as exc:
         logger.warning("remote file proxy failed for %s: %s", target, exc)
         return response
 
-    if proxied.status_code >= 400:
+    if not 200 <= proxied.status_code < 300:
         return response
 
     passthrough_headers = {}
@@ -265,6 +291,14 @@ async def _proxy_remote_file_if_needed(request: Request, response):
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    if (request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not request.headers.get("Authorization")
+            and (request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE))):
+        try:
+            require_csrf(request)
+        except HTTPException as exc:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     response = await call_next(request)
     response = await _proxy_remote_file_if_needed(request, response)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -282,6 +316,16 @@ async def security_headers(request: Request, call_next):
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+@app.get("/readyz")
+def readyz():
+    from fastapi.responses import JSONResponse
+    from app.db.session import engine
+    from app.db.readiness import status
+    from app.services.files import UPLOAD_ROOT
+    result = status(engine, UPLOAD_ROOT)
+    return JSONResponse(result, status_code=200 if result['ok'] else 503)
 
 
 def _require_user(request: Request):

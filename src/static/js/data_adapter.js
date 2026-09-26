@@ -42,16 +42,36 @@ async function refreshSyncIndicator() {
   }
   try {
     const status = await getSyncStatus();
-    if (!status.enabled || !status.remoteBaseUrl) {
+    if (!status.enabled || !status.remoteConfigured) {
       setSyncIndicator('Sync: не подключен', 'disconnected');
+      return;
+    }
+    if (status.authRequired) {
+      setSyncIndicator('Sync: требуется повторный вход', 'error');
       return;
     }
     if (status.failed > 0) {
       setSyncIndicator(`Sync: ошибка (${status.failed})`, 'error');
       return;
     }
+    if (status.lastError) {
+      setSyncIndicator('Sync: ошибка соединения или конфигурации', 'error');
+      return;
+    }
+    if (status.relationConflicts > 0) {
+      setSyncIndicator(`Sync: конфликты связей (${status.relationConflicts})`, 'error');
+      return;
+    }
     if (status.pending > 0) {
       setSyncIndicator(`Sync: в очереди ${status.pending}`, 'pending');
+      return;
+    }
+    if (status.conflicts > 0) {
+      setSyncIndicator(`Sync: сохранены копии конфликтов (${status.conflicts})`, 'error');
+      return;
+    }
+    if (status.quarantinedLegacy > 0) {
+      setSyncIndicator(`Sync: старая очередь изолирована (${status.quarantinedLegacy})`, 'pending');
       return;
     }
     setSyncIndicator('Sync: подключен', 'connected');

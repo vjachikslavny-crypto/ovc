@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.auth_provider import supabase_auth_get_user, get_current_user_from_provider
 from app.core.security import (
     ACCESS_COOKIE,
+    as_utc,
     CSRF_COOKIE,
     REFRESH_COOKIE,
     create_access_token,
@@ -70,42 +71,10 @@ def _build_verify_link(request: Request, token: str) -> str:
     return str(request.url_for("auth_verify").include_query_params(token=token))
 
 
-def _ensure_email_verified_column(session) -> None:
-    try:
-        dialect = session.bind.dialect.name
-        if dialect == "sqlite":
-            rows = session.execute(text("PRAGMA table_info(users)")).fetchall()
-            columns = {row[1] for row in rows}
-            if "email_verified_at" not in columns:
-                session.execute(text("ALTER TABLE users ADD COLUMN email_verified_at DATETIME"))
-        else:
-            session.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP")
-            )
-    except Exception:
-        # Keep auth flow operational even if migration isn't applied yet.
-        pass
-
-
 def _cookie_secure_for_request(request: Request) -> bool:
-    """
-    Keep secure cookies for public HTTPS, but allow localhost HTTP dev login.
-    """
-    if not settings.cookie_secure:
-        return False
-
-    host = (request.headers.get("host") or "").split(":", 1)[0].lower()
-    if host in {"127.0.0.1", "localhost"}:
-        return False
-
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
-    if forwarded_proto:
-        return forwarded_proto == "https"
-
-    if request.url.scheme:
-        return request.url.scheme.lower() == "https"
-
-    return True
+    """Local HTTP development requires an explicit COOKIE_SECURE=false."""
+    # Explicit secure configuration must not be weakened by Host/proxy headers.
+    return settings.cookie_secure
 
 
 def _set_refresh_cookie_for_request(request: Request, response: Response, raw_token: str) -> None:
@@ -198,6 +167,11 @@ def _build_unique_username(session, email: str, explicit_username: Optional[str]
     return candidate
 
 
+def _local_auth_enabled():
+    if settings.auth_mode not in {"local", "both"}:
+        raise HTTPException(status_code=403, detail="Local authentication is disabled")
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_view(request: Request):
     return templates.TemplateResponse("auth/login.html", _auth_template_context(request))
@@ -208,7 +182,7 @@ def register_view(request: Request):
     return templates.TemplateResponse("auth/register.html", _auth_template_context(request))
 
 
-@router.get("/auth/verify", name="auth_verify")
+@router.get("/auth/verify", name="auth_verify", dependencies=[Depends(_local_auth_enabled)])
 def auth_verify(token: str, request: Request):
     try:
         data = _serializer().loads(token, salt="email-verify", max_age=60 * 60 * 24)
@@ -223,7 +197,6 @@ def auth_verify(token: str, request: Request):
         return RedirectResponse(url="/login?verify=invalid", status_code=302)
 
     with get_session() as session:
-        _ensure_email_verified_column(session)
         user = session.get(User, user_id)
         if not user:
             return RedirectResponse(url="/login?verify=invalid", status_code=302)
@@ -241,7 +214,7 @@ def auth_verify(token: str, request: Request):
 
 
 
-@router.post("/auth/register", response_model=AuthOkResponse, status_code=201)
+@router.post("/auth/register", response_model=AuthOkResponse, status_code=201, dependencies=[Depends(_local_auth_enabled)])
 def register(payload: RegisterRequest, request: Request):
     if not _rate_limiter.allow(
         f"register:{_client_ip(request)}",
@@ -260,7 +233,6 @@ def register(payload: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail=" ".join(errors))
 
     with get_session() as session:
-        _ensure_email_verified_column(session)
         email_exists = session.query(User).filter(
             func.lower(User.email) == email_lower
         ).first()
@@ -279,19 +251,6 @@ def register(payload: RegisterRequest, request: Request):
         session.flush()
         log_event(session, "REGISTER_SUCCESS", user_id=user.id, request=request)
 
-        # При первом пользователе привязываем старые заметки/файлы
-        user_count = session.query(User).count()
-        if user_count == 1:
-            try:
-                session.execute(text("UPDATE notes SET user_id = :uid WHERE user_id IS NULL"), {"uid": user.id})
-            except Exception:
-                pass  # Таблица может не иметь user_id или быть пустой
-            try:
-                session.execute(text("UPDATE files SET user_id = :uid WHERE user_id IS NULL"), {"uid": user.id})
-            except Exception:
-                pass  # Таблица может не существовать или не иметь user_id
-            log_event(session, "LEGACY_DATA_MIGRATED", user_id=user.id, request=request)
-
         verify_token = _serializer().dumps(
             {"sub": str(user.id), "email": email_lower},
             salt="email-verify",
@@ -303,7 +262,7 @@ def register(payload: RegisterRequest, request: Request):
     return AuthOkResponse(ok=True)
 
 
-@router.post("/auth/resend-verification", response_model=AuthOkResponse)
+@router.post("/auth/resend-verification", response_model=AuthOkResponse, dependencies=[Depends(_local_auth_enabled)])
 def resend_verification(payload: ForgotRequest, request: Request):
     email_lower = payload.email.lower().strip()
     if not email_lower:
@@ -314,7 +273,6 @@ def resend_verification(payload: ForgotRequest, request: Request):
         raise HTTPException(status_code=429, detail="Подождите минуту перед повторной отправкой")
 
     with get_session() as session:
-        _ensure_email_verified_column(session)
         user = session.query(User).filter(func.lower(User.email) == email_lower).first()
         if user:
             verify_token = _serializer().dumps(
@@ -329,7 +287,7 @@ def resend_verification(payload: ForgotRequest, request: Request):
     return AuthOkResponse(ok=True, detail="Если email существует, письмо отправлено.")
 
 
-@router.post("/auth/login", response_model=AuthOkResponse)
+@router.post("/auth/login", response_model=AuthOkResponse, dependencies=[Depends(_local_auth_enabled)])
 def login(payload: LoginRequest, request: Request, response: Response):
     if not _rate_limiter.allow(
         f"login:{_client_ip(request)}",
@@ -340,47 +298,38 @@ def login(payload: LoginRequest, request: Request, response: Response):
 
     identifier = payload.identifier.strip().lower()
 
-    with get_session() as session:
-        # Ищем пользователя по username ИЛИ email (case-insensitive)
-        user = session.query(User).filter(
-            or_(
-                func.lower(User.username) == identifier,
-                func.lower(User.email) == identifier
-            )
-        ).first()
-        
+    error = None
+    with get_session(immediate=True) as session:
+        user = session.query(User).filter(or_(
+            func.lower(User.username) == identifier,
+            func.lower(User.email) == identifier,
+        )).with_for_update().first()
         if not user or not user.is_active:
-            log_event(session, "LOGIN_FAIL", request=request, metadata={"identifier": identifier})
-            raise HTTPException(status_code=401, detail="Неверные учетные данные")
-        
-        # Проверка lockout
-        locked, until = check_user_locked(user)
-        if locked:
-            log_event(session, "LOGIN_LOCKED", user_id=user.id, request=request, metadata={"locked_until": str(until)})
-            raise HTTPException(status_code=423, detail=f"Аккаунт заблокирован до {until.strftime('%H:%M')}")
-        
-        # Проверка пароля
-        if not verify_password(payload.password, user.password_hash):
-            register_login_failure(session, user, max_failures=10)
-            log_event(session, "LOGIN_FAIL", user_id=user.id, request=request)
-            raise HTTPException(status_code=401, detail="Неверные учетные данные")
-        
-        # Успешный вход - сброс счетчиков
-        reset_login_failures(session, user)
-
-        raw_token = generate_refresh_token()
-        token_hash = hash_refresh_token(raw_token)
-        expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=settings.refresh_token_expires_days)
-        refresh = RefreshToken(
-            user_id=user.id,
-            token_hash=token_hash,
-            expires_at=expires,
-            fingerprint_hash=_fingerprint_hash(request),
-            ip=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
-        session.add(refresh)
-        log_event(session, "LOGIN_SUCCESS", user_id=user.id, request=request)
+            log_event(session, "LOGIN_FAIL", request=request)
+            error = HTTPException(status_code=401, detail="Неверные учетные данные")
+        else:
+            locked, until = check_user_locked(user)
+            if locked:
+                error = HTTPException(status_code=423, detail="Аккаунт временно заблокирован")
+            elif not verify_password(payload.password, user.password_hash):
+                register_login_failure(session, user, max_failures=10)
+                log_event(session, "LOGIN_FAIL", user_id=user.id, request=request)
+                error = HTTPException(status_code=401, detail="Неверные учетные данные")
+            else:
+                reset_login_failures(session, user)
+                raw_token = generate_refresh_token()
+                session.add(RefreshToken(
+                    user_id=user.id, token_hash=hash_refresh_token(raw_token),
+                    auth_provider="local",
+                    expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=settings.refresh_token_expires_days),
+                    fingerprint_hash=_fingerprint_hash(request),
+                    ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                ))
+                log_event(session, "LOGIN_SUCCESS", user_id=user.id, request=request)
+    # Security updates must commit before an HTTP error is raised.
+    if error:
+        raise error
 
     _set_refresh_cookie_for_request(request, response, raw_token)
     csrf_token = issue_csrf_token()
@@ -413,6 +362,7 @@ def supabase_session_bridge(request: Request, response: Response):
         refresh = RefreshToken(
             user_id=user.id,
             token_hash=token_hash,
+            auth_provider="supabase",
             expires_at=expires,
             fingerprint_hash=_fingerprint_hash(request),
             ip=request.client.host if request.client else None,
@@ -433,7 +383,7 @@ def supabase_session_bridge(request: Request, response: Response):
     return AuthOkResponse(ok=True)
 
 
-@router.post("/auth/refresh", response_model=RefreshResponse)
+@router.post("/auth/refresh", response_model=RefreshResponse, dependencies=[Depends(_local_auth_enabled)])
 def refresh(request: Request, response: Response):
     require_csrf(request)
     raw_token = request.cookies.get(REFRESH_COOKIE)
@@ -442,43 +392,35 @@ def refresh(request: Request, response: Response):
     token_hash = hash_refresh_token(raw_token)
     now = dt.datetime.now(dt.timezone.utc)
 
-    with get_session() as session:
-        token = session.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-        if not token:
-            raise HTTPException(status_code=401, detail="Refresh token invalid")
-        if token.revoked_at:
-            raise HTTPException(status_code=401, detail="Refresh token revoked")
-        if token.rotated_at:
-            # Повторное использование — отзываем всю семью токенов.
-            session.query(RefreshToken).filter(RefreshToken.user_id == token.user_id).update(
-                {"revoked_at": now}
-            )
+    error = None
+    with get_session(immediate=True) as session:
+        token = session.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).with_for_update().first()
+        if not token or token.auth_provider != "local":
+            error = HTTPException(status_code=401, detail="Local refresh token required")
+        elif token.rotated_at:
+            session.query(RefreshToken).filter(RefreshToken.user_id == token.user_id).update({"revoked_at": now})
             log_event(session, "TOKEN_REUSE", user_id=token.user_id, request=request)
-            raise HTTPException(status_code=401, detail="Refresh token reused")
-        # Преобразуем naive datetime из БД в aware для корректного сравнения
-        expires_at = token.expires_at.replace(tzinfo=dt.timezone.utc) if token.expires_at.tzinfo is None else token.expires_at
-        if expires_at <= now:
-            raise HTTPException(status_code=401, detail="Refresh token expired")
-
-        token.rotated_at = now
-        raw_next = generate_refresh_token()
-        next_hash = hash_refresh_token(raw_next)
-        next_expires = now + dt.timedelta(days=settings.refresh_token_expires_days)
-        session.add(
-            RefreshToken(
-                user_id=token.user_id,
-                token_hash=next_hash,
-                expires_at=next_expires,
-                fingerprint_hash=_fingerprint_hash(request),
-                ip=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-            )
-        )
-        log_event(session, "TOKEN_ROTATE", user_id=token.user_id, request=request)
-
-        user = session.get(User, token.user_id)
-        if not user or not user.is_active:
-            raise HTTPException(status_code=403, detail="User inactive")
+            error = HTTPException(status_code=401, detail="Refresh token reused")
+        elif token.revoked_at or as_utc(token.expires_at) <= now:
+            error = HTTPException(status_code=401, detail="Refresh token expired or revoked")
+        else:
+            user = session.get(User, token.user_id)
+            if not user or not user.is_active:
+                error = HTTPException(status_code=403, detail="User inactive")
+            else:
+                token.rotated_at = now
+                raw_next = generate_refresh_token()
+                session.add(RefreshToken(
+                    user_id=user.id, auth_provider="local",
+                    token_hash=hash_refresh_token(raw_next),
+                    expires_at=now + dt.timedelta(days=settings.refresh_token_expires_days),
+                    fingerprint_hash=_fingerprint_hash(request),
+                    ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                ))
+                log_event(session, "TOKEN_ROTATE", user_id=user.id, request=request)
+    if error:
+        raise error
 
     _set_refresh_cookie_for_request(request, response, raw_next)
     csrf_token = issue_csrf_token()
@@ -505,12 +447,13 @@ def logout(request: Request, response: Response):
                 token.revoked_at = dt.datetime.now(dt.timezone.utc)
                 log_event(session, "LOGOUT", user_id=token.user_id, request=request)
     _clear_cookies(response)
-    return Response(status_code=204)
+    response.status_code = 204
+    return response
 
 
 
 
-@router.get("/auth/username-available")
+@router.get("/auth/username-available", dependencies=[Depends(_local_auth_enabled)])
 def check_username_availability(u: str):
     """Проверка доступности username"""
     if not u or len(u) < 3:
@@ -526,7 +469,7 @@ def check_username_availability(u: str):
         return {"available": not exists}
 
 
-@router.post("/auth/change-password", response_model=AuthOkResponse)
+@router.post("/auth/change-password", response_model=AuthOkResponse, dependencies=[Depends(_local_auth_enabled)])
 def change_password(
     payload: ChangePasswordRequest,
     request: Request,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -44,8 +44,10 @@ class Note(Base):
         foreign_keys="NoteLink.to_id",
         cascade="all, delete-orphan",
     )
-    files = relationship("FileAsset", back_populates="note", cascade="all, delete-orphan")
+    # Hard deletion detaches metadata; API deletion is a tombstone. Never delete bytes.
+    files = relationship("FileAsset", back_populates="note", passive_deletes="all")
     user = relationship("User", back_populates="notes")
+    __table_args__ = (Index('ix_notes_owner_updated', 'user_id', 'updated_at'),)
 
 
 class NoteChunk(Base):
@@ -143,11 +145,22 @@ class GroupPreference(Base):
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
 
 
+class UserGroupPreference(Base):
+    __tablename__ = "user_group_preferences"
+
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    key = Column(String, primary_key=True)
+    label = Column(String, nullable=False, default="Группа")
+    color = Column(String, nullable=False, default="#8b5cf6")
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+
 class FileAsset(Base):
     __tablename__ = "files"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True)
+    note_id = Column(String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     kind = Column(String, nullable=False)
     mime = Column(String, nullable=False)
@@ -203,6 +216,19 @@ class SyncOutbox(Base):
     last_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+    # Default 0 deliberately quarantines every historical row without rewriting it.
+    protocol_version = Column(Integer, nullable=False, default=0, server_default="0")
+    client_id = Column(String, nullable=True)
+    remote_key = Column(String, nullable=True)
+    entity_type = Column(String, nullable=True)
+    entity_id = Column(String, nullable=True)
+    entity_remote_id = Column(String, nullable=True)
+    base_revision = Column(Integer, nullable=True)
+    dependency_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    wire_json = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime, nullable=True)
+    __table_args__ = (Index('ix_outbox_scope_due', 'user_id', 'client_id', 'remote_key', 'protocol_version', 'status', 'next_retry_at'),)
 
 
 class SyncNoteMap(Base):
@@ -223,3 +249,84 @@ class SyncConflict(Base):
     kind = Column(String, nullable=False, default="note_conflict")
     payload_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    user_id = Column(String, nullable=True)
+    client_id = Column(String, nullable=True)
+    remote_key = Column(String, nullable=True)
+    op_id = Column(String, nullable=True)
+    __table_args__ = (Index('ix_conflicts_scope_kind', 'user_id', 'client_id', 'remote_key', 'kind'),)
+
+
+class SyncIdentity(Base):
+    __tablename__ = "sync_identity"
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+class SyncAppliedOp(Base):
+    __tablename__ = "sync_applied_ops"
+    op_id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False)
+    entity_type = Column(String, nullable=False)
+    entity_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    protocol_version = Column(Integer, nullable=False, default=0, server_default="0")
+    client_id = Column(String, nullable=True)
+    request_hash = Column(String, nullable=True)
+    result_json = Column(Text, nullable=True)
+
+
+class SyncChangeLog(Base):
+    __tablename__ = "sync_change_log"
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False, index=True)
+    entity_type = Column(String, nullable=False)
+    entity_id = Column(String, nullable=False)
+    op_type = Column(String, nullable=False)
+    server_version = Column(Integer, nullable=False, default=0)
+    deleted = Column(Boolean, nullable=False, default=False)
+    payload_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    protocol_version = Column(Integer, nullable=False, default=0, server_default="0")
+    sequence = Column(Integer, nullable=True, unique=True)
+    __table_args__ = (Index('ix_changes_owner_sequence', 'user_id', 'protocol_version', 'sequence'),)
+
+
+class IntegrityArchive(Base):
+    """Private, immutable repair evidence. Original IDs deliberately are not FKs."""
+    __tablename__ = 'integrity_archive'
+    id = Column(String, primary_key=True)
+    repair_id = Column(String, nullable=False, index=True)
+    source_table = Column(String, nullable=False)
+    source_id = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    original_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+
+class SyncPeerState(Base):
+    __tablename__ = "sync_peer_state"
+    user_id = Column(String, primary_key=True)
+    client_id = Column(String, primary_key=True)
+    remote_key = Column(String, primary_key=True)
+    server_id = Column(String, nullable=True)
+    remote_user_id = Column(String, nullable=True)
+    cursor = Column(Integer, nullable=False, default=0)
+    last_success_at = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
+    reachable = Column(Boolean, nullable=True)
+    auth_required = Column(Boolean, nullable=False, default=False)
+
+
+class SyncEntityMap(Base):
+    __tablename__ = "sync_entity_map"
+    user_id = Column(String, primary_key=True)
+    client_id = Column(String, primary_key=True)
+    remote_key = Column(String, primary_key=True)
+    entity_type = Column(String, primary_key=True)
+    local_id = Column(String, primary_key=True)
+    remote_id = Column(String, nullable=False)
+    remote_revision = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="mapped")
+    __table_args__ = (UniqueConstraint("user_id", "client_id", "remote_key", "entity_type", "remote_id", name="uq_sync_entity_remote"),)

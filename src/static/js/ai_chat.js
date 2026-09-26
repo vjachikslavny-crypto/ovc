@@ -12,7 +12,7 @@ const ESC_KEY = 'Escape';
  * Draft actions from summarize/detailed are shown as a preview
  * with Approve / Reject buttons instead of being auto-committed.
  */
-export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted }) {
+export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted, commitDraftActions }) {
   if (!rootEl) return { update() {} };
 
   const messagesEl = rootEl.querySelector('.ai-chat__messages');
@@ -311,12 +311,16 @@ export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted }) 
 
           const applyBtn = document.createElement('button');
           applyBtn.className = 'ai-draft-btn ai-draft-btn--apply';
-          applyBtn.textContent = '✅ Применить к заметке';
+          applyBtn.textContent = m.draftStatus === 'uncertain'
+            ? 'Результат уточняется — проверьте сохранение заметки'
+            : m.draftStatus === 'applying' ? 'Применяем…' : '✅ Применить к заметке';
+          applyBtn.disabled = m.draftStatus !== 'pending';
           applyBtn.addEventListener('click', () => commitDraft(idx));
 
           const rejectBtn = document.createElement('button');
           rejectBtn.className = 'ai-draft-btn ai-draft-btn--reject';
           rejectBtn.textContent = '❌ Отклонить';
+          rejectBtn.disabled = m.draftStatus !== 'pending';
           rejectBtn.addEventListener('click', () => rejectDraft(idx));
 
           actions.appendChild(applyBtn);
@@ -337,6 +341,8 @@ export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted }) 
     const msg = state.messages[msgIndex];
     if (!msg || !msg.draft || msg.draftStatus !== 'pending') return;
 
+    msg.draftStatus = 'applying';
+    renderMessages();
     try {
       // Помечаем каждый блок как созданный ИИ
       const taggedDraft = msg.draft.map((action) => {
@@ -352,6 +358,12 @@ export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted }) 
         return action;
       });
 
+      if (commitDraftActions) {
+        await commitDraftActions(taggedDraft);
+        msg.draftStatus = 'applied';
+        renderMessages();
+        return;
+      }
       const commitRes = await fetch('/api/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -364,13 +376,16 @@ export function initAiChat({ rootEl, toggleBtn, getNoteId, onBlocksCommitted }) 
         renderMessages();
         // Обновляем холст заметки без перезагрузки
         if (typeof onBlocksCommitted === 'function') {
-          onBlocksCommitted();
+          await onBlocksCommitted();
         }
       } else {
+        msg.draftStatus = 'pending';
         const errText = await commitRes.text().catch(() => '');
         addMessage('error', `Ошибка коммита: ${errText || commitRes.status}`);
       }
     } catch (e) {
+      msg.draftStatus = e.applied ? 'applied' : (e.uncertain ? 'uncertain' : 'pending');
+      renderMessages();
       console.error('AI Draft commit failed', e);
       addMessage('error', `Ошибка: ${e.message}`);
     }

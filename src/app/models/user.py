@@ -30,5 +30,5 @@ class User(Base):
     role = Column(String, default="user", nullable=False)
 
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    notes = relationship("Note", back_populates="user")
-    files = relationship("FileAsset", back_populates="user")
+    notes = relationship("Note", back_populates="user", passive_deletes="all")
+    files = relationship("FileAsset", back_populates="user", passive_deletes="all")

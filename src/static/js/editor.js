@@ -1,3 +1,4 @@
+import { createNoteSaver, mergeRemote, same } from './note_save.js';
 import { renderNote } from './blocks_render.js';
 import { initToolbar, clearSelectionSnapshot, rememberSelection } from './toolbar.js';
 import { initInlineBubble } from './inline_bubble.js';
@@ -23,6 +24,17 @@ const PLACEHOLDER_STRINGS = new Set(['Новый заголовок', 'Новы�
 document.addEventListener('DOMContentLoaded', () => {
   const editorEl = document.querySelector('.editor');
   if (!editorEl) return;
+  editorEl.inert = true;
+  const saveStatus = document.createElement('button');
+  saveStatus.type = 'button';
+  saveStatus.className = 'editor-save-status';
+  saveStatus.setAttribute('aria-live', 'polite');
+  saveStatus.textContent = 'Загрузка заметки…';
+  const saveRegion = document.createElement('div');
+  saveRegion.className = 'editor-page';
+  const layout = editorEl.parentElement;
+  layout.before(saveRegion);
+  saveRegion.append(saveStatus, layout);
 
   const canvas = document.getElementById('note-blocks');
   const floatingActions = document.querySelector('.floating-actions');
@@ -92,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rootEl: aiChatEl,
     toggleBtn: fabAi,
     getNoteId: () => noteState.id,
-    onBlocksCommitted: refreshNoteState,
+    commitDraftActions: commitAiDraft,
   });
 
   canvas.addEventListener('click', (event) => {
@@ -140,13 +152,21 @@ document.addEventListener('DOMContentLoaded', () => {
     getNoteId: () => noteState.id,
     onOpenNote: (noteId) => {
       if (!noteId) return;
-      window.location.href = `/notes/${noteId}`;
+      navigateSafely(`/notes/${noteId}`);
     },
     fetchOptions: fetchLinkableNotes,
     addLink: createManualLink,
   });
 
-  let saveTimer = null;
+  let createPromise = null;
+  let draftKey = null;
+  let recoveryKey = null;
+  let recoveryText = null;
+  let recoveryDraft = null;
+  let reconciliationBase = null;
+  let serverVersion = null;
+  let serverConflict = false;
+  let ready = false;
   let focusedBlockId = null;
   let canvasClickBound = false;
   let pendingCaretBlockId = null;
@@ -155,7 +175,55 @@ document.addEventListener('DOMContentLoaded', () => {
     overId: null,
     position: null,
   };
-  const saveQueue = [];
+  const saver = createNoteSaver({
+    delay: SAVE_DEBOUNCE,
+    online: () => navigator.onLine,
+    store: {
+      write(value) {
+        if (!draftKey) throw new Error('No verified draft owner');
+        localStorage.setItem(draftKey, JSON.stringify({ ...value, modifiedAt: Date.now() }));
+      },
+      clear: clearStoredDraft,
+    },
+    async send(payload) {
+      const res = await fetch(`/api/notes/${noteState.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json',
+          ...(serverVersion ? { 'If-Match': `"${serverVersion}"` } : {}) }, body: JSON.stringify(payload),
+      });
+      if (res.status === 409) {
+        serverConflict = true;
+        saver.pause();
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      serverVersion = noteVersion(await res.json());
+    },
+    onState({ state, storageError, error }) {
+      const labels = { clean: 'Сохранено', dirty: 'Не сохранено', saving: 'Сохраняем…',
+        save_failed: 'Не сохранено — повторить', offline: 'Нет сети — черновик ожидает отправки' };
+      saveStatus.textContent = labels[state];
+      if (storageError) saveStatus.textContent += ' · Не закрывайте страницу: локальная копия недоступна';
+      saveStatus.disabled = state === 'clean';
+      saveStatus.dataset.state = state;
+      saveStatus.title = error ? `${error.message}. Изменения остаются в редакторе.` : '';
+    },
+  });
+
+  function savePayload(note = noteState) {
+    return JSON.parse(JSON.stringify({ title: note.title || 'Без названия', blocks: note.blocks,
+      styleTheme: note.styleTheme, layoutHints: note.layoutHints || {}, passport: note.passport || {} }));
+  }
+
+  function noteVersion(note) {
+    return Number.isInteger(note.revision) ? `r${note.revision}` : note.updatedAt;
+  }
+
+  function clearStoredDraft() {
+    if (draftKey) localStorage.removeItem(draftKey);
+    // Another tab may have continued editing the recovered snapshot.
+    if (recoveryKey && localStorage.getItem(recoveryKey) === recoveryText) localStorage.removeItem(recoveryKey);
+    recoveryKey = null; recoveryText = null;
+  }
+
 
   function isMobileLayout() {
     return window.matchMedia('(max-width: 899px)').matches;
@@ -202,35 +270,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function ensureNote() {
     if (noteState.id) return noteState.id;
-    const res = await fetch('/api/notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: 'Новая заметка',
-        blocks: [],
-        styleTheme: noteState.styleTheme,
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const note = await res.json();
-    noteState.id = note.id;
-    editorEl.dataset.noteId = note.id;
-    window.history.replaceState({}, '', `/notes/${note.id}`);
-    return note.id;
+    if (createPromise) return createPromise;
+    createPromise = (async () => {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Новая заметка',
+          blocks: [],
+          styleTheme: noteState.styleTheme,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const note = await res.json();
+      noteState.id = note.id;
+      editorEl.dataset.noteId = note.id;
+      window.history.replaceState({}, '', `/notes/${note.id}`);
+      return note.id;
+    })().finally(() => { createPromise = null; });
+    return createPromise;
   }
 
   async function fetchNoteDetail(noteId) {
     const res = await fetch(`/api/notes/${noteId}`);
     if (!res.ok) throw new Error(await res.text());
     const note = await res.json();
-    console.log('[Editor] fetchNoteDetail response:', note);
-    console.log('[Editor] Tags from API:', note.tags);
     return note;
   }
 
   function applyNote(note) {
-    console.log('[Editor] applyNote called with:', note);
-    console.log('[Editor] Tags from note:', note.tags);
     
     noteState = {
       ...noteState,
@@ -241,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
       passport: note.passport ?? {},
       createdAt: note.createdAt || note.created_at || null,
       updatedAt: note.updatedAt || note.updated_at || null,
+      revision: note.revision,
       blocks: cleanIncomingBlocks(note.blocks),
       tags: note.tags || [],
       linksFrom: note.linksFrom || [],
@@ -248,7 +317,6 @@ document.addEventListener('DOMContentLoaded', () => {
       sources: note.sources || [],
     };
     
-    console.log('[Editor] noteState.tags:', noteState.tags);
     
     focusedBlockId = null;
     render();
@@ -259,14 +327,51 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshNoteState() {
     if (!noteState.id) return;
     const note = await fetchNoteDetail(noteState.id);
-    applyNote(note);
+    const remotePayload = savePayload({ ...note, blocks: cleanIncomingBlocks(note.blocks) });
+    const nextVersion = noteVersion(note);
+    const olderRevision = /^r\d+$/.test(serverVersion || '') && /^r\d+$/.test(nextVersion || '')
+      && Number(nextVersion.slice(1)) < Number(serverVersion.slice(1));
+    if (olderRevision) return;
+    // Metadata can advance the revision while a failed save still owns dirty
+    // text. Advance only against the last confirmed content, never the draft.
+    if (same(remotePayload, saver.base)) {
+      serverVersion = nextVersion;
+      noteState.revision = note.revision;
+      noteState.updatedAt = note.updatedAt;
+    }
+    for (const key of ['tags', 'linksFrom', 'linksTo', 'sources']) noteState[key] = note[key] || [];
+    connectionsPanel?.update(noteState);
+    inspector.update(noteState);
   }
 
   async function loadNote() {
     try {
+      const meResponse = await fetch('/api/users/me');
+      if (!meResponse.ok) throw new Error('Не удалось проверить владельца заметки');
+      const me = await meResponse.json();
       const noteId = await ensureNote();
+      const prefix = `ovc:draft:${me.id}:${noteId}`;
+      // Separate writers prevent two open tabs from overwriting each other's backup.
+      draftKey = `${prefix}:${uuid()}`;
       const note = await fetchNoteDetail(noteId);
+      serverVersion = noteVersion(note);
       applyNote(note);
+      saver.acceptSaved(savePayload());
+      try {
+        const candidates = Object.keys(localStorage).filter(key => key === prefix || key.startsWith(`${prefix}:`))
+          .map(key => ({ key, text: localStorage.getItem(key) }))
+          .map(item => ({ ...item, value: JSON.parse(item.text) }))
+          .sort((a, b) => (b.value.modifiedAt || 0) - (a.value.modifiedAt || 0));
+        if (candidates.length) {
+          recoveryKey = candidates[0].key; recoveryText = candidates[0].text;
+          recoveryDraft = candidates[0].value;
+        }
+      } catch (_) {
+        throw new Error('Не удалось прочитать локальные черновики. Не очищайте данные браузера.');
+      }
+      ready = true;
+      if (recoveryDraft) await recoverDraft();
+      else editorEl.inert = false;
     } finally {
       // Перезапуск мини-графа после загрузки заметки (или её ошибки),
       // чтобы гарантировать актуальные данные
@@ -1409,59 +1514,135 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---- SAVE ----
 
   function scheduleSave() {
-    if (saveTimer) window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(persistNote, SAVE_DEBOUNCE);
+    if (ready) saver.change(savePayload());
   }
 
-  let _saveToast = null;
-  function showSaveError() {
-    if (_saveToast) _saveToast.remove();
-    _saveToast = document.createElement('div');
-    _saveToast.textContent = 'Не удалось сохранить заметку';
-    Object.assign(_saveToast.style, {
-      position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-      background: '#d32f2f', color: '#fff', padding: '10px 24px', borderRadius: '12px',
-      fontSize: '0.9rem', zIndex: '9999', boxShadow: '0 4px 12px rgba(0,0,0,.3)',
-      opacity: '0', transition: 'opacity 0.3s',
+  async function recoverDraft(remoteNote = noteState) {
+    if (!recoveryDraft) return;
+    const draft = recoveryDraft;
+    if (!draft.pending || !draft.base) throw new Error('Повреждённый черновик: локальная копия оставлена');
+    if (same(draft.base, savePayload(remoteNote)) || same(draft.pending, savePayload(remoteNote))) {
+      saver.acceptSaved(savePayload(remoteNote));
+      serverVersion = noteVersion(remoteNote);
+      applyNote({ ...noteState, ...draft.pending });
+      recoveryDraft = null;
+      serverConflict = false;
+      saver.resume();
+      editorEl.inert = false;
+      scheduleSave();
+      if (!saver.dirty) clearStoredDraft();
+      return;
+    }
+    editorEl.inert = true;
+    saveStatus.disabled = false;
+    saveStatus.textContent = 'Есть локальный черновик и другая версия на сервере — восстановить копию';
+    if (!window.confirm('На сервере другая версия заметки. Восстановить локальный черновик как отдельную заметку, сохранив обе версии?')) return;
+    const res = await fetch(`/api/notes/${encodeURIComponent(noteState.id)}/recovery-copy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft.pending),
     });
-    document.body.appendChild(_saveToast);
-    requestAnimationFrame(() => { _saveToast.style.opacity = '1'; });
-    setTimeout(() => {
-      if (_saveToast) { _saveToast.style.opacity = '0'; setTimeout(() => _saveToast?.remove(), 300); }
-    }, 4000);
+    if (!res.ok) throw new Error(`Не удалось восстановить копию: HTTP ${res.status}`);
+    const copy = await res.json();
+    // Only remove recovery state after the server accepted the entire copy.
+    clearStoredDraft();
+    saver.acceptSaved(draft.pending);
+    recoveryDraft = null;
+    reconciliationBase = null;
+    serverConflict = false;
+    window.location.assign(`/notes/${copy.id}`);
   }
 
-  async function persistNote() {
-    saveTimer = null;
+  async function reconcileAiCommit() {
+    if (!reconciliationBase) return;
+    const remote = await fetchNoteDetail(noteState.id);
+    const remotePayload = savePayload({ ...remote, blocks: cleanIncomingBlocks(remote.blocks) });
+    const merged = mergeRemote(reconciliationBase, savePayload(), remotePayload);
+    saver.acceptSaved(remotePayload);
+    serverVersion = noteVersion(remote);
+    applyNote({ ...remote, ...merged });
+    reconciliationBase = null;
+    saver.resume();
+    scheduleSave();
+    // The successful GET confirmed server state even if there were no local edits.
+    if (!saver.dirty) clearStoredDraft();
+  }
 
-    const payload = {
-      title: noteState.title,
-      blocks: noteState.blocks,
-      styleTheme: noteState.styleTheme,
-      layoutHints: noteState.layoutHints,
-      passport: noteState.passport,
-    };
-
-    saveQueue.push(payload);
-    if (saveQueue.length > 1) return;
-
-    while (saveQueue.length) {
-      const next = saveQueue[0];
-      try {
-        const res = await fetch(`/api/notes/${noteState.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(next),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch (error) {
-        console.error('Failed to save note', error);
-        showSaveError();
-      } finally {
-        saveQueue.shift();
-      }
+  async function commitAiDraft(draft) {
+    if (reconciliationBase || recoveryDraft) throw new Error('Сначала восстановите ожидающий черновик');
+    if (!await saver.flush()) throw new Error('Сначала сохраните изменения заметки');
+    saver.pause();
+    reconciliationBase = savePayload();
+    let applied = false;
+    try {
+      const res = await fetch('/api/commit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft, baseRevisions: { [noteState.id]: serverVersion } }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      applied = true;
+      await reconcileAiCommit();
+    } catch (error) {
+      // A lost response may have been committed. Reconcile before another PATCH.
+      saveStatus.disabled = false;
+      saveStatus.textContent = 'Проверить результат AI и сохранение — повторить';
+      error.applied = applied;
+      error.uncertain = true;
+      throw error;
     }
   }
+
+  saveStatus.addEventListener('click', async () => {
+    try {
+      if (!ready) await loadNote();
+      else if (serverConflict) {
+        recoveryDraft = JSON.parse(localStorage.getItem(draftKey));
+        if (!recoveryDraft) throw new Error('Скопируйте текст перед перезагрузкой: локальное хранилище недоступно');
+        await recoverDraft(await fetchNoteDetail(noteState.id));
+      }
+      else if (recoveryDraft) await recoverDraft();
+      else if (reconciliationBase) await reconcileAiCommit();
+      else await saver.flush();
+    } catch (error) {
+      saveStatus.disabled = false;
+      saveStatus.textContent = `${error.message} — повторить`;
+    }
+  });
+  window.addEventListener('online', () => { if (!reconciliationBase && !recoveryDraft) saver.flush(); });
+  window.addEventListener('beforeunload', event => {
+    if (!saver.dirty && !reconciliationBase && !recoveryDraft) return;
+    if (saver.dirty) saver.checkpoint();
+    event.preventDefault(); event.returnValue = '';
+  });
+  window.addEventListener('pagehide', () => {
+    if (saver.dirty) { saver.checkpoint(); saver.flush(); }
+  });
+  async function canLeaveEditor() {
+    if (reconciliationBase || recoveryDraft || !await saver.flush()) {
+      saveStatus.disabled = false;
+      saveStatus.textContent = 'Переход остановлен: сначала сохраните или восстановите черновик';
+      return false;
+    }
+    return true;
+  }
+  async function navigateSafely(url) {
+    if (await canLeaveEditor()) window.location.assign(url);
+  }
+  document.addEventListener('click', event => {
+    const logout = event.target.closest?.('#auth-logout');
+    if (logout && (saver.dirty || reconciliationBase || recoveryDraft)) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      // Keep credentials until the last edit is acknowledged; replay only then.
+      canLeaveEditor().then(allowed => { if (allowed) logout.click(); });
+      return;
+    }
+    const link = event.target.closest?.('a[href]');
+    if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target === '_blank' || link.hasAttribute('download')) return;
+    const url = new URL(link.href, location.href);
+    if (url.hash && url.pathname === location.pathname) return;
+    if (!saver.dirty && !reconciliationBase && !recoveryDraft) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    navigateSafely(url.href);
+  }, true);
 
   // ---- TITLE / THEME / LLM ----
 
@@ -1533,11 +1714,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   backBtn?.addEventListener('click', () => {
-    window.location.href = '/notes';
+    navigateSafely('/notes');
   });
 
   refreshBtn?.addEventListener('click', () => {
-    window.location.reload();
+    navigateSafely(window.location.href);
   });
 
   infoBtn?.addEventListener('click', () => {
@@ -1627,6 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const normalizedReason = (reason || '').trim() || 'manual';
     const payload = {
+      baseRevisions: { [noteId]: serverVersion },
       draft: [
         {
           type: 'add_link',
@@ -1676,6 +1858,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const payload = {
+      baseRevisions: { [noteId]: serverVersion },
       draft: unique.map((tag) => ({
         type: 'add_tag',
         noteId,
@@ -1712,6 +1895,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noteId = await ensureNote();
     
     const payload = {
+      baseRevisions: { [noteId]: serverVersion },
       draft: [{
         type: 'remove_tag',
         noteId,
@@ -2418,7 +2602,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = { ...(block.data || {}) };
 
       if (block.type === 'heading') {
-        data.text = stripPlaceholder(data.text || '', true);
+        data.text = stripPlaceholder(data.text || '');
         return { ...block, data };
       }
 
@@ -2429,7 +2613,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const parts = rawParts
           .map((part) => ({
-            text: stripPlaceholder(part?.text || '', true),
+            text: stripPlaceholder(part?.text || ''),
             annotations: sanitizeAnnotations(part?.annotations),
           }))
           .filter((part) => part.text !== '');
@@ -2576,7 +2760,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Инициализируем глобальные обработчики для выделения блоков
   initGlobalBlockHandlers();
 
-  loadNote().catch((error) =>
-    console.error('Unable to load note', error),
-  );
+  loadNote().catch((error) => {
+    console.error('Unable to load note', error);
+    saveStatus.disabled = false;
+    saveStatus.textContent = `${error.message || 'Не удалось загрузить заметку'} — повторить`;
+  });
 });

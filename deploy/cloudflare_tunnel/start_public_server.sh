@@ -25,7 +25,7 @@ else
   exit 1
 fi
 
-PUBLIC_MODE="${PUBLIC_MODE:-true}"
+export PUBLIC_MODE="${PUBLIC_MODE:-true}"
 HOST="${HOST:-}"
 PORT="${PORT:-8000}"
 

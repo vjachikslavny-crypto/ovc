@@ -10,6 +10,20 @@ OVC — заметки на **FastAPI + SQLite** с блочным редакт�
 
 Последнее обновление UI (2026-05-10): re-merge `ok10010` в `vanya+max/develop` с theme-aware правками dashboard/graph. Детали: `docs/current_release_notes.md`.
 
+Стабилизация этапов 0–2: [резервное копирование](docs/data_backup_restore.md),
+[контракт блоков, сохранение и изоляция аккаунтов](docs/stabilization_stages_0_2.md),
+[baseline данных](docs/stabilization_baseline.md). Перед миграциями существующей базы создайте
+и проверьте копию. `PATCH /api/notes/{id}` принимает необязательный `If-Match: "r<revision>"`
+(старый `"<updatedAt>"` также поддерживается):
+устаревшая версия получает 409; редактор сохраняет локальный черновик и предлагает восстановление.
+`POST /api/notes/{id}/recovery-copy` принимает тело `NoteCreateRequest` локального
+черновика и возвращает `201`, `NoteDetail` и ETag новой копии. Доступен только владельцу
+исходной заметки, включая tombstone; cookie-запросы требуют CSRF. Копия получает
+свои FileAsset IDs и переписанные URL, поэтому удаление оригинала не ломает вложения.
+Семантика и проверки: [этап 4.1](docs/stabilization_stage_4_1.md).
+В `AUTH_MODE=none` теперь видны только данные dev-user, а публичный запуск этого режима
+блокируется. Существующие личные заметки открывайте после входа в соответствующий аккаунт.
+
 ## Что есть в проекте
 
 - Главная рабочая страница (`/`) + блочный редактор (`/editor`, `/notes/{id}`)
@@ -172,10 +186,23 @@ AUTH_MODE=both
 
 ## Offline/Sync (desktop)
 
-Desktop sync использует outbox-модель:
-- локальные изменения пишутся сразу
-- операции складываются в очередь
-- при доступном remote уходят push/pull
+Sync v1 использует транзакционную очередь и журнал изменений. `Note.revision` —
+локальная версия для web/editor/AI; удалённая версия хранится отдельно в
+`SyncEntityMap.remote_revision` и задаёт sync base. Pull изменённого содержимого
+увеличивает локальную версию, ack её не подменяет. Операция и durable receipt на сервере фиксируются вместе;
+повтор UUID возвращает прежний результат. Конфликты сохраняют обе версии,
+удаления передаются tombstone, ID файлов сопоставляются явно.
+Удалённая цель старой связи не блокирует текст: намерение сохраняется как
+`relation_target_deleted` в `sync_conflicts` и receipt, счётчик `relationConflicts`
+виден в status и desktop-индикаторе. При permanent failure, включая preflight,
+trigger возвращает `ok=false`; `failed`, `pending`, `retry`, `lastError` согласованы
+со status того же пользователя/remote. `ok=true` не означает пустую очередь.
+
+Технический контракт и проверенные сценарии: [sync v1](docs/sync_protocol_v1.md),
+[выбор протокола](docs/sync_protocol_selection.md), [legacy quarantine](docs/sync_legacy_quarantine.md).
+**Старые 187 операций автоматически не отправляются.** До включения worker выполните
+аудит `python -B scripts/audit_legacy_sync.py` и проверьте резервную копию.
+При полной очереди новая транзакция получает 503; редактор сохраняет черновик для повтора.
 
 Основные переменные:
 
@@ -193,8 +220,8 @@ SYNC_PULL_ENABLED=true
 `SYNC_MODE`:
 - `off` — удалённый sync выключен
 - `shared-db` — desktop/web работают с одной локальной БД, без remote sync
-- `remote-shell` — remote URL есть, sync запускается вручную через `/api/sync/trigger`
-- `remote-sync` — фоновый воркер (требует `SYNC_BEARER_TOKEN`)
+- `remote-shell` — desktop использует удалённый UI/backend, локального обмена репликами нет
+- `remote-sync` — очередь и ручной `/api/sync/trigger`; фоновый worker дополнительно требует `SYNC_BEARER_TOKEN`
 - `auto` — режим выводится из `DESKTOP_MODE`, `SYNC_ENABLED`, `SYNC_REMOTE_BASE_URL`
 
 Пример включения синка на удалённый backend:
@@ -202,6 +229,13 @@ SYNC_PULL_ENABLED=true
 ```bash
 SYNC_ENABLED=true SYNC_REMOTE_BASE_URL=https://your-server AUTH_MODE=both npm run desktop:dev
 ```
+
+Обе стороны должны поддерживать v1 и подтверждать одну и ту же auth-идентичность.
+`AUTH_MODE=none`/dev fallback не подходят для обмена. Worker закрепляет пользователя
+за проверенным токеном, при истечении токена останавливается; ручной trigger использует
+текущий access token. Секреты не сохраняются в очереди/status. Менять remote URL можно:
+очередь и cursor старого сервера сохранятся отдельно. Подмена server UUID на прежнем URL
+блокирует обмен и требует отдельного явного переподключения.
 
 ## .env (минимально)
 
@@ -279,3 +313,27 @@ GET /api/runtime/status
 AUTH_MODE=both npm run desktop:dev
 ```
 Проверить: логин, создание заметки, загрузка/открытие файла, синк-статус.
+
+## Stage 5: схема, целостность и запуск
+
+Единственный источник схемы — Alembic, текущий head `20260926_integrity`.
+Сервер проверяет схему при старте; ошибки миграции больше не скрываются.
+`/healthz` показывает жизнь процесса, `/readyz` — доступность БД, head, таблиц/столбцов,
+FK SQLite и хранилища. `DB_AUTO_MIGRATE=false` по умолчанию; production требует
+явной миграции отдельным шагом до запуска workers. В development/test автообновление
+можно включить явно, но оно не ремонтирует повреждённые данные.
+
+**Stage 5 COMPLETE: 2026-09-26 рабочая SQLite явно отремонтирована и проверена в Stage 5.1.**
+Она находится на head `20260926_integrity`, FK/cross-owner нарушений нет, все 187 legacy
+операций остаются в карантине. Для другой старой/неисправленной копии сначала требуется
+отдельный согласованный ремонт с backup; обычный запуск такой схемы будет заблокирован.
+Настройки auth/sync, .env и Tauri не менялись. Для пустой БД подходит команда миграции выше.
+
+- [Отчёт Stage 5 и точная процедура ремонта](docs/stabilization_stage_5.md)
+- [Stage 5.1: применение к рабочей базе, backup IDs и финальные проверки](docs/stabilization_stage_5_1.md)
+- [Каноническая схема и семантика удаления](docs/database_schema.md)
+- [Резервная копия и восстановление](docs/data_backup_restore.md)
+
+Ремонт реальных данных выполнен по явному разрешению пользователя после свежего backup,
+restore и совпавшего dry-run. Uploads и .env не изменены, production remote sync выключен.
+Stage 6 не начат; изменения кода и документации остаются локальными.

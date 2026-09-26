@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -26,13 +26,15 @@ class TFIDFIndex:
             self.documents = [doc for doc in self.documents if doc[0] != note_id]
             self._rebuild()
 
-    def search(self, query: str, limit: int = 8) -> List[Dict[str, object]]:
+    def search(self, query: str, limit: int = 8, *, allowed_note_ids: Optional[Set[str]] = None) -> List[Dict[str, object]]:
         with self._lock:
-            if not self.documents:
+            if not self.documents or self.matrix is None:
                 return []
             query_vec = self.vectorizer.transform([query])
             similarities = cosine_similarity(query_vec, self.matrix).flatten()
             scored = list(zip(self.documents, similarities))
+            if allowed_note_ids is not None:
+                scored = [item for item in scored if item[0][0] in allowed_note_ids]
             scored.sort(key=lambda item: item[1], reverse=True)
             results = []
             for (note_id, chunk_id, text), score in scored[:limit]:
@@ -49,7 +51,12 @@ class TFIDFIndex:
             self.matrix = None
             return
         corpus = [text for (_, _, text) in self.documents]
-        self.matrix = self.vectorizer.fit_transform(corpus)
+        try:
+            self.matrix = self.vectorizer.fit_transform(corpus)
+        except ValueError as exc:
+            if "empty vocabulary" not in str(exc):
+                raise
+            self.matrix = None
 
 
 index = TFIDFIndex()

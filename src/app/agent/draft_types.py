@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from app.agent.block_models import normalize_blocks
 
 
 class ChatMessage(BaseModel):
@@ -17,13 +18,19 @@ class DraftActionBase(BaseModel):
     note_id: Optional[str] = Field(default=None, alias="noteId")
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class BlockPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     id: Optional[str] = None
     type: str
     data: dict[str, Any]
+
+    @model_validator(mode="after")
+    def canonical_data(self):
+        self.data = normalize_blocks([self.model_dump()])[0]["data"]
+        return self
 
 
 class InsertBlockAction(DraftActionBase):

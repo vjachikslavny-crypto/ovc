@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import math
+import os
 import struct
 import sys
 import unittest
@@ -22,7 +23,8 @@ try:
     from app.models.user import User  # noqa: E402
 
     _APP_IMPORT_ERROR = None
-    db_migrate.upgrade()
+    if os.getenv("OVC_ISOLATED_TESTS") != "1":
+        raise RuntimeError("Run this integration suite with pytest; conftest isolates DB/storage")
 
     # Мок-пользователь для тестов — обходим JWT-аутентификацию
     _TEST_USER = User(
@@ -36,8 +38,6 @@ try:
     def _override_get_current_user():
         return _TEST_USER
 
-    app.dependency_overrides[get_current_user] = _override_get_current_user
-    app.dependency_overrides[get_current_user_or_refresh] = _override_get_current_user
     client = TestClient(app)
 except ModuleNotFoundError as exc:  # pragma: no cover - dependency missing on CI
     _APP_IMPORT_ERROR = exc
@@ -151,6 +151,17 @@ def make_large_markdown() -> bytes:
 
 @unittest.skipIf(client is None, f"FastAPI app unavailable: {_APP_IMPORT_ERROR}")
 class UploadApiTests(unittest.TestCase):
+    def setUp(self):
+        from app.db.session import get_session
+        with get_session() as session:
+            session.merge(_TEST_USER)
+        client.cookies.clear()
+        app.dependency_overrides[get_current_user] = _override_get_current_user
+        app.dependency_overrides[get_current_user_or_refresh] = _override_get_current_user
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
     def test_upload_image_returns_block(self):
         payload = make_png()
         response = client.post(

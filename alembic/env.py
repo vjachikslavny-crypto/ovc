@@ -1,64 +1,29 @@
-from __future__ import annotations
-
-from logging.config import fileConfig
-
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-
-from app.core.config import settings
-from app.db.base import Base
-from app.db import models  # noqa: F401
-from app.models import user  # noqa: F401
-from app.models import session  # noqa: F401
-from app.models import audit  # noqa: F401
-
+from app.db.migration_steps import metadata
 
 config = context.config
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-target_metadata = Base.metadata
+target_metadata = metadata()
 
 
-def get_url() -> str:
-    return settings.database_url
-
-
-def run_migrations_offline() -> None:
-    url = get_url()
-    context.configure(
-        url=url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        compare_type=True,
-    )
-
+def run(connection):
+    context.configure(connection=connection, target_metadata=target_metadata,
+                      compare_type=True, transactional_ddl=True)
     with context.begin_transaction():
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = get_url()
-    connectable = engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-        )
-
-        with context.begin_transaction():
-            context.run_migrations()
-
-
 if context.is_offline_mode():
-    run_migrations_offline()
+    raise RuntimeError('These migrations inspect existing data; use an online maintenance connection')
+connection = config.attributes.get('connection')
+if connection is not None:
+    run(connection)
 else:
-    run_migrations_online()
+    from app.core.config import settings
+    from app.db.engine import make_engine
+    from app.db.migrate import migration_connection
+    engine = make_engine(settings.database_url)
+    try:
+        with migration_connection(engine) as connection:
+            run(connection)
+    finally:
+        engine.dispose()

@@ -8,10 +8,12 @@ from pydantic import BaseModel, Field
 
 from app.db.models import FileAsset, Note
 from app.db.session import get_session
+from app.core.ownership import get_owned_note
 from app.services import files as file_service
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_protocol import lock_stream, record_file_change
 from app.services.sync_engine import OP_UPLOAD_FILE, enqueue_sync_operation
 
 # OVC: video - увеличиваем лимит размера файла
@@ -56,18 +58,11 @@ async def _store_uploads(
 
     upload_op_id = request.headers.get("X-Upload-Op-Id") or request.headers.get("X-Desktop-Op-Id")
 
-    with get_session() as session:
+    with get_session(immediate=True) as session:
         try:
+            lock_stream(session)
             if note_id:
-                note = session.get(Note, note_id)
-                if not note:
-                    raise HTTPException(status_code=404, detail="Note not found")
-                if note.user_id is None:
-                    note.user_id = user.id
-                    session.add(note)
-                    session.flush()
-                if note.user_id != user.id:
-                    raise HTTPException(status_code=404, detail="Note not found")
+                get_owned_note(session, note_id, user.id)
 
             for upload in uploads:
                 existing_asset = None
@@ -96,6 +91,7 @@ async def _store_uploads(
                     )
                     asset = stored.asset
                     block = stored.block
+                    record_file_change(session, asset)
 
                 original_url = f"/files/{asset.id}/original"
                 preview_url = f"/files/{asset.id}/preview" if asset.path_preview else None
@@ -121,7 +117,7 @@ async def _store_uploads(
                     request=request,
                     metadata={"file_id": asset.id, "kind": asset.kind},
                 )
-                if note_id:
+                if not existing_asset:
                     enqueue_sync_operation(
                         session,
                         OP_UPLOAD_FILE,
