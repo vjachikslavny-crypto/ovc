@@ -1,8 +1,11 @@
 from __future__ import annotations
+from app.core.config import settings
 
 import json
 import logging
 import re
+from fastapi import HTTPException
+from app.services.runtime import check_cancelled
 from typing import Generator, Optional
 
 from pydantic import TypeAdapter
@@ -48,7 +51,7 @@ def _log_dialog(user_id: Optional[str], note_id: Optional[str], mode: str,
                 mode=mode,
             ))
     except Exception as exc:
-        logger.warning("Dialog logging failed: %s", exc)
+        logger.warning("dialog_logging_failed type=%s", type(exc).__name__)
 
 
 def _parse_llm_response(raw: str) -> tuple[str, list[DraftAction]]:
@@ -88,12 +91,12 @@ def _parse_llm_response(raw: str) -> tuple[str, list[DraftAction]]:
                 act = ta.validate_python(item)
                 actions.append(act)
             except Exception as e:
-                logger.warning("Draft action validation failed: %s", e)
+                logger.warning("draft_validation_failed type=%s", type(e).__name__)
 
         return reply, actions
         
     except Exception as e:
-        logger.warning("_parse_llm_response JSON error: %s", e)
+        logger.warning("ai_response_parse_failed type=%s", type(e).__name__)
         # Если это не JSON, возвращаем исходный текст
         return raw.strip(), []
 
@@ -153,6 +156,7 @@ def handle_user_message(
     user_id: Optional[str] = None,
     mode: str = "chat",
     messages: Optional[list[ChatMessage]] = None,
+    raise_errors: bool = False,
 ) -> AgentReply:
     """Обрабатывает сообщение пользователя через LLM.
 
@@ -181,6 +185,7 @@ def handle_user_message(
                 note_id, text, user_id, session, mode=mode,
             )
 
+        _check_context_budget(system_prompt, user_prompt, messages)
         # Если есть история — используем multi-turn API
         if messages:
             gemini_history = _history_to_gemini(messages)
@@ -188,6 +193,8 @@ def handle_user_message(
         else:
             raw_response = llm.chat(system_prompt, user_prompt)
 
+        if not isinstance(raw_response, str) or len(raw_response) > settings.max_ai_context_chars:
+            raise HTTPException(502, 'Invalid or oversized AI response')
         reply_text, draft_actions = _parse_llm_response(raw_response)
         
         # Для режимов общения (chat) и объяснения (explain) принудительно очищаем draft,
@@ -205,15 +212,32 @@ def handle_user_message(
                     action.note_id = note_id
 
         result = AgentReply(reply=reply_text, draft=draft_actions, mode=mode)
+        check_cancelled()
         _log_dialog(user_id, note_id, mode, text, reply_text)
         return result
 
     except Exception as exc:
-        logger.exception("LLM call failed: %s", exc)
-        return AgentReply(
-            reply="Не удалось связаться с AI. Попробуйте позже.",
-            draft=[], mode=mode,
-        )
+        error = _runtime_error(exc)
+        if raise_errors:
+            raise error from None
+        return AgentReply(reply="Не удалось связаться с AI. Попробуйте позже.", draft=[], mode=mode)
+
+
+def _check_context_budget(system, user, messages):
+    if len(system) + len(user) + sum(len(m.text) for m in (messages or [])) > settings.max_ai_context_chars:
+        raise HTTPException(413, 'AI input exceeds the configured context limit')
+
+
+def _runtime_error(exc):
+    if isinstance(exc, HTTPException):
+        return exc
+    logger.warning('ai_provider_failed type=%s', type(exc).__name__)
+    code = getattr(exc, 'status_code', None)
+    if 'Timeout' in type(exc).__name__:
+        return HTTPException(504, 'AI provider timed out')
+    if code == 429:
+        return HTTPException(429, 'AI provider rate limit; retry later', headers={'Retry-After':'30'})
+    return HTTPException(502, 'AI provider is unavailable or returned an invalid response')
 
 
 def stream_user_message(
@@ -249,11 +273,19 @@ def stream_user_message(
                 note_id, text, user_id, session, mode=stream_mode if stream_mode == "stream" else mode,
             )
 
+        _check_context_budget(system_prompt, user_prompt, messages)
         gemini_history = _history_to_gemini(messages) if messages else None
         use_json = mode in ("summarize_text", "detailed")
 
         full_chunks: list[str] = []
+        output_size = 0
         for chunk in llm.stream_chat(system_prompt, user_prompt, history=gemini_history, json_mode=use_json):
+            check_cancelled()
+            if not isinstance(chunk, str):
+                raise HTTPException(502, 'Invalid AI response')
+            output_size += len(chunk)
+            if output_size > settings.max_ai_context_chars:
+                raise HTTPException(502, 'AI response exceeds configured size limit')
             full_chunks.append(chunk)
             # Для chat/explain — стримим текст по мере поступления
             if not use_json:
@@ -278,11 +310,12 @@ def stream_user_message(
             if draft_actions:
                 yield {"type": "draft", "draft": [a.dict(by_alias=True) for a in draft_actions]}
 
+        check_cancelled()
         _log_dialog(user_id, note_id, mode, text, complete if not use_json else reply_text)
 
     except Exception as exc:
-        logger.exception("Stream LLM call failed: %s", exc)
-        yield {"type": "error", "message": "Не удалось связаться с AI. Попробуйте позже."}
+        error = _runtime_error(exc)
+        yield {"type": "error", "message": error.detail, "status": error.status_code}
 
     yield {"type": "done"}
 

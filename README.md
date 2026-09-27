@@ -24,6 +24,10 @@ OVC — заметки на **FastAPI + SQLite** с блочным редакт�
 В `AUTH_MODE=none` теперь видны только данные dev-user, а публичный запуск этого режима
 блокируется. Существующие личные заметки открывайте после входа в соответствующий аккаунт.
 
+Runtime/public HTTPS: [этап 6](docs/stabilization_stage_6.md) — ограничения загрузки,
+изолированные конвертации, потоковое медиа, доверенные proxy и production env.
+Обычный локальный запуск сохраняется; реальный `.env` автоматически не меняется.
+
 ## Что есть в проекте
 
 - Главная рабочая страница (`/`) + блочный редактор (`/editor`, `/notes/{id}`)
@@ -62,7 +66,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r src/requirements.txt
 PYTHONPATH=src python -m app.db.migrate
-uvicorn app.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --no-proxy-headers --app-dir src --reload --host 127.0.0.1 --port 8000
 ```
 
 Или одним скриптом:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import time
+from app.services.runtime import check_cancelled
+from fastapi import HTTPException
 from abc import ABC, abstractmethod
 from typing import Generator, Optional
 
@@ -58,23 +61,32 @@ class GroqLLM(LLMProvider):
             api_key=api_key,
             base_url="https://api.groq.com/openai/v1",
             timeout=timeout,
+            max_retries=0,
         )
+        self.timeout = timeout
         self._model_name = model
         self.max_tokens = max_tokens
         self.temperature = temperature
 
     def chat(self, system: str, user: str) -> str:
-        response = self._client.chat.completions.create(
-            model=self._model_name,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-        )
-        return response.choices[0].message.content
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model_name,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        finally:
+            self._client.close()
+        check_cancelled()
+        content = response.choices[0].message.content
+        if not isinstance(content, str):
+            raise HTTPException(502, "Invalid AI response")
+        return content
 
     def chat_with_history(
         self,
@@ -95,14 +107,21 @@ class GroqLLM(LLMProvider):
             
         messages.append({"role": "user", "content": user})
         
-        response = self._client.chat.completions.create(
-            model=self._model_name,
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-        )
-        return response.choices[0].message.content
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model_name,
+                messages=messages,
+                response_format={"type": "json_object"},
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        finally:
+            self._client.close()
+        check_cancelled()
+        content = response.choices[0].message.content
+        if not isinstance(content, str):
+            raise HTTPException(502, "Invalid AI response")
+        return content
 
     def stream_chat(
         self,
@@ -132,11 +151,23 @@ class GroqLLM(LLMProvider):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        stream = self._client.chat.completions.create(**kwargs)
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
+        deadline = time.monotonic() + self.timeout
+        stream = None
+        try:
+            stream = self._client.chat.completions.create(**kwargs)
+            for chunk in stream:
+                check_cancelled()
+                if time.monotonic() > deadline:
+                    raise HTTPException(504, 'AI response timed out')
+                if not chunk.choices:
+                    continue
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+        finally:
+            if stream is not None:
+                stream.close()
+            self._client.close()
 
 
 class OllamaLLM(LLMProvider):

@@ -56,7 +56,7 @@ class CommitResponse(BaseModel):
 
 
 @router.post("/commit", response_model=CommitResponse)
-async def commit_endpoint(
+def commit_endpoint(
     payload: CommitRequest,
     request: Request,
     current_user: User = Depends(get_current_user),

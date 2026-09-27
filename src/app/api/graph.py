@@ -38,7 +38,7 @@ class GroupLabelRequest(BaseModel):
 
 
 @router.get("/graph")
-async def graph_endpoint(current_user: User = Depends(get_current_user)):
+def graph_endpoint(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
             session.execute(_user_notes_query(current_user))
@@ -118,7 +118,7 @@ async def graph_endpoint(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/graph/groups")
-async def graph_groups(current_user: User = Depends(get_current_user)):
+def graph_groups(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
             session.execute(_user_notes_query(current_user))
@@ -156,7 +156,7 @@ async def graph_groups(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/graph/groups/{cluster}")
-async def update_group_color(
+def update_group_color(
     cluster: str,
     payload: GroupColorRequest,
     current_user: User = Depends(get_current_user),
@@ -179,7 +179,7 @@ async def update_group_color(
 
 
 @router.post("/graph/groups/{cluster}/label")
-async def update_group_label(
+def update_group_label(
     cluster: str,
     payload: GroupLabelRequest,
     current_user: User = Depends(get_current_user),

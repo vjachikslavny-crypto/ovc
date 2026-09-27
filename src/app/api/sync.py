@@ -114,25 +114,53 @@ async def sync_file(operation: str = Form(...), file: UploadFile = File(...),
         raise HTTPException(422, 'Invalid operation schema or protocol')
     if op.entity_type != 'file' or op.operation_type != 'upload' or op.entity_remote_id or op.base_revision is not None:
         raise HTTPException(422, 'Expected a new file upload operation')
-    # Read and verify before the database lock. Retries must carry the same bytes.
-    data = await file.read(500 * 1024 * 1024 + 1)
-    if len(data) > 500 * 1024 * 1024:
-        raise HTTPException(413, 'File too large')
+    from app.services.runtime import run_blocking
+    return await run_blocking(_store_sync_file, op, file, current_user.id)
+
+
+def _store_sync_file(op, file, user_id):
+    from app.services.upload_pipeline import prepare_upload, cleanup_asset
+    from app.services.runtime import check_cancelled
     payload = op.payload
-    if (hashlib.sha256(data).hexdigest() != payload.get('sha256') or len(data) != payload.get('size')
+    digest = hashlib.sha256()
+    size = 0
+    while True:
+        check_cancelled()
+        data = file.file.read(1024 * 1024)
+        if not data:
+            break
+        size += len(data)
+        if size > settings.max_file_bytes:
+            raise HTTPException(413, 'File too large')
+        digest.update(data)
+    if (digest.hexdigest() != payload.get('sha256') or size != payload.get('size')
             or file.filename != payload.get('filename') or file.content_type != payload.get('mime')):
         raise HTTPException(422, 'File metadata/checksum mismatch')
-    with get_session(immediate=True) as session:
-        previous, fingerprint = receipt(session, current_user.id, op)
+    note_id = payload.get('noteId')
+    with get_session() as session:
+        previous, _ = receipt(session, user_id, op)
         if previous is not None:
             return previous
-        note_id = payload.get('noteId')
         if note_id:
-            get_owned_note(session, note_id, current_user.id)
-        upload = UploadFile(filename=file.filename, file=io.BytesIO(data), headers=Headers({'content-type': file.content_type}))
-        stored = await file_service.save_upload(session, upload, note_id, current_user.id, upload_op_id=str(op.op_id))
-        record_file_change(session, stored.asset)
-        result = {'op_id': str(op.op_id), 'status': 'applied', 'entity_remote_id': stored.asset.id,
-                  'revision': 1, 'snapshot': file_payload(stored.asset)}
-        store_receipt(session, current_user.id, op, fingerprint, result)
+            get_owned_note(session, note_id, user_id)
+    stored = prepare_upload(file, note_id, user_id, upload_op_id=str(op.op_id))
+    committed = False
+    try:
+        check_cancelled()
+        with get_session(immediate=True) as session:
+            previous, fingerprint = receipt(session, user_id, op)
+            if previous is not None:
+                return previous
+            if note_id:
+                get_owned_note(session, note_id, user_id)
+            session.add(stored.asset)
+            session.flush()
+            record_file_change(session, stored.asset)
+            result = {'op_id': str(op.op_id), 'status': 'applied', 'entity_remote_id': stored.asset.id,
+                      'revision': 1, 'snapshot': file_payload(stored.asset)}
+            store_receipt(session, user_id, op, fingerprint, result)
+        committed = True
         return result
+    finally:
+        if not committed:
+            cleanup_asset(stored.asset.id)

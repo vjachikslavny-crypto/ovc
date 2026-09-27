@@ -45,4 +45,4 @@ if [[ -n "${PUBLIC_BASE_URL:-}" ]]; then
   echo "[start_public_server] Public URL: ${PUBLIC_BASE_URL}"
 fi
 
-exec env PYTHONPATH=src "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir src --host "${HOST}" --port "${PORT}"
+exec env PYTHONPATH=src "${PYTHON_BIN}" -m uvicorn app.main:app --no-proxy-headers --app-dir src --host "${HOST}" --port "${PORT}"

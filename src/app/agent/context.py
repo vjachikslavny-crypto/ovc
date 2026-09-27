@@ -151,6 +151,7 @@ def get_related_notes(
 ) -> list[RelatedNote]:
     """Ищет похожие заметки через TF-IDF индекс."""
     live_note_ids = set(session.execute(select(Note.id).where(owned_notes_filter(user_id))).scalars())
+    session.commit()  # release the read transaction before CPU-heavy index work
     results = tfidf_index.search(query, limit=limit + 5, allowed_note_ids=live_note_ids)
     related: list[RelatedNote] = []
     seen_ids: set[str] = set()

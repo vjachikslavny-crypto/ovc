@@ -46,7 +46,7 @@ def _owner_filter(user: User):
 
 
 @router.get("/tags")
-async def list_all_tags(current_user: User = Depends(get_current_user)):
+def list_all_tags(current_user: User = Depends(get_current_user)):
     """Возвращает список всех уникальных тегов в системе"""
     with get_session() as session:
         tags = (
@@ -64,7 +64,7 @@ async def list_all_tags(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/notes", response_model=NoteListResponse)
-async def list_notes(
+def list_notes(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
@@ -93,12 +93,14 @@ async def list_notes(
 
 
 @router.get("/notes/search/full")
-async def search_notes_full(
-    q: str = Query(..., min_length=1),
+def search_notes_full(
+    q: str = Query(..., min_length=1, max_length=512),
     limit: int = Query(30, ge=1, le=100),
     current_user: User = Depends(get_current_user),
 ):
     """Extended search: TF-IDF content search + title search + file name search."""
+    from app.services.rate_limit import limit_operation
+    limit_operation('search', current_user.id, settings.rate_limit_search_per_min)
     query_lower = q.strip().lower()
     matched_note_ids: dict[str, float] = {}
 
@@ -110,6 +112,8 @@ async def search_notes_full(
             ).all()
         )
 
+        # Release the read transaction before any CPU-heavy index fit.
+        session.commit()
         # Filter before ranking so tombstones/other owners cannot crowd out hits.
         for result in index.search(q, limit=limit, allowed_note_ids=user_note_ids):
             nid, score = result["note_id"], result["score"]
@@ -173,7 +177,7 @@ async def search_notes_full(
 
 
 @router.get("/notes/{note_id}", response_model=NoteDetail)
-async def get_note(note_id: str, request: Request, response: Response, current_user: User = Depends(get_current_user)):
+def get_note(note_id: str, request: Request, response: Response, current_user: User = Depends(get_current_user)):
     with get_session() as session:
         note = session.execute(
             select(Note).where(Note.id == note_id)
@@ -187,7 +191,7 @@ async def get_note(note_id: str, request: Request, response: Response, current_u
 
 
 @router.post("/notes", response_model=NoteDetail, status_code=201)
-async def create_note(payload: NoteCreateRequest, request: Request, response: Response, current_user: User = Depends(get_current_user)):
+def create_note(payload: NoteCreateRequest, request: Request, response: Response, current_user: User = Depends(get_current_user)):
     with get_session(immediate=True) as session:
         lock_stream(session)
         layout_data = merge_layout_hints(None, payload.layout_hints)
@@ -226,7 +230,7 @@ async def create_note(payload: NoteCreateRequest, request: Request, response: Re
 
 
 @router.post("/notes/{note_id}/recovery-copy", response_model=NoteDetail, status_code=201)
-async def recover_note(note_id: str, payload: NoteCreateRequest, request: Request,
+def recover_note(note_id: str, payload: NoteCreateRequest, request: Request,
                        response: Response, current_user: User = Depends(get_current_user)):
     with get_session(immediate=True) as session:
         lock_stream(session)
@@ -244,7 +248,7 @@ async def recover_note(note_id: str, payload: NoteCreateRequest, request: Reques
 
 
 @router.patch("/notes/{note_id}", response_model=NoteDetail)
-async def update_note(
+def update_note(
     note_id: str,
     payload: NoteUpdateRequest,
     request: Request,
@@ -312,7 +316,7 @@ async def update_note(
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
+def delete_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
     with get_session(immediate=True) as session:
         lock_stream(session)
         note = session.get(Note, note_id)

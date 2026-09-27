@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import logging
+from sqlalchemy.exc import OperationalError
+from fastapi import HTTPException
 from sqlalchemy.orm import sessionmaker
 from app.db.engine import make_engine
 
@@ -22,6 +25,12 @@ def get_session(*, immediate: bool = False):
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         yield session
         session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        if engine.dialect.name == 'sqlite' and ('locked' in str(exc.orig).lower() or 'busy' in str(exc.orig).lower()):
+            logging.getLogger(__name__).warning('database_busy')
+            raise HTTPException(503, 'Database busy; retry the operation', headers={'Retry-After':'1'}) from None
+        raise
     except Exception:
         session.rollback()
         raise

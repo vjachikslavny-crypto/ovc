@@ -66,6 +66,12 @@ def isolated_database(monkeypatch):
     app.dependency_overrides.clear()
     index.documents = []
     index.matrix = None
+    index._loaded = False
+    index._dirty = True
+    from app.services.runtime import start_runtime
+    from app.services.rate_limit import runtime_limiter
+    start_runtime()
+    runtime_limiter._hits.clear()
     # Do not download tokenizer data or call a live model during tests.
     monkeypatch.setattr(token_counter, "_tiktoken_enc", False)
     yield

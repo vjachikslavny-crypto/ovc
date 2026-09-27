@@ -12,7 +12,7 @@ router = APIRouter(tags=["export"])
 
 
 @router.get("/export/docx/{note_id}")
-async def export_docx_stub(note_id: str, current_user: User = Depends(get_current_user_or_refresh)):
+def export_docx_stub(note_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     with get_session() as session:
         get_owned_note(session, note_id, current_user.id)
 

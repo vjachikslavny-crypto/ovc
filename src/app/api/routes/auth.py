@@ -140,8 +140,7 @@ def _normalize_username_candidate(raw: str) -> str:
 def _client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return request.client.host
-    forwarded_for = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    return forwarded_for or "unknown"
+    return "unknown"
 
 
 def _username_exists(session, username: str) -> bool:
@@ -385,6 +384,8 @@ def supabase_session_bridge(request: Request, response: Response):
 
 @router.post("/auth/refresh", response_model=RefreshResponse, dependencies=[Depends(_local_auth_enabled)])
 def refresh(request: Request, response: Response):
+    from app.services.rate_limit import limit_operation
+    limit_operation('refresh-ip', _client_ip(request), settings.rate_limit_refresh_per_min)
     require_csrf(request)
     raw_token = request.cookies.get(REFRESH_COOKIE)
     if not raw_token:
@@ -408,6 +409,7 @@ def refresh(request: Request, response: Response):
             if not user or not user.is_active:
                 error = HTTPException(status_code=403, detail="User inactive")
             else:
+                limit_operation('refresh-user', user.id, settings.rate_limit_refresh_per_min)
                 token.rotated_at = now
                 raw_next = generate_refresh_token()
                 session.add(RefreshToken(

@@ -38,6 +38,7 @@ OP_COMMIT, OP_UPLOAD_FILE = 'commit', 'upload_file'
 ACTIVE = ('pending', 'retry', 'inflight', 'auth_required')
 TERMINAL = ('applied', 'conflict', 'failed_permanent')
 _worker_lock, _sync_lock = threading.Lock(), threading.Lock()
+_worker_stop = threading.Event()
 _worker_started = False
 _sync_thread = None
 
@@ -456,32 +457,56 @@ def _download_files(client, scope, page):
             if asset and asset.hash_sha256 != manifest['sha256']:
                 raise PermanentSyncError('Immutable remote file checksum changed')
             needed.append((rid, manifest, asset.path_original if asset else None))
+    from app.services.files import UPLOAD_ROOT
+    from app.services.storage import require_space
     downloads = []
-    for rid, manifest, local_path in needed:
-        if local_path and Path(local_path).is_file():
-            with open(local_path, 'rb') as stream:
-                digest = hashlib.sha256()
-                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                    digest.update(chunk)
-            if digest.hexdigest() == manifest['sha256']:
-                continue
-        data = _http(client.get(f'api/sync/files/{quote(rid, safe="")}/original')).content
-        if hashlib.sha256(data).hexdigest() != manifest['sha256'] or len(data) != manifest['size']:
-            raise PermanentSyncError('Downloaded file checksum mismatch')
-        downloads.append((manifest, data))
-    return downloads
+    try:
+        for rid, manifest, local_path in needed:
+            if local_path and Path(local_path).is_file():
+                with open(local_path, 'rb') as stream:
+                    digest = hashlib.sha256()
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        digest.update(chunk)
+                if digest.hexdigest() == manifest['sha256']:
+                    continue
+            if not 0 <= manifest['size'] <= settings.max_file_bytes:
+                raise PermanentSyncError('Remote file exceeds configured size limit')
+            staging = UPLOAD_ROOT / '.staging'
+            staging.mkdir(parents=True, exist_ok=True)
+            require_space(staging, manifest['size'])
+            with tempfile.NamedTemporaryFile(dir=staging, prefix='sync-', delete=False) as target:
+                source = Path(target.name)
+                downloads.append((manifest, source))
+                digest, size = hashlib.sha256(), 0
+                with client.stream('GET', f'api/sync/files/{quote(rid, safe="")}/original') as response:
+                    _http(response)
+                    for chunk in response.iter_bytes(1024 * 1024):
+                        size += len(chunk)
+                        if size > manifest['size'] or size > settings.max_file_bytes:
+                            raise PermanentSyncError('Downloaded file exceeds manifest size')
+                        require_space(staging, len(chunk))
+                        target.write(chunk)
+                        digest.update(chunk)
+            if digest.hexdigest() != manifest['sha256'] or size != manifest['size']:
+                raise PermanentSyncError('Downloaded file checksum mismatch')
+        return downloads
+    except BaseException:
+        for _, source in downloads:
+            source.unlink(missing_ok=True)
+        raise
 
 
 def _apply_page(scope, changes, downloads, cursor, next_cursor):
+    from app.services.upload_pipeline import prepare_upload, cleanup_asset
     from app.services import files as file_service
-    with get_session(immediate=True) as session:
-        lock_stream(session)
-        peer = session.get(SyncPeerState, scope)
-        if peer.cursor != cursor:
-            return False  # Another process already committed this page; reread cursor.
-        for manifest, data in downloads:
-            mapping = _remote_mapping(session, scope, 'file', manifest['id'])
-            existing = session.get(FileAsset, mapping.local_id) if mapping else None
+    prepared, kept = [], []
+    committed = False
+    try:
+        # Network, disk writes and converters finish BEFORE the cursor transaction.
+        for manifest, source in downloads:
+            with get_session() as session:
+                mapping = _remote_mapping(session, scope, 'file', manifest['id'])
+                existing = session.get(FileAsset, mapping.local_id) if mapping else None
             if existing:
                 if existing.user_id != scope[0] or existing.hash_sha256 != manifest['sha256']:
                     raise PermanentSyncError('Mapped file identity mismatch')
@@ -489,18 +514,43 @@ def _apply_page(scope, changes, downloads, cursor, next_cursor):
                 if not path.is_relative_to(file_service.UPLOAD_ROOT.resolve()):
                     raise PermanentSyncError('Mapped file path outside configured storage')
                 path.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-                    temporary = stream.name
-                    stream.write(data)
-                try:
-                    os.replace(temporary, path)
-                finally:
-                    if os.path.exists(temporary):
-                        os.unlink(temporary)
+                os.replace(source, path)
+                prepared.append((manifest, None, None))
+            else:
+                with source.open('rb') as stream:
+                    upload = UploadFile(file=stream, filename=manifest['filename'], headers=Headers({'content-type': manifest['mime']}))
+                    stored = prepare_upload(upload, None, scope[0])
+                prepared.append((manifest, stored, stored.asset.id))
+        committed = _apply_page_transaction(scope, changes, prepared, cursor, next_cursor, kept)
+        return committed
+    finally:
+        for _, stored, original_id in prepared:
+            if stored and (not committed or original_id not in kept):
+                cleanup_asset(original_id)
+        for _, source in downloads:
+            source.unlink(missing_ok=True)
+
+
+def _apply_page_transaction(scope, changes, prepared, cursor, next_cursor, kept):
+    from app.services import files as file_service
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        peer = session.get(SyncPeerState, scope)
+        if peer.cursor != cursor:
+            return False  # Another process already committed this page; reread cursor.
+        for manifest, stored, original_id in prepared:
+            mapping = _remote_mapping(session, scope, 'file', manifest['id'])
+            existing = session.get(FileAsset, mapping.local_id) if mapping else None
+            if existing:
+                if existing.user_id != scope[0] or existing.hash_sha256 != manifest['sha256']:
+                    raise PermanentSyncError('Mapped file identity mismatch')
                 continue
+            if stored is None:
+                raise RetryableSyncError('File metadata changed during preparation')
             parent = _pull_local_id(session, scope, 'note', manifest['noteId']) if manifest.get('noteId') else None
-            upload = UploadFile(file=io.BytesIO(data), filename=manifest['filename'], headers=Headers({'content-type': manifest['mime']}))
-            stored = asyncio.run(file_service.save_upload(session, upload, parent, scope[0]))
+            stored.asset.note_id = parent
+            session.add(stored.asset)
+            kept.append(original_id)
             if mapping:
                 # Keep already published local URLs stable when recovering a lost row.
                 stored.asset.id = mapping.local_id
@@ -567,9 +617,15 @@ def _apply_page(scope, changes, downloads, cursor, next_cursor):
     return True
 
 
+def _check_worker_stop():
+    if _worker_stop.is_set() and threading.current_thread() is _sync_thread:
+        raise RetryableSyncError('Server shutting down')
+
+
 def _pull(client, scope):
     pulled = 0
     while True:
+        _check_worker_stop()
         with get_session() as session:
             peer = session.get(SyncPeerState, scope)
             cursor, server_id = peer.cursor, peer.server_id
@@ -581,10 +637,14 @@ def _pull(client, scope):
         if sequences != sorted(set(sequences)) or any(s <= cursor for s in sequences) or next_cursor != (sequences[-1] if sequences else cursor):
             raise PermanentSyncError('Invalid pull cursor ordering')
         downloads = _download_files(client, scope, changes)
-        if _apply_page(scope, changes, downloads, cursor, next_cursor):
-            pulled += len(changes)
-            if not page.get('has_more'):
-                return pulled
+        try:
+            if _apply_page(scope, changes, downloads, cursor, next_cursor):
+                pulled += len(changes)
+                if not page.get('has_more'):
+                    return pulled
+        finally:
+            for _, source in downloads:
+                source.unlink(missing_ok=True)
         if not changes and page.get('has_more'):
             raise PermanentSyncError('Empty page cannot advance cursor')
 
@@ -629,6 +689,7 @@ def trigger_sync_now(*, access_token=None, user_id=None, background=False):
             hello = _http(client.get('api/sync/hello')).json()
             _bind(scope, hello, principal)
             for _ in range(settings.sync_batch_size):
+                _check_worker_stop()
                 claim = _claim(scope)
                 if claim is None:
                     break
@@ -654,9 +715,16 @@ def trigger_sync_now(*, access_token=None, user_id=None, background=False):
                 peer = session.get(SyncPeerState, scope)
                 peer.last_success_at, peer.reachable = now(), True
             return _cycle_result(user_id, pushed, pulled)
-        except HTTPException:
-            _error(scope, AuthRequired('Local authentication required'))
-            return _cycle_result(user_id, pushed, pulled, 'auth_required')
+        except HTTPException as exc:
+            if exc.status_code in (401, 403):
+                error = AuthRequired('Local authentication required')
+            elif exc.status_code >= 500 or exc.status_code == 429:
+                error = RetryableSyncError(f'Local processing HTTP {exc.status_code}')
+            else:
+                error = PermanentSyncError(f'Local processing HTTP {exc.status_code}')
+            _error(scope, error, claim['id'] if claim else None)
+            return _cycle_result(user_id, pushed, pulled,
+                'auth_required' if isinstance(error, AuthRequired) else 'sync_error')
         except (AuthRequired, PermanentSyncError, RetryableSyncError, httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as exc:
             _error(scope, exc, claim['id'] if claim else None)
             return _cycle_result(user_id, pushed, pulled,
@@ -717,8 +785,9 @@ def start_sync_worker_once():
     with _worker_lock:
         if _worker_started:
             return
+        _worker_stop.clear()
         def loop():
-            while True:
+            while not _worker_stop.is_set():
                 try:
                     result = trigger_sync_now(access_token=token, user_id=uid, background=True)
                     if result.get('reason') in ('auth_required', 'account_switched'):
@@ -727,8 +796,17 @@ def start_sync_worker_once():
                         return
                 except Exception:
                     logger.exception('Sync worker cycle failed')
-                threading.Event().wait(max(3, settings.sync_poll_seconds))
+                _worker_stop.wait(max(3, settings.sync_poll_seconds))
         _sync_thread = threading.Thread(target=loop, name='ovc-sync-worker', daemon=True)
         _sync_thread.start()
         _worker_started = True
         logger.info('Sync v1 worker bound to a verified owner; legacy queue quarantined')
+
+
+def stop_sync_worker():
+    global _worker_started
+    _worker_stop.set()
+    if _sync_thread and _sync_thread.is_alive():
+        _sync_thread.join(timeout=settings.shutdown_grace_seconds)
+    if not _sync_thread or not _sync_thread.is_alive():
+        _worker_started = False

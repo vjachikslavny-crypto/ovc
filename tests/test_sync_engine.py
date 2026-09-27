@@ -461,6 +461,7 @@ def test_worker_reverifies_captured_owner_each_cycle(pair, monkeypatch):
     settings.sync_worker_enabled = True
     settings.sync_bearer_token = pair.tokens['a']
     monkeypatch.setattr(sync, '_worker_started', False)
+    monkeypatch.setattr(sync, '_sync_thread', None)
     captured = []
     class Thread:
         def __init__(self, **kwargs): captured.append(kwargs['target'])

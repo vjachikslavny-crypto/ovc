@@ -7,6 +7,7 @@ def make_engine(url, **kwargs):
         url = 'postgresql://' + url[len('postgres://'):]
     if url.startswith('sqlite'):
         kwargs.setdefault('connect_args', {'check_same_thread': False})
+    kwargs.setdefault("hide_parameters", True)  # SQL errors must not log private note/auth values.
     engine = create_engine(url, pool_pre_ping=True, **kwargs)
     if engine.dialect.name == 'sqlite':
         @event.listens_for(engine, 'connect')
