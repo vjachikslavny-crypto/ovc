@@ -31,7 +31,12 @@ class RichText(BaseModel):
         extra = "forbid"
 
 
-class HeadingData(BaseModel):
+class BlockData(BaseModel):
+    # Metadata emitted by the AI editor; retained through every save path.
+    source: Optional[Literal["ai"]] = None
+
+
+class HeadingData(BlockData):
     level: int = Field(..., ge=1, le=3)
     text: str
 
@@ -39,21 +44,21 @@ class HeadingData(BaseModel):
         extra = "forbid"
 
 
-class ParagraphData(BaseModel):
+class ParagraphData(BlockData):
     parts: List[RichText]
 
     class Config:
         extra = "forbid"
 
 
-class ListData(BaseModel):
+class ListData(BlockData):
     items: List[RichText]
 
     class Config:
         extra = "forbid"
 
 
-class QuoteData(BaseModel):
+class QuoteData(BlockData):
     text: str
     cite: Optional[str] = None
 
@@ -61,7 +66,7 @@ class QuoteData(BaseModel):
         extra = "forbid"
 
 
-class ImageData(BaseModel):
+class ImageData(BlockData):
     src: str
     full: Optional[str] = None
     alt: Optional[str] = None
@@ -72,7 +77,7 @@ class ImageData(BaseModel):
         extra = "forbid"
 
 
-class AudioData(BaseModel):
+class AudioData(BlockData):
     src: str
     mime: Optional[str] = None
     duration: Optional[float] = Field(default=None, ge=0.0)
@@ -84,8 +89,9 @@ class AudioData(BaseModel):
         extra = "forbid"
 
 
-class VideoData(BaseModel):
+class VideoData(BlockData):
     src: str
+    title: Optional[str] = None
     poster: Optional[str] = None
     duration_sec: Optional[float] = Field(default=None, alias="durationSec", ge=0.0)
     width: Optional[int] = Field(default=None, ge=1)
@@ -112,8 +118,8 @@ class DocMeta(BaseModel):
         extra = "forbid"
 
 
-class DocData(BaseModel):
-    kind: Literal["pdf", "docx", "rtf", "pptx", "txt"]
+class DocData(BlockData):
+    kind: Literal["pdf", "doc", "docx", "rtf", "pptx", "txt"]
     src: str
     title: Optional[str] = None
     preview: Optional[str] = None
@@ -124,7 +130,7 @@ class DocData(BaseModel):
         extra = "forbid"
 
 
-class SheetData(BaseModel):
+class SheetData(BlockData):
     kind: Literal["xlsx", "csv"]
     src: str
     sheets: List[str] = Field(default_factory=list)
@@ -134,7 +140,7 @@ class SheetData(BaseModel):
         extra = "forbid"
 
 
-class SlidesData(BaseModel):
+class SlidesData(BlockData):
     kind: Literal["pptx"]
     src: str
     slides: Optional[str] = None  # OVC: pptx - опционально, если LibreOffice не установлен
@@ -146,7 +152,7 @@ class SlidesData(BaseModel):
         extra = "forbid"
 
 
-class CodeData(BaseModel):
+class CodeData(BlockData):
     src: str
     preview_url: Optional[str] = Field(default=None, alias="previewUrl")
     filename: str
@@ -163,7 +169,7 @@ class CodeData(BaseModel):
             allow_population_by_field_name = True
 
 
-class MarkdownData(BaseModel):
+class MarkdownData(BlockData):
     src: str
     preview_url: Optional[str] = Field(default=None, alias="previewUrl")
     filename: str
@@ -187,7 +193,7 @@ class ArchiveEntry(BaseModel):
         extra = "forbid"
 
 
-class ArchiveData(BaseModel):
+class ArchiveData(BlockData):
     src: str
     tree: List[ArchiveEntry] = Field(default_factory=list)
 
@@ -195,7 +201,7 @@ class ArchiveData(BaseModel):
         extra = "forbid"
 
 
-class LinkData(BaseModel):
+class LinkData(BlockData):
     url: str
     title: Optional[str] = None
     desc: Optional[str] = None
@@ -205,7 +211,7 @@ class LinkData(BaseModel):
         extra = "forbid"
 
 
-class TableData(BaseModel):
+class TableData(BlockData):
     kind: Optional[Literal["xlsx", "xls", "csv"]] = None
     src: Optional[str] = None
     summary: Optional[str] = None
@@ -222,7 +228,7 @@ class TableData(BaseModel):
             allow_population_by_field_name = True
 
 
-class YouTubeData(BaseModel):
+class YouTubeData(BlockData):
     video_id: str = Field(alias="videoId")
     title: Optional[str] = None
     start_sec: Optional[float] = Field(default=None, alias="startSec", ge=0.0)
@@ -236,14 +242,14 @@ class YouTubeData(BaseModel):
             allow_population_by_field_name = True
 
 
-class InstagramData(BaseModel):
+class InstagramData(BlockData):
     url: str
 
     class Config:
         extra = "forbid"
 
 
-class TikTokData(BaseModel):
+class TikTokData(BlockData):
     url: str
     video_id: str = Field(alias="videoId")
 
@@ -255,7 +261,7 @@ class TikTokData(BaseModel):
             allow_population_by_field_name = True
 
 
-class SourceData(BaseModel):
+class SourceData(BlockData):
     url: str
     title: str
     domain: str
@@ -266,7 +272,7 @@ class SourceData(BaseModel):
         extra = "forbid"
 
 
-class SummaryData(BaseModel):
+class SummaryData(BlockData):
     dateISO: str
     text: str
 
@@ -283,14 +289,14 @@ class TodoItem(BaseModel):
         extra = "forbid"
 
 
-class TodoData(BaseModel):
+class TodoData(BlockData):
     items: List[TodoItem]
 
     class Config:
         extra = "forbid"
 
 
-class DividerData(BaseModel):
+class DividerData(BlockData):
     class Config:
         extra = "forbid"
 
@@ -460,6 +466,15 @@ def parse_blocks(raw_blocks: List[Any]) -> List[BlockModel]:
         adapter = TypeAdapter(List[BlockModel])
         return adapter.validate_python(raw_blocks)
     return parse_obj_as(List[BlockModel], raw_blocks)
+
+
+def normalize_blocks(raw_blocks: List[Any]) -> List[dict]:
+    """Canonical round trip, including AI provenance and legacy DOC kind.
+
+    Reject unknown fields rather than silently deleting imported content. Callers
+    reading historical data may retain the original JSON on validation failure.
+    """
+    return dump_blocks(parse_blocks(raw_blocks))
 
 
 __all__ = [

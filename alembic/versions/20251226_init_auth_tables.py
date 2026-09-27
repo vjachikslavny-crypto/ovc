@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20251226_init_auth"
-down_revision = None
+down_revision = '20251225_core'
 branch_labels = None
 depends_on = None
 
@@ -73,10 +73,12 @@ def upgrade() -> None:
     op.add_column("notes", sa.Column("tombstone", sa.Boolean(), nullable=False, server_default=sa.text("false")))
     op.add_column("notes", sa.Column("client_origin", sa.String(), nullable=True))
     op.add_column("notes", sa.Column("last_client_ts", sa.DateTime(), nullable=True))
-    op.create_foreign_key("fk_notes_user_id_users", "notes", "users", ["user_id"], ["id"], ondelete="CASCADE")
+    with op.batch_alter_table('notes') as batch:
+        batch.create_foreign_key("fk_notes_user_id_users", "users", ["user_id"], ["id"], ondelete="CASCADE")
 
     op.add_column("files", sa.Column("user_id", sa.String(), nullable=True))
-    op.create_foreign_key("fk_files_user_id_users", "files", "users", ["user_id"], ["id"], ondelete="CASCADE")
+    with op.batch_alter_table('files') as batch:
+        batch.create_foreign_key("fk_files_user_id_users", "users", ["user_id"], ["id"], ondelete="CASCADE")
 
 
 def downgrade() -> None:

@@ -61,6 +61,10 @@ export function renderNote(container, note, theme = 'clean') {
       if (element) {
         element.dataset.blockId = block.id || '';
         element.dataset.blockType = block.type || '';
+        // Помечаем блоки, сгенерированные ИИ (оставляем только стиль, без бейджика)
+        if (block.data && block.data.source === 'ai') {
+          element.classList.add('note-block--ai');
+        }
         container.appendChild(element);
       }
       i++;
@@ -177,7 +181,9 @@ function renderCodeCapMessage(cap, totalText, downloadUrl) {
 function renderHeading(data) {
   const level = Math.min(Math.max(parseInt(data.level ?? 1, 10), 1), 3);
   const el = document.createElement(`h${level + 1}`);
-  el.textContent = sanitizePlaceholder(data.text || '');
+  // Убираем ведущие символы # которые LLM может вставить в текст
+  const rawText = sanitizePlaceholder(data.text || '');
+  el.textContent = rawText.replace(/^#{1,6}\s*/, '');
   el.className = 'note-block note-block--heading';
   el.contentEditable = 'true';
   el.spellcheck = false;
@@ -202,7 +208,22 @@ function renderParagraph(data) {
     : [{ text: sanitizePlaceholder(data.text || '') }];
   parts.forEach((part) => {
     const span = document.createElement('span');
-    span.textContent = part.text || '';
+    const rawText = part.text || '';
+    // Поддержка переносов строк: \n → <br>
+    const lines = rawText.split('\n');
+    lines.forEach((line, i) => {
+      if (i > 0) span.appendChild(document.createElement('br'));
+      if (!line) return;
+      // Строки целиком ЗАГЛАВНЫМИ — рендерим как жирный заголовок
+      const isUpperHeading = line.length > 2 && line === line.toUpperCase() && /[A-ZА-ЯЁ]/.test(line);
+      if (isUpperHeading) {
+        const strong = document.createElement('strong');
+        strong.textContent = line;
+        span.appendChild(strong);
+      } else {
+        span.appendChild(document.createTextNode(line));
+      }
+    });
     const a = part.annotations || {};
     if (a.bold) span.classList.add('rt-bold');
     if (a.italic) span.classList.add('rt-italic');

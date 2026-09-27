@@ -17,13 +17,10 @@ async function submitLocalLogin(identifier, password) {
       token = await window.refreshAccessToken();
     }
     if (!token) {
-      const hasRefreshCookie = document.cookie.includes('refresh_token=');
       return {
         ok: false,
         status: 401,
-        error: hasRefreshCookie
-          ? 'Сессия не активировалась. Обновите страницу и попробуйте снова.'
-          : 'Сессия не установлена (проверьте настройки cookie).',
+        error: 'Сессия не активировалась. Обновите страницу и попробуйте снова.',
       };
     }
     return { ok: true };

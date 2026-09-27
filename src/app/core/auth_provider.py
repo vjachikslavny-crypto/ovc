@@ -179,14 +179,8 @@ def _get_signing_key(token: str) -> Any:
 
 def get_bearer_token(request: Request) -> Optional[str]:
     """Extract access token from Authorization header or cookie."""
-    auth = request.headers.get("Authorization") or ""
-    parts = auth.split()
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1]
-    cookie_token = request.cookies.get("ovc_access_token")
-    if cookie_token:
-        return cookie_token.strip()
-    return None
+    from app.core.security import get_bearer_token as extract_token
+    return extract_token(request)
 
 
 def _set_auth_context(request: Request, value: str) -> None:
@@ -237,6 +231,8 @@ def local_auth_get_user(request: Request) -> Optional[AuthUser]:
         # Token invalid - let caller decide how to handle
         raise
     
+    if payload.get("auth_provider", "local") != "local":
+        raise HTTPException(status_code=401, detail="Local authentication required")
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid access token")
@@ -432,6 +428,8 @@ def get_current_user_from_provider(request: Request) -> User:
     if auth_user.provider in {"none", "dev-fallback"}:
         with get_session() as session:
             user = session.query(User).filter(User.username == "dev-user").first()
+            if user is not None and (user.password_hash != "dev-fallback" or user.email or user.supabase_id):
+                raise HTTPException(status_code=409, detail="Development identity conflicts with an existing account")
             if user is None:
                 user = User(
                     username="dev-user",
@@ -467,7 +465,7 @@ def get_current_user_from_provider(request: Request) -> User:
                     raise HTTPException(status_code=403, detail="User inactive")
                 return user
             
-            # Try to link by email if exists
+            # Email equality does not prove access to the existing local account.
             if auth_user.email:
                 email_lower = auth_user.email.lower()
                 user = session.query(User).filter(
@@ -476,12 +474,9 @@ def get_current_user_from_provider(request: Request) -> User:
                 if user:
                     if not user.is_active:
                         raise HTTPException(status_code=403, detail="User inactive")
-                    if not user.supabase_id:
-                        user.supabase_id = auth_user.id
-                        session.add(user)
-                        session.flush()
-                    return user
-            
+                    logger.warning("Supabase identity conflict for local user %s", user.id)
+                    raise HTTPException(status_code=409, detail="Account linking requires verified access to both accounts")
+
             # Create new user linked to Supabase
             username = f"sb_{auth_user.id[:8]}"  # Generate username from Supabase ID
             email = auth_user.email
@@ -508,18 +503,9 @@ def get_current_user_from_provider(request: Request) -> User:
             except IntegrityError:
                 session.rollback()
                 user = session.query(User).filter(User.supabase_id == auth_user.id).first()
-                if user:
+                if user and user.is_active:
                     return user
-                if auth_user.email:
-                    email_lower = auth_user.email.lower()
-                    user = session.query(User).filter(
-                        func.lower(User.email) == email_lower
-                    ).first()
-                    if user and not user.supabase_id:
-                        user.supabase_id = auth_user.id
-                        session.add(user)
-                        session.flush()
-                        return user
-                raise HTTPException(status_code=500, detail="Failed to link Supabase user")
+                logger.warning("Supabase account creation/link conflict")
+                raise HTTPException(status_code=409, detail="Account identity conflict")
     
     raise HTTPException(status_code=500, detail="Unknown auth provider")

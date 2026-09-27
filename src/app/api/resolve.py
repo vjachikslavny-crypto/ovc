@@ -4,7 +4,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 from typing import Optional
 
-import httpx
+from app.services.public_url import resolve_public_redirect, validate_public_url
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -41,6 +41,7 @@ class YouTubeResolveResponse(BaseModel):
 
 
 def _extract_youtube_id(url: str) -> tuple[str, Optional[int]]:
+    validate_public_url(url.strip(), _YOUTUBE_HOSTS)
     parsed = urlparse(url.strip())
     host = (parsed.hostname or "").lower()
     if host not in _YOUTUBE_HOSTS:
@@ -151,20 +152,11 @@ def _extract_tiktok_video_id(url: str) -> tuple[str, str]:
     if host not in _TIKTOK_HOSTS:
         raise HTTPException(status_code=400, detail="Unsupported TikTok domain")
     
+    validate_public_url(url.strip(), _TIKTOK_HOSTS)
     # Short URL - need to follow redirect
     if host in ("vt.tiktok.com", "vm.tiktok.com"):
-        try:
-            with httpx.Client(follow_redirects=True, timeout=10.0) as client:
-                response = client.head(url, headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; OVC/1.0)"
-                })
-                final_url = str(response.url)
-                parsed = urlparse(final_url)
-                final_host = (parsed.hostname or "").lower()
-                if final_host not in _TIKTOK_HOSTS:
-                    raise HTTPException(status_code=400, detail="Redirect resolved to non-TikTok domain")
-        except httpx.HTTPError:
-            raise HTTPException(status_code=502, detail="Failed to resolve TikTok short URL")
+        final_url = resolve_public_redirect(url, _TIKTOK_HOSTS)
+        parsed = urlparse(final_url)
     else:
         final_url = url
     
@@ -184,9 +176,14 @@ def _extract_tiktok_video_id(url: str) -> tuple[str, str]:
 
 
 @router.post("/resolve/tiktok", response_model=TikTokResolveResponse)
-def resolve_tiktok(payload: TikTokResolveRequest, _user: User = Depends(get_current_user)):
+async def resolve_tiktok(payload: TikTokResolveRequest, _user: User = Depends(get_current_user)):
     try:
-        final_url, video_id = _extract_tiktok_video_id(payload.url)
+        from app.services.runtime import run_blocking
+        from app.core.config import settings
+        from app.services.rate_limit import limit_operation
+        limit_operation('resolve', _user.id, settings.rate_limit_search_per_min)
+        final_url, video_id = await run_blocking(_extract_tiktok_video_id, payload.url,
+                                                timeout=settings.external_http_timeout_seconds)
     except HTTPException:
         raise
     except Exception:

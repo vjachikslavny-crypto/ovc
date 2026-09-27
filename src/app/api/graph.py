@@ -9,13 +9,19 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.db.models import GroupPreference, Note, NoteLink, NoteTag
+from app.db.models import UserGroupPreference, Note, NoteLink, NoteTag
+from app.core.ownership import owned_notes_filter
 from app.db.session import get_session
 from app.utils.layout_hints import parse_layout_hints
 from app.core.security import get_current_user
+from app.core.config import settings
 from app.models.user import User
 
 router = APIRouter(tags=["graph"])
+
+
+def _user_notes_query(user: User):
+    return select(Note).where(owned_notes_filter(user.id))
 
 
 DEFAULT_COLOR = "#8b5cf6"
@@ -32,10 +38,10 @@ class GroupLabelRequest(BaseModel):
 
 
 @router.get("/graph")
-async def graph_endpoint(current_user: User = Depends(get_current_user)):
+def graph_endpoint(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
-            session.execute(select(Note).where(Note.user_id == current_user.id))
+            session.execute(_user_notes_query(current_user))
             .scalars()
             .all()
         )
@@ -58,11 +64,11 @@ async def graph_endpoint(current_user: User = Depends(get_current_user)):
             session.execute(
                 select(NoteTag.note_id, NoteTag.tag)
                 .join(Note, Note.id == NoteTag.note_id)
-                .where(Note.user_id == current_user.id)
+                .where(owned_notes_filter(current_user.id))
             )
             .all()
         )
-        groups, assignments = _build_groups(session, notes, links)
+        groups, assignments = _build_groups(session, notes, links, current_user.id)
         tags_by_note, tag_to_notes = _collect_tags(raw_tags)
 
         nodes: List[dict] = []
@@ -112,10 +118,10 @@ async def graph_endpoint(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/graph/groups")
-async def graph_groups(current_user: User = Depends(get_current_user)):
+def graph_groups(current_user: User = Depends(get_current_user)):
     with get_session() as session:
         notes = (
-            session.execute(select(Note).where(Note.user_id == current_user.id))
+            session.execute(_user_notes_query(current_user))
             .scalars()
             .all()
         )
@@ -134,7 +140,7 @@ async def graph_groups(current_user: User = Depends(get_current_user)):
             )
         else:
             links = []
-        groups, _ = _build_groups(session, notes, links)
+        groups, _ = _build_groups(session, notes, links, current_user.id)
 
     payload = [
         {
@@ -150,7 +156,7 @@ async def graph_groups(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/graph/groups/{cluster}")
-async def update_group_color(
+def update_group_color(
     cluster: str,
     payload: GroupColorRequest,
     current_user: User = Depends(get_current_user),
@@ -159,12 +165,12 @@ async def update_group_color(
 
     with get_session() as session:
         pref = (
-            session.execute(select(GroupPreference).where(GroupPreference.key == key))
+            session.execute(select(UserGroupPreference).where(UserGroupPreference.key == key, UserGroupPreference.user_id == current_user.id))
             .scalars()
             .first()
         )
         if not pref:
-            pref = GroupPreference(key=key, label=DEFAULT_LABEL, color=payload.color)
+            pref = UserGroupPreference(user_id=current_user.id, key=key, label=DEFAULT_LABEL, color=payload.color)
         else:
             pref.color = payload.color
         session.add(pref)
@@ -173,7 +179,7 @@ async def update_group_color(
 
 
 @router.post("/graph/groups/{cluster}/label")
-async def update_group_label(
+def update_group_label(
     cluster: str,
     payload: GroupLabelRequest,
     current_user: User = Depends(get_current_user),
@@ -185,12 +191,12 @@ async def update_group_label(
 
     with get_session() as session:
         pref = (
-            session.execute(select(GroupPreference).where(GroupPreference.key == key))
+            session.execute(select(UserGroupPreference).where(UserGroupPreference.key == key, UserGroupPreference.user_id == current_user.id))
             .scalars()
             .first()
         )
         if not pref:
-            pref = GroupPreference(key=key, label=label, color=DEFAULT_COLOR)
+            pref = UserGroupPreference(user_id=current_user.id, key=key, label=label, color=DEFAULT_COLOR)
         else:
             pref.label = label
         session.add(pref)
@@ -199,11 +205,11 @@ async def update_group_label(
 
 
 def _build_groups(
-    session, notes: List[Note], links: List[NoteLink]
+    session, notes: List[Note], links: List[NoteLink], user_id: str
 ) -> Tuple[Dict[str, dict], Dict[str, str]]:
     prefs = {
         pref.key: pref
-        for pref in session.execute(select(GroupPreference)).scalars().all()
+        for pref in session.execute(select(UserGroupPreference).where(UserGroupPreference.user_id == user_id)).scalars().all()
     }
 
     manual_groups: Dict[str, dict] = {}

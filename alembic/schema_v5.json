@@ -1,0 +1,2270 @@
+[
+  {
+    "name": "action_log",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "hash",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "payload",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [
+      {
+        "name": "uq_action_log_hash",
+        "columns": [
+          "hash"
+        ]
+      }
+    ],
+    "indexes": []
+  },
+  {
+    "name": "group_preferences",
+    "columns": [
+      {
+        "name": "key",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "label",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "\u0413\u0440\u0443\u043f\u043f\u0430"
+      },
+      {
+        "name": "color",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "#8b5cf6"
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": []
+  },
+  {
+    "name": "integrity_archive",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "repair_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "source_table",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "source_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "reason",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "original_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_integrity_archive_repair_id",
+        "columns": [
+          "repair_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "messages",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "role",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "text",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "mode",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_messages_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_messages_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "sources",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "url",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "domain",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "summary",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": ""
+      },
+      {
+        "name": "published_at",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [
+      {
+        "name": "uq_sources_url",
+        "columns": [
+          "url"
+        ]
+      }
+    ],
+    "indexes": []
+  },
+  {
+    "name": "sync_applied_ops",
+    "columns": [
+      {
+        "name": "op_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_type",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "protocol_version",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": "0"
+      },
+      {
+        "name": "client_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "request_hash",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "result_json",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": []
+  },
+  {
+    "name": "sync_change_log",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_type",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "op_type",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "server_version",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "deleted",
+        "type": "Boolean",
+        "nullable": false,
+        "primary_key": false,
+        "default": false
+      },
+      {
+        "name": "payload_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "{}"
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "protocol_version",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": "0"
+      },
+      {
+        "name": "sequence",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [
+      {
+        "name": "uq_sync_change_log_sequence",
+        "columns": [
+          "sequence"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "name": "ix_changes_owner_sequence",
+        "columns": [
+          "user_id",
+          "protocol_version",
+          "sequence"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_change_log_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "sync_entity_map",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "client_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "remote_key",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "entity_type",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "local_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "remote_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "remote_revision",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "sha256",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "mapped"
+      }
+    ],
+    "fks": [],
+    "unique": [
+      {
+        "name": "uq_sync_entity_remote",
+        "columns": [
+          "user_id",
+          "client_id",
+          "remote_key",
+          "entity_type",
+          "remote_id"
+        ]
+      }
+    ],
+    "indexes": []
+  },
+  {
+    "name": "sync_identity",
+    "columns": [
+      {
+        "name": "key",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "value",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": []
+  },
+  {
+    "name": "sync_peer_state",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "client_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "remote_key",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "server_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "remote_user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "cursor",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "last_success_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "last_error",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "reachable",
+        "type": "Boolean",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "auth_required",
+        "type": "Boolean",
+        "nullable": false,
+        "primary_key": false,
+        "default": false
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": []
+  },
+  {
+    "name": "users",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "username",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "email",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "password_hash",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "supabase_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "display_name",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "avatar_url",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "failed_login_count",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "locked_until",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "is_active",
+        "type": "Boolean",
+        "nullable": false,
+        "primary_key": false,
+        "default": true
+      },
+      {
+        "name": "role",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "user"
+      },
+      {
+        "name": "email_verified_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_users_supabase_id",
+        "columns": [
+          "supabase_id"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_users_username",
+        "columns": [
+          "username"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_users_email",
+        "columns": [
+          "email"
+        ],
+        "unique": true
+      }
+    ]
+  },
+  {
+    "name": "audit_logs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "event",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "ip",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_agent",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "metadata",
+        "type": "JSON",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "SET NULL",
+        "name": "fk_audit_logs_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_audit_logs_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_audit_logs_created_at",
+        "columns": [
+          "created_at"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_audit_logs_event",
+        "columns": [
+          "event"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "notes",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "style_theme",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "clean"
+      },
+      {
+        "name": "layout_hints",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "{}"
+      },
+      {
+        "name": "blocks_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "[]"
+      },
+      {
+        "name": "passport_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "{}"
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "revision",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "tombstone",
+        "type": "Boolean",
+        "nullable": false,
+        "primary_key": false,
+        "default": false
+      },
+      {
+        "name": "client_origin",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "last_client_ts",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_notes_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_notes_owner_updated",
+        "columns": [
+          "user_id",
+          "updated_at"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_notes_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "refresh_tokens",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "auth_provider",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "local"
+      },
+      {
+        "name": "token_hash",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "expires_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "rotated_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "revoked_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "fingerprint_hash",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "ip",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_agent",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_refresh_tokens_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_refresh_tokens_expires_at",
+        "columns": [
+          "expires_at"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_refresh_tokens_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_refresh_tokens_token_hash",
+        "columns": [
+          "token_hash"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "user_group_preferences",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "key",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "label",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "\u0413\u0440\u0443\u043f\u043f\u0430"
+      },
+      {
+        "name": "color",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "#8b5cf6"
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_user_group_preferences_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": []
+  },
+  {
+    "name": "files",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "mime",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "filename",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "size",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_original",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_preview",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_doc_html",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_waveform",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_slides_json",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_slides_dir",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_excel_summary",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_excel_charts_json",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_excel_charts_dir",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_excel_chart_sheets_json",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "excel_charts_pages_keep",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "excel_default_sheet",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_video_original",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_video_poster",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_code_original",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "path_markdown_raw",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "hash_sha256",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "upload_op_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "width",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "height",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "pages",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "duration",
+        "type": "Float",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "words",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "slides_count",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "video_duration",
+        "type": "Float",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "video_width",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "video_height",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "video_mime",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "code_language",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "code_line_count",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "markdown_line_count",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "revision",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "tombstone",
+        "type": "Boolean",
+        "nullable": true,
+        "primary_key": false,
+        "default": false
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "SET NULL",
+        "name": "fk_files_note_id_notes"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_files_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_files_upload_op_id",
+        "columns": [
+          "upload_op_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_files_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_files_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "note_chunks",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "idx",
+        "type": "Float",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "text",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "embedding",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_chunks_note_id_notes"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_note_chunks_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "note_links",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "from_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "to_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "reason",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "confidence",
+        "type": "Float",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "from_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_links_from_id_notes"
+      },
+      {
+        "columns": [
+          "to_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_links_to_id_notes"
+      }
+    ],
+    "unique": [
+      {
+        "name": "uq_note_links",
+        "columns": [
+          "from_id",
+          "to_id",
+          "reason"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "name": "ix_note_links_to_id",
+        "columns": [
+          "to_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_note_links_from_id",
+        "columns": [
+          "from_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "note_sources",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "source_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "relevance",
+        "type": "Float",
+        "nullable": true,
+        "primary_key": false,
+        "default": 1.0
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_sources_note_id_notes"
+      },
+      {
+        "columns": [
+          "source_id"
+        ],
+        "target": "sources",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_sources_source_id_sources"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_note_sources_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "note_tags",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "tag",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "weight",
+        "type": "Float",
+        "nullable": true,
+        "primary_key": false,
+        "default": 1.0
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_note_tags_note_id_notes"
+      }
+    ],
+    "unique": [
+      {
+        "name": "uq_note_tags",
+        "columns": [
+          "note_id",
+          "tag"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "name": "ix_note_tags_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_note_tags_tag",
+        "columns": [
+          "tag"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "sync_conflicts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "local_note_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "remote_note_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "note_conflict"
+      },
+      {
+        "name": "payload_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "{}"
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "client_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "remote_key",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "op_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "local_note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "SET NULL",
+        "name": "fk_sync_conflicts_local_note_id_notes"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_sync_conflicts_local_note_id",
+        "columns": [
+          "local_note_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_conflicts_created_at",
+        "columns": [
+          "created_at"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_conflicts_scope_kind",
+        "columns": [
+          "user_id",
+          "client_id",
+          "remote_key",
+          "kind"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_conflicts_remote_note_id",
+        "columns": [
+          "remote_note_id"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "sync_note_map",
+    "columns": [
+      {
+        "name": "local_note_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "remote_note_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "local_note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "CASCADE",
+        "name": "fk_sync_note_map_local_note_id_notes"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_sync_note_map_remote_note_id",
+        "columns": [
+          "remote_note_id"
+        ],
+        "unique": true
+      }
+    ]
+  },
+  {
+    "name": "sync_outbox",
+    "columns": [
+      {
+        "name": "id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "op_type",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "note_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "payload_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "{}"
+      },
+      {
+        "name": "status",
+        "type": "String",
+        "nullable": false,
+        "primary_key": false,
+        "default": "pending"
+      },
+      {
+        "name": "tries",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": 0
+      },
+      {
+        "name": "last_error",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "protocol_version",
+        "type": "Integer",
+        "nullable": false,
+        "primary_key": false,
+        "default": "0"
+      },
+      {
+        "name": "client_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "remote_key",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_type",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "entity_remote_id",
+        "type": "String",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "base_revision",
+        "type": "Integer",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "dependency_json",
+        "type": "Text",
+        "nullable": false,
+        "primary_key": false,
+        "default": "[]"
+      },
+      {
+        "name": "wire_json",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "result_json",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "next_retry_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [
+      {
+        "columns": [
+          "note_id"
+        ],
+        "target": "notes",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "SET NULL",
+        "name": "fk_sync_outbox_note_id_notes"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "target": "users",
+        "target_columns": [
+          "id"
+        ],
+        "ondelete": "SET NULL",
+        "name": "fk_sync_outbox_user_id_users"
+      }
+    ],
+    "unique": [],
+    "indexes": [
+      {
+        "name": "ix_sync_outbox_created_at",
+        "columns": [
+          "created_at"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_outbox_note_id",
+        "columns": [
+          "note_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_outbox_user_id",
+        "columns": [
+          "user_id"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_outbox_op_type",
+        "columns": [
+          "op_type"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_sync_outbox_status",
+        "columns": [
+          "status"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_outbox_scope_due",
+        "columns": [
+          "user_id",
+          "client_id",
+          "remote_key",
+          "protocol_version",
+          "status",
+          "next_retry_at"
+        ],
+        "unique": false
+      }
+    ]
+  },
+  {
+    "name": "sync_state",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "String",
+        "nullable": false,
+        "primary_key": true,
+        "default": null
+      },
+      {
+        "name": "last_pull_since",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "last_success_at",
+        "type": "DateTime",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "last_error",
+        "type": "Text",
+        "nullable": true,
+        "primary_key": false,
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "DateTime",
+        "nullable": false,
+        "primary_key": false,
+        "default": null
+      }
+    ],
+    "fks": [],
+    "unique": [],
+    "indexes": []
+  }
+]

@@ -320,7 +320,7 @@ export function initInspector(panelEl, options = {}) {
         }
       });
       renderLinks(linksEl, note?.linksFrom || [], note?.linksTo || []);
-      renderProperties(propsEl, note?.passport || {});
+      renderProperties(propsEl, note?.passport || {}, note);
       const weight = clampWeight(note?.layoutHints?.sizeWeight, minWeight, maxWeight);
       syncSizeInputs(weight, { updateNumber: true, updateSlider: true });
       
@@ -421,12 +421,18 @@ function renderLinks(container, fromLinks, toLinks) {
   });
 }
 
-function renderProperties(container, passport) {
+function renderProperties(container, passport, note = {}) {
   if (!container) return;
   container.innerHTML = '';
-  Object.entries(passport || {}).forEach(([key, value]) => {
+  const entries = [
+    ['createdAt', note?.createdAt || note?.created_at],
+    ['updatedAt', note?.updatedAt || note?.updated_at],
+    ...Object.entries(passport || {}),
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+
+  entries.forEach(([key, value]) => {
     const dt = document.createElement('dt');
-    dt.textContent = key;
+    dt.textContent = formatPropertyLabel(key);
     const dd = document.createElement('dd');
     dd.textContent = formatValue(value);
     container.append(dt, dd);
@@ -436,7 +442,38 @@ function renderProperties(container, passport) {
 function formatValue(value) {
   if (Array.isArray(value)) return value.join(', ');
   if (value && typeof value === 'object') return JSON.stringify(value, null, 2);
+  if (typeof value === 'string' && looksLikeDate(value)) {
+    return formatDateTime(value);
+  }
   return String(value ?? '');
+}
+
+function formatPropertyLabel(key) {
+  const labels = {
+    createdAt: 'Создана',
+    created_at: 'Создана',
+    updatedAt: 'Обновлена',
+    updated_at: 'Обновлена',
+  };
+  return labels[key] || String(key)
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-zа-я])([A-ZА-Я])/g, '$1 $2');
+}
+
+function looksLikeDate(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function clampWeight(value, min, max) {

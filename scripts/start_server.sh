@@ -25,4 +25,4 @@ PYTHONPATH=src python -m app.db.migrate
 # Запускаем сервер
 echo "Запускаю сервер..."
 echo "Сервер будет доступен на http://127.0.0.1:8000"
-uvicorn app.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --no-proxy-headers --app-dir src --reload --host 127.0.0.1 --port 8000

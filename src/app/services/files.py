@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import audioop
 import csv
 import gzip
 import hashlib
@@ -51,6 +50,9 @@ from app.agent.block_models import (
     dump_block,
 )
 from app.db.models import FileAsset, generate_uuid
+from app.core.config import settings
+from app.services.runtime import run_tool
+from app.services.storage import atomic_write
 
 try:
     import bleach
@@ -375,7 +377,7 @@ def _audio_mime_from_filename(filename: str) -> str:
 
 def _classify_file(upload: UploadFile) -> FileMetadata:
     filename = upload.filename or ""
-    mime = (upload.content_type or "").lower()
+    mime = (upload.content_type or "").split(";", 1)[0].strip().lower()
     if not mime:
         guessed, _ = mimetypes.guess_type(filename)
         mime = (guessed or "application/octet-stream").lower()
@@ -405,7 +407,8 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
             extension = ".xlsx"
             excel_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return FileMetadata(kind=excel_kind, mime=excel_mime, extension=extension, max_bytes=EXCEL_MAX_BYTES)
-    if mime in AUDIO_MIME_TYPES or filename.lower().endswith(AUDIO_EXTENSIONS):
+    # WebM can contain either audio or video; an explicit video MIME takes priority.
+    if mime in AUDIO_MIME_TYPES or (not mime.startswith("video/") and filename.lower().endswith(AUDIO_EXTENSIONS)):
         audio_mime = mime if mime in AUDIO_MIME_TYPES else _audio_mime_from_filename(filename)
         extension = _guess_extension(filename, audio_mime) or ".webm"
         return FileMetadata(kind="audio", mime=audio_mime, extension=extension, max_bytes=AUDIO_MAX_BYTES)
@@ -433,9 +436,7 @@ def _classify_file(upload: UploadFile) -> FileMetadata:
 
 
 def _write_file(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as handle:
-        handle.write(data)
+    atomic_write(path, data)
 
 
 def _slides_dir_path(file_id: str) -> Path:
@@ -531,7 +532,7 @@ def extract_video_meta(path: Path) -> dict:
     if not _ffprobe_available():
         return meta
     try:
-        result = subprocess.run(
+        result = run_tool(
             [
                 _FFPROBE_PATH,
                 "-v",
@@ -547,6 +548,7 @@ def extract_video_meta(path: Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            timeout=settings.ffmpeg_timeout_seconds,
         )
         payload = json.loads(result.stdout or "{}")
         stream = (payload.get("streams") or [{}])[0]
@@ -580,7 +582,7 @@ def render_video_poster(video_path: Path, out_path: Path, *, at_percent: float =
         return False
     seek = duration * at_percent if duration and duration > 0 else 1.0
     try:
-        subprocess.run(
+        run_tool(
             [
                 _FFMPEG_PATH,
                 "-y",
@@ -597,6 +599,7 @@ def render_video_poster(video_path: Path, out_path: Path, *, at_percent: float =
                 str(out_path),
             ],
             check=True,
+            timeout=settings.ffmpeg_timeout_seconds,
         )
         return True
     except Exception as exc:
@@ -644,7 +647,7 @@ def _render_pdf_page(data: bytes, page_num: int, scale: float = 1.0) -> Optional
         # Попытка использовать pdf2image
         if HAS_PDF2IMAGE:
             try:
-                images = convert_from_bytes(data, first_page=page_num, last_page=page_num, dpi=int(72 * scale))
+                images = convert_from_bytes(data, first_page=page_num, last_page=page_num, dpi=int(72 * scale), timeout=settings.conversion_timeout_seconds)
                 if not images:
                     return None
                 img = images[0]
@@ -776,6 +779,31 @@ def _default_waveform(points: int = 64) -> list[float]:
     return [0.2 for _ in range(points)]
 
 
+def _pcm_peak_without_audioop(chunk: bytes, sample_width: int, channels: int) -> int:
+    frame_size = sample_width * max(channels, 1)
+    if frame_size <= 0:
+        return 0
+
+    peak = 0.0
+    for offset in range(0, len(chunk) - frame_size + 1, frame_size):
+        samples: list[int] = []
+        for channel_idx in range(channels):
+            start = offset + (channel_idx * sample_width)
+            sample_bytes = chunk[start:start + sample_width]
+            if len(sample_bytes) < sample_width:
+                continue
+            if sample_width == 1:
+                sample = sample_bytes[0] - 128
+            else:
+                sample = int.from_bytes(sample_bytes, byteorder="little", signed=True)
+            samples.append(sample)
+        if not samples:
+            continue
+        mono_sample = sum(samples) / len(samples)
+        peak = max(peak, abs(mono_sample))
+    return int(peak)
+
+
 def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], list[float]]:
     duration = None
     waveform: list[float] = []
@@ -794,24 +822,23 @@ def _extract_audio_metadata(data: bytes, mime: str) -> tuple[Optional[float], li
                 frames = wav_file.readframes(wav_file.getnframes())
                 sample_width = wav_file.getsampwidth()
                 channels = wav_file.getnchannels()
-                if channels > 1:
-                    frames = audioop.tomono(frames, sample_width, 0.5, 0.5)
-                total_samples = len(frames) // sample_width
+                frame_size = sample_width * max(channels, 1)
+                total_samples = len(frames) // frame_size
                 if total_samples == 0:
                     raise ValueError("empty audio")
                 bucket = max(total_samples // AUDIO_WAVE_POINTS, 1)
                 waveform = []
-                max_sample = float((1 << (8 * sample_width - 1)) - 1) or 1.0
+                max_sample = float(127 if sample_width == 1 else (1 << (8 * sample_width - 1)) - 1) or 1.0
                 for idx in range(AUDIO_WAVE_POINTS):
-                    start = idx * bucket * sample_width
+                    start = idx * bucket * frame_size
                     if start >= len(frames):
                         break
-                    end = min(len(frames), start + bucket * sample_width)
+                    end = min(len(frames), start + bucket * frame_size)
                     chunk = frames[start:end]
                     if not chunk:
                         waveform.append(0.0)
                         continue
-                    peak = audioop.max(chunk, sample_width)
+                    peak = _pcm_peak_without_audioop(chunk, sample_width, channels)
                     waveform.append(round(min(1.0, peak / max_sample), 4))
     except Exception:
         waveform = []
@@ -875,10 +902,7 @@ def _find_libreoffice() -> Optional[str]:
         if Path(path).exists():
             return path
     # Проверяем PATH
-    result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
-    if result.returncode == 0:
-        return result.stdout.strip()
-    return None
+    return shutil.which("soffice")
 
 
 def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Path, int, Path]:
@@ -894,6 +918,7 @@ def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Pa
             tmp_path = Path(tmpdir)
             cmd = [
                 soffice_path,
+                "-env:UserInstallation=" + (tmp_path / "profile").as_uri(),
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -901,8 +926,8 @@ def _convert_pptx_to_slides(original_path: Path, file_id: str) -> tuple[Path, Pa
                 str(tmp_path),
                 str(original_path),
             ]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            logger.info("LibreOffice output: %s", result.stdout.decode(errors="ignore").strip())
+            result = run_tool(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=settings.libreoffice_timeout_seconds)
+            logger.info("LibreOffice conversion completed")
             pdf_path = tmp_path / f"{original_path.stem}.pdf"
             if not pdf_path.exists():
                 raise HTTPException(status_code=500, detail="Failed to convert PPTX to PDF")
@@ -1991,6 +2016,7 @@ def _extract_xlsx_charts_precise(original_path: Path, file_id: str) -> Optional[
             tmp_path = Path(tmpdir)
             cmd = [
                 soffice_path,
+                "-env:UserInstallation=" + (tmp_path / "profile").as_uri(),
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -1998,7 +2024,7 @@ def _extract_xlsx_charts_precise(original_path: Path, file_id: str) -> Optional[
                 str(tmp_path),
                 str(original_path),
             ]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=60)
+            result = run_tool(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=settings.libreoffice_timeout_seconds)
             pdf_path = tmp_path / f"{original_path.stem}.pdf"
             if not pdf_path.exists():
                 logger.warning(f"PDF not generated for {file_id}")
@@ -2431,6 +2457,7 @@ def _convert_excel_to_charts(original_path: Path, file_id: str) -> Optional[tupl
             tmp_path = Path(tmpdir)
             cmd = [
                 soffice_path,
+                "-env:UserInstallation=" + (tmp_path / "profile").as_uri(),
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -2438,7 +2465,7 @@ def _convert_excel_to_charts(original_path: Path, file_id: str) -> Optional[tupl
                 str(tmp_path),
                 str(original_path),
             ]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=60)
+            result = run_tool(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=settings.libreoffice_timeout_seconds)
             pdf_path = tmp_path / f"{original_path.stem}.pdf"
             if not pdf_path.exists():
                 logger.warning(f"PDF not generated for {file_id}")
@@ -3089,23 +3116,17 @@ class StoredAsset:
     block: dict
 
 
-async def save_upload(
-    session: Session,
-    upload: UploadFile,
-    note_id: Optional[str],
-    user_id: str,
-    upload_op_id: Optional[str] = None,
-) -> StoredAsset:
-    logger = logging.getLogger(__name__)  # OVC: docx - определяем logger в начале функции
-    meta = _classify_file(upload)
-    data = await upload.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if len(data) > meta.max_bytes:
-        raise HTTPException(status_code=413, detail="File too large for this prototype")
-
-    file_id = generate_uuid()
-    original_name = upload.filename or f"{file_id}{meta.extension}"
+def _prepare_file(meta: FileMetadata, source: Path, file_id: str, original_name: str,
+                  note_id: Optional[str], user_id: str, upload_op_id=None) -> StoredAsset:
+    """Executed in a disposable conversion process, without any DB session."""
+    logger = logging.getLogger(__name__)
+    size = source.stat().st_size
+    digest = hashlib.sha256()
+    with source.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    # Native converters need bounded bytes; large video/code/table files stay on disk.
+    data = source.read_bytes() if meta.kind in {'image', 'pdf', 'docx', 'rtf', 'audio'} else b''
     if meta.kind == "video":
         original_path = _video_original_path(file_id, meta.extension)
     elif meta.kind == "code":
@@ -3114,7 +3135,8 @@ async def save_upload(
         original_path = _markdown_raw_path(file_id, meta.extension)
     else:
         original_path = ORIGINAL_DIR / f"{file_id}{meta.extension}"
-    _write_file(original_path, data)
+    original_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, original_path)
 
     preview_path: Optional[Path] = None
     doc_html_path: Optional[Path] = None
@@ -3222,7 +3244,7 @@ async def save_upload(
         kind=meta.kind,
         mime=meta.mime,
         filename=original_name,
-        size=len(data),
+        size=size,
         path_original=str(original_path),
         path_preview=str(preview_path) if preview_path else None,
         path_doc_html=str(doc_html_path) if doc_html_path else None,
@@ -3238,7 +3260,7 @@ async def save_upload(
         path_excel_charts_dir=charts_dir_path,
         path_excel_chart_sheets_json=charts_sheets_json_path,
         excel_default_sheet=default_sheet,
-        hash_sha256=_hash_bytes(data),
+        hash_sha256=digest.hexdigest(),
         upload_op_id=upload_op_id,
         width=width,
         height=height,
@@ -3254,8 +3276,15 @@ async def save_upload(
         code_line_count=code_line_count,
         markdown_line_count=markdown_line_count,
     )
-    session.add(asset)
-    session.flush()
-
     block = _build_block(asset)
     return StoredAsset(asset=asset, block=block)
+
+
+async def save_upload(session, upload, note_id, user_id, upload_op_id=None):
+    """Compatibility facade. Runtime callers prepare before opening a transaction."""
+    from app.services.upload_pipeline import prepare_upload
+    from app.services.runtime import run_blocking
+    stored = await run_blocking(prepare_upload, upload, note_id, user_id, upload_op_id)
+    session.add(stored.asset)
+    session.flush()
+    return stored

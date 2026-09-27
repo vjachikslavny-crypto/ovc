@@ -4,9 +4,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from fastapi import APIRouter, HTTPException, Query, Depends, Request, Response
 from pydantic import ValidationError
-from sqlalchemy import func, select, or_
+from sqlalchemy import event, func, select
 
 from app.agent.block_models import BlockModel, dump_blocks, parse_blocks
 from app.api.note_models import (
@@ -23,9 +23,11 @@ from app.db.session import get_session
 from app.rag.chunking import chunk_markdown
 from app.rag.tfidf_index import index
 from app.core.config import settings
+from app.core.ownership import is_owned, owned_notes_filter, require_note_owner
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.sync_protocol import check_revision, lock_stream, record_note_change, preserve_copy
 from app.services.sync_engine import (
     OP_CREATE_NOTE,
     OP_DELETE_NOTE,
@@ -40,18 +42,11 @@ router = APIRouter(tags=["notes"])
 
 
 def _owner_filter(user: User):
-    """Return SQLAlchemy filter for notes owned by user.
-
-    In desktop/none mode also includes orphan notes (user_id IS NULL)
-    for backward compatibility.  In multi-user production only strict ownership.
-    """
-    if settings.desktop_mode or settings.auth_mode == "none":
-        return or_(Note.user_id == user.id, Note.user_id.is_(None))
-    return Note.user_id == user.id
+    return owned_notes_filter(user.id)
 
 
 @router.get("/tags")
-async def list_all_tags(current_user: User = Depends(get_current_user)):
+def list_all_tags(current_user: User = Depends(get_current_user)):
     """Возвращает список всех уникальных тегов в системе"""
     with get_session() as session:
         tags = (
@@ -69,7 +64,7 @@ async def list_all_tags(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/notes", response_model=NoteListResponse)
-async def list_notes(
+def list_notes(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
@@ -93,33 +88,21 @@ async def list_notes(
             .all()
         )
 
-        if settings.desktop_mode or settings.auth_mode == "none":
-            for note in notes:
-                if note.user_id is None:
-                    note.user_id = current_user.id
-                    session.add(note)
-
         items = [_serialize_summary(note) for note in notes]
         return NoteListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/notes/search/full")
-async def search_notes_full(
-    q: str = Query(..., min_length=1),
+def search_notes_full(
+    q: str = Query(..., min_length=1, max_length=512),
     limit: int = Query(30, ge=1, le=100),
     current_user: User = Depends(get_current_user),
 ):
     """Extended search: TF-IDF content search + title search + file name search."""
+    from app.services.rate_limit import limit_operation
+    limit_operation('search', current_user.id, settings.rate_limit_search_per_min)
     query_lower = q.strip().lower()
     matched_note_ids: dict[str, float] = {}
-
-    # 1. TF-IDF full-text search across note content
-    tfidf_results = index.search(q, limit=limit)
-    for result in tfidf_results:
-        nid = result["note_id"]
-        score = result["score"]
-        if nid not in matched_note_ids or score > matched_note_ids[nid]:
-            matched_note_ids[nid] = score
 
     with get_session() as session:
         user_note_ids = set(
@@ -128,6 +111,14 @@ async def search_notes_full(
                 select(Note.id).where(_owner_filter(current_user))
             ).all()
         )
+
+        # Release the read transaction before any CPU-heavy index fit.
+        session.commit()
+        # Filter before ranking so tombstones/other owners cannot crowd out hits.
+        for result in index.search(q, limit=limit, allowed_note_ids=user_note_ids):
+            nid, score = result["note_id"], result["score"]
+            if nid not in matched_note_ids or score > matched_note_ids[nid]:
+                matched_note_ids[nid] = score
 
         # 2. Title search (SQL LIKE)
         title_matches = (
@@ -149,6 +140,7 @@ async def search_notes_full(
             session.execute(
                 select(FileAsset.note_id).where(
                     FileAsset.note_id.isnot(None),
+                    FileAsset.user_id == current_user.id,
                     func.lower(FileAsset.filename).contains(query_lower),
                 )
             )
@@ -170,7 +162,7 @@ async def search_notes_full(
             return {"items": [], "total": 0, "query": q}
 
         notes = (
-            session.execute(select(Note).where(Note.id.in_(final_ids)))
+            session.execute(select(Note).where(Note.id.in_(final_ids), _owner_filter(current_user)))
             .scalars()
             .all()
         )
@@ -185,7 +177,7 @@ async def search_notes_full(
 
 
 @router.get("/notes/{note_id}", response_model=NoteDetail)
-async def get_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
+def get_note(note_id: str, request: Request, response: Response, current_user: User = Depends(get_current_user)):
     with get_session() as session:
         note = session.execute(
             select(Note).where(Note.id == note_id)
@@ -193,13 +185,15 @@ async def get_note(note_id: str, request: Request, current_user: User = Depends(
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
         _ensure_note_owner(note, current_user, session)
+        response.headers["ETag"] = f'"r{note.revision}"'
         log_event(session, "NOTE_READ", user_id=current_user.id, request=request, metadata={"note_id": note.id})
         return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
 @router.post("/notes", response_model=NoteDetail, status_code=201)
-async def create_note(payload: NoteCreateRequest, request: Request, current_user: User = Depends(get_current_user)):
-    with get_session() as session:
+def create_note(payload: NoteCreateRequest, request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    with get_session(immediate=True) as session:
+        lock_stream(session)
         layout_data = merge_layout_hints(None, payload.layout_hints)
         note = Note(
             title=payload.title,
@@ -213,6 +207,7 @@ async def create_note(payload: NoteCreateRequest, request: Request, current_user
         session.flush()
         _reindex_note(session, note)
         session.refresh(note)
+        record_note_change(session, note, "create")
         enqueue_sync_operation(
             session,
             OP_CREATE_NOTE,
@@ -230,21 +225,44 @@ async def create_note(payload: NoteCreateRequest, request: Request, current_user
             user_id=current_user.id,
         )
         log_event(session, "NOTE_CREATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
+        response.headers["ETag"] = f'"r{note.revision}"'
         return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
+@router.post("/notes/{note_id}/recovery-copy", response_model=NoteDetail, status_code=201)
+def recover_note(note_id: str, payload: NoteCreateRequest, request: Request,
+                       response: Response, current_user: User = Depends(get_current_user)):
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        original = session.get(Note, note_id)
+        # A preserved draft remains recoverable after its own original is deleted.
+        if not original or original.user_id != current_user.id:
+            raise HTTPException(404, 'Note not found')
+        copy = preserve_copy(session, current_user.id, payload.model_dump(by_alias=True),
+                             title_suffix=' (восстановлено)')
+        enqueue_sync_operation(session, OP_CREATE_NOTE, {}, note_id=copy.id, user_id=current_user.id)
+        log_event(session, 'NOTE_RECOVERY_COPY', user_id=current_user.id, request=request,
+                  metadata={'note_id': copy.id, 'original_id': note_id})
+        response.headers['ETag'] = f'"r{copy.revision}"'
+        return _serialize_detail(copy, session=session, user_id=current_user.id)
+
+
 @router.patch("/notes/{note_id}", response_model=NoteDetail)
-async def update_note(
+def update_note(
     note_id: str,
     payload: NoteUpdateRequest,
     request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
 ):
-    with get_session() as session:
-        note = session.get(Note, note_id)
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        note = session.execute(select(Note).where(Note.id == note_id).with_for_update()).scalars().first()
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
         _ensure_note_owner(note, current_user, session)
+
+        check_revision(note, request.headers.get("If-Match"))
 
         blocks_changed = False
 
@@ -280,6 +298,7 @@ async def update_note(
             _reindex_note(session, note)
 
         session.refresh(note)
+        record_note_change(session, note)
         enqueue_sync_operation(
             session,
             OP_UPDATE_NOTE,
@@ -292,16 +311,21 @@ async def update_note(
             user_id=current_user.id,
         )
         log_event(session, "NOTE_UPDATE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
+        response.headers["ETag"] = f'"r{note.revision}"'
         return _serialize_detail(note, session=session, user_id=current_user.id)
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
-    with get_session() as session:
+def delete_note(note_id: str, request: Request, current_user: User = Depends(get_current_user)):
+    with get_session(immediate=True) as session:
+        lock_stream(session)
         note = session.get(Note, note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
         _ensure_note_owner(note, current_user, session)
+        check_revision(note, request.headers.get("If-Match"))
+        note.tombstone = True
+        record_note_change(session, note, "delete")
         enqueue_sync_operation(
             session,
             OP_DELETE_NOTE,
@@ -310,9 +334,7 @@ async def delete_note(note_id: str, request: Request, current_user: User = Depen
             user_id=current_user.id,
         )
         log_event(session, "NOTE_DELETE", user_id=current_user.id, request=request, metadata={"note_id": note.id})
-        session.delete(note)
-        session.flush()
-        index.remove(note_id)
+    index.remove(note_id)
     return {"status": "ok"}
 
 
@@ -323,6 +345,7 @@ def _serialize_summary(note: Note) -> NoteSummary:
         styleTheme=note.style_theme,
         createdAt=note.created_at.isoformat(),
         updatedAt=note.updated_at.isoformat(),
+        revision=note.revision,
     )
 
 
@@ -344,7 +367,7 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
 
     links_from = []
     for link in note.links_from:
-        if user_id and link.target_note and link.target_note.user_id not in {None, user_id}:
+        if not is_owned(link.target_note, user_id or note.user_id):
             continue
         links_from.append(
             LinkPayload(
@@ -358,7 +381,7 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
         )
     links_to = []
     for link in note.links_to:
-        if user_id and link.source_note and link.source_note.user_id not in {None, user_id}:
+        if not is_owned(link.source_note, user_id or note.user_id):
             continue
         links_to.append(
             LinkPayload(
@@ -389,6 +412,7 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
         styleTheme=note.style_theme,
         createdAt=note.created_at.isoformat(),
         updatedAt=note.updated_at.isoformat(),
+        revision=note.revision,
         blocks=blocks,
         layoutHints=layout_hints,
         passport=passport,
@@ -400,15 +424,7 @@ def _serialize_detail(note: Note, session=None, user_id: Optional[str] = None) -
 
 
 def _ensure_note_owner(note: Note, user: User, session) -> None:
-    if note.user_id is None:
-        if settings.desktop_mode or settings.auth_mode == "none":
-            note.user_id = user.id
-            session.add(note)
-            session.flush()
-            return
-        raise HTTPException(status_code=404, detail="Note not found")
-    if note.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Note not found")
+    require_note_owner(note, user.id)
 
 
 def _reindex_note(session, note: Note) -> None:
@@ -431,7 +447,11 @@ def _reindex_note(session, note: Note) -> None:
         session.add_all(new_chunks)
     session.flush()
 
-    index.upsert(note.id, [(f"{note.id}:{i}", text) for i, text in enumerate(chunks)])
+    # The cache must not publish content from a transaction later rejected by
+    # the journal/outbox (e.g. queue overflow).
+    note_id = note.id
+    indexed_chunks = [(f"{note_id}:{i}", text) for i, text in enumerate(chunks)]
+    event.listen(session, "after_commit", lambda _: index.upsert(note_id, indexed_chunks), once=True)
 
 
 def _blocks_to_text(blocks: List[Dict[str, Any]]) -> str:
@@ -487,15 +507,15 @@ def _load_blocks(raw_json: str, *, note_id: Optional[str] = None) -> List[Dict[s
         parsed = json.loads(raw_json or "[]")
     except json.JSONDecodeError as exc:
         logger.warning("Failed to decode blocks JSON for note %s: %s", note_id, exc)
-        return []
+        raise HTTPException(status_code=409, detail="Stored block JSON is damaged; original data retained") from exc
 
     if not isinstance(parsed, list):
         logger.warning("Blocks JSON for note %s is not a list", note_id)
-        return []
+        raise HTTPException(status_code=409, detail="Stored blocks must be a list; original data retained")
 
     try:
         typed_blocks = parse_blocks(parsed)
     except ValidationError as exc:
-        logger.warning("Block schema validation failed for note %s: %s", note_id, exc)
+        logger.warning("Block schema validation failed for note %s; retaining original JSON", note_id)
         return parsed
     return dump_blocks(typed_blocks)

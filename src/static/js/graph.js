@@ -7,6 +7,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   await loadGraph();
   await loadGroups();
+  document.addEventListener('theme-change', () => {
+    requestAnimationFrame(refreshGraphForTheme);
+  });
 });
 
 async function loadGraph() {
@@ -296,6 +299,7 @@ function renderGraph(data) {
     zoomBehaviour,
     simulation,
     fitToView,
+    getNodeRadius,
     clusterColors: new Map(nodes.map((n) => [n.group_key, n.color ?? DEFAULT_COLOR])),
     clusterLabels: new Map(nodes.map((n) => [n.group_key, n.group_label])),
     renderLegend,
@@ -304,6 +308,33 @@ function renderGraph(data) {
 
   renderLegend(window.__graph.clusterColors, window.__graph.clusterLabels);
   return true;
+}
+
+function refreshGraphForTheme() {
+  const store = window.__graph;
+  const container = document.getElementById('graph-canvas');
+  if (!store || !container) return;
+
+  const rect = container.getBoundingClientRect();
+  const width = rect.width > 0 ? rect.width : 900;
+  const height = rect.height > 0 ? rect.height : 600;
+
+  store.svg.attr('width', width).attr('height', height);
+  store.node.attr('fill', (d) => d.color || DEFAULT_COLOR);
+  store.link.attr('stroke', (d) =>
+    getEdgeType(d) === 'tag' ? 'var(--muted)' : getLinkColor(d.source.color, d.target.color)
+  );
+
+  store.simulation
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('x', d3.forceX(width / 2).strength(0.04))
+    .force('y', d3.forceY(height / 2).strength(0.04))
+    .alpha(0.8)
+    .restart();
+
+  window.setTimeout(() => {
+    store.fitToView?.({ animate: true });
+  }, 250);
 }
 
 function initToolbar() {

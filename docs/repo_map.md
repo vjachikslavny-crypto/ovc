@@ -1,32 +1,49 @@
 # Repo Map
 
-```
-src/
-├── app/
-│   ├── api/          # notes/chat/commit/export/graph + files/upload
-│   ├── agent/        # blocks_schema + DraftAction + orchestrator
-│   ├── db/           # модели, миграция, сессия
-│   ├── services/     # files.py — обработка загрузок/превью
-│   ├── providers/    # LLM-провайдер, структуризатор (stub)
-│   ├── rag/          # TF-IDF индекс
-│   └── main.py       # FastAPI приложение
-├── static/
-│   ├── css/styles.css            # темы Clean/Brief, mobile layout
-│   └── js/
-│       ├── blocks_render.js, editor.js
-│       ├── toolbar.js, inline_bubble.js, palette.js, smart_insert.js
-│       ├── inspector.js, hints.js, notes_page.js, notes_renderer.js
-│       ├── theme.js, utils.js
-│       └── graph.js, vendor/d3.v7.min.js
-├── templates/        # base.html, notes.html, editor.html, graph.html
-├── requirements.txt  # зависимости Python
-└── run.sh            # автозапуск (venv → миграция → uvicorn)
+Актуальная рабочая структура:
+
+```text
+OVC/
+├── README.md
+├── PROJECT_DOCUMENTATION.md
+├── desktop/                         # Tauri desktop wrapper (macOS)
+│   └── src-tauri/
+├── deploy/
+│   └── cloudflare_tunnel/           # публичный запуск через Cloudflare Tunnel
+├── docs/
+│   ├── quick_start.md
+│   ├── repo_map.md
+│   ├── auth_migration.md
+│   ├── design-fixes.md
+│   ├── current_release_notes.md
+│   └── pdf/
+├── scripts/
+│   ├── start_server.sh
+│   └── migrate_desktop_to_shared.py
+└── src/
+    ├── app/
+    │   ├── main.py                  # FastAPI точка входа
+    │   ├── api/                     # notes/chat/commit/export/graph/sync/upload/files/auth/users
+    │   ├── agent/                   # AI-оркестратор и контекст
+    │   ├── core/                    # config/security/auth_provider
+    │   ├── db/                      # модели, миграции, сессия
+    │   ├── services/                # files, sync_engine, password_policy, audit, rate_limit
+    │   └── providers/               # LLM provider
+    ├── static/
+    │   ├── css/styles.css
+    │   └── js/                      # editor/notes/graph/auth/viewers/data_adapter и др.
+    ├── templates/                   # base, welcome, notes, editor, graph, auth/*
+    ├── requirements.txt
+    ├── run.sh
+    └── README_simple.md
 ```
 
-Документация:
+Ключевые документы:
 
-- `README.md` — обзор и запуск.
-- `src/README_simple.md` — детали API/блоков/экспорта.
+- `README.md` — запуск web/desktop + sync + tunnel.
+- `PROJECT_DOCUMENTATION.md` — полная техническая документация.
+- `docs/current_release_notes.md` — сводка последних нововведений.
+- `src/README_simple.md` — практичные детали API/блоков/экспорта.
 
 ## Note Block Contract
 

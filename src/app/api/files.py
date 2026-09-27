@@ -4,13 +4,18 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
-from fastapi.responses import FileResponse, Response, HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import Response, HTMLResponse, JSONResponse
 
 from app.db.models import FileAsset
+from app.core.ownership import get_owned_file
 from app.db.session import get_session
 from app.core.config import settings
 from app.core.security import get_current_user, get_current_user_or_refresh
 from app.models.user import User
+from app.services.runtime import run_blocking
+from app.services.viewer_jobs import render_viewer
+from starlette.concurrency import run_in_threadpool
+from app.services.media_response import FileResponse
 from app.services.files import (
     EXCEL_WINDOW_LIMIT,
     PAGES_DIR,
@@ -34,25 +39,17 @@ router = APIRouter(tags=["files"])
 
 def _fetch_asset(file_id: str, user: User) -> FileAsset:
     with get_session() as session:
-        asset = session.get(FileAsset, file_id)
-        if not asset:
-            raise HTTPException(status_code=404, detail="File not found")
-        if asset.user_id is None:
-            asset.user_id = user.id
-            session.add(asset)
-            session.flush()
-        if asset.user_id != user.id:
-            raise HTTPException(status_code=404, detail="File not found")
-        return asset
+        return get_owned_file(session, file_id, user.id)
 
 
+@router.head("/files/{file_id}/original", include_in_schema=False)
 @router.get("/files/{file_id}/original")
 def download_original(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     asset = _fetch_asset(file_id, current_user)
     path = Path(asset.path_original)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Original file is missing on disk")
-    return FileResponse(path, media_type=asset.mime, filename=asset.filename)
+    return FileResponse(path, media_type=safe_media_type(asset), filename=asset.filename)
 
 
 @router.get("/files/{file_id}/preview")
@@ -76,7 +73,8 @@ def download_doc_html(file_id: str, current_user: User = Depends(get_current_use
     if not path.exists():
         raise HTTPException(status_code=404, detail="Document preview file is missing on disk")
     content = path.read_text(encoding="utf-8")
-    return HTMLResponse(content=content, media_type="text/html; charset=utf-8")
+    return HTMLResponse(content=content, media_type="text/html; charset=utf-8",
+        headers={'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'"})
 
 
 @router.get("/files/{file_id}/slides.json")
@@ -107,6 +105,7 @@ def slide_image(file_id: str, slide_index: int, current_user: User = Depends(get
     return FileResponse(slide_path, media_type="image/webp")
 
 
+@router.head("/files/{file_id}/video/source", include_in_schema=False)
 @router.get("/files/{file_id}/video/source")
 def video_source(file_id: str, current_user: User = Depends(get_current_user_or_refresh)):
     asset = _fetch_asset(file_id, current_user)
@@ -115,7 +114,7 @@ def video_source(file_id: str, current_user: User = Depends(get_current_user_or_
     path = Path(asset.path_video_original or asset.path_original)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video file is missing on disk")
-    media_type = asset.video_mime or asset.mime or "video/mp4"
+    media_type = safe_media_type(asset)
     return FileResponse(path, media_type=media_type, filename=asset.filename)
 
 
@@ -216,8 +215,7 @@ def markdown_raw(file_id: str, current_user: User = Depends(get_current_user_or_
     if asset.kind != "markdown":
         raise HTTPException(status_code=400, detail="File is not markdown")
     path = _get_markdown_file_path(asset)
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return Response(content=text, media_type="text/plain; charset=utf-8")
+    return FileResponse(path, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/files/{file_id}/excel/summary.json")
@@ -230,26 +228,31 @@ def excel_summary(file_id: str, current_user: User = Depends(get_current_user_or
 
 
 @router.get("/files/{file_id}/excel/sheet/{sheet_name}.json")
-def excel_window(
+async def excel_window(
     file_id: str,
     sheet_name: str,
     offset: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=EXCEL_WINDOW_LIMIT),
     current_user: User = Depends(get_current_user_or_refresh),
 ):
-    asset = _fetch_asset(file_id, current_user)
+    asset = await run_in_threadpool(_fetch_asset, file_id, current_user)
     if asset.kind not in {"xlsx", "xls", "csv"}:
         raise HTTPException(status_code=400, detail="File is not a table")
-    window = _read_excel_window(asset, sheet_name, offset, limit)
-    return JSONResponse(window)
+    data = await run_blocking(render_viewer, asset, "excel-window", sheet=sheet_name, offset=offset, limit=limit)
+    return Response(data, media_type="application/json")
 
 
 @router.get("/files/{file_id}/excel/sheet/{sheet_name}.csv")
-def excel_sheet_csv(file_id: str, sheet_name: str, current_user: User = Depends(get_current_user_or_refresh)):
-    asset = _fetch_asset(file_id, current_user)
-    if asset.kind not in {"xlsx", "xls", "csv"}:
-        raise HTTPException(status_code=400, detail="File is not a table")
-    return _iter_sheet_csv(asset, sheet_name)
+async def excel_sheet_csv(file_id: str, sheet_name: str, current_user: User = Depends(get_current_user_or_refresh)):
+    asset = await run_in_threadpool(_fetch_asset, file_id, current_user)
+    if asset.kind == 'csv':
+        return FileResponse(asset.path_original, media_type='text/csv', filename=asset.filename)
+    if asset.kind not in {'xlsx', 'xls'}:
+        raise HTTPException(400, 'File is not a table')
+    data = await run_blocking(render_viewer, asset, 'excel-csv', sheet=sheet_name)
+    from urllib.parse import quote
+    filename = quote(sheet_name + '.csv', safe='')
+    return Response(data, media_type='text/csv', headers={'Content-Disposition':f"attachment; filename*=utf-8''{filename}"})
 
 
 @router.get("/files/{file_id}/excel/charts.json")
@@ -349,6 +352,11 @@ async def save_excel_charts_pages(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
+    body = await request.json()
+    return await run_in_threadpool(_save_excel_charts_pages, file_id, body, current_user)
+
+
+def _save_excel_charts_pages(file_id, body, current_user):
     """Сохраняет ручной выбор страниц диаграмм пользователем."""
     from app.db.session import get_session
     from app.db.models import FileAsset
@@ -358,7 +366,7 @@ async def save_excel_charts_pages(
         raise HTTPException(status_code=400, detail="File is not an Excel file")
     
     try:
-        body = await request.json()
+
         if not isinstance(body, dict) or "keep" not in body:
             raise HTTPException(status_code=400, detail="Expected JSON body with 'keep' array")
         
@@ -391,8 +399,8 @@ async def save_excel_charts_pages(
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error saving chart pages selection for {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        logger.warning("chart_selection_failed type=%s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Unable to save chart selection")
 
 
 @router.get("/files/{file_id}/excel/chart/{chart_index}")
@@ -425,6 +433,7 @@ def download_waveform(file_id: str, current_user: User = Depends(get_current_use
     return Response(content=path.read_text(encoding="utf-8"), media_type="application/json")
 
 
+@router.head("/files/{file_id}/stream", include_in_schema=False)
 @router.get("/files/{file_id}/stream")
 def stream_media(file_id: str, request: Request, current_user: User = Depends(get_current_user_or_refresh)):
     asset = _fetch_asset(file_id, current_user)
@@ -432,130 +441,57 @@ def stream_media(file_id: str, request: Request, current_user: User = Depends(ge
     if not path.exists():
         raise HTTPException(status_code=404, detail="Original file is missing on disk")
 
-    file_size = path.stat().st_size
-    if file_size <= 0:
-        raise HTTPException(status_code=404, detail="Audio stream is empty")
-    range_header = request.headers.get("range")
-    
-    # OVC: audio - нормализуем MIME-тип для WebM с codecs
-    media_type = asset.mime
-    if media_type and "webm" in media_type.lower() and "codecs" in media_type:
-        # Для стриминга используем базовый тип, браузер сам определит codec
-        media_type = "audio/webm"
-    
-    if range_header:
-        start, end = _parse_range(range_header, file_size)
-        status_code = 206
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end - start + 1),
-            "Content-Type": media_type,
-        }
-    else:
-        if not settings.desktop_mode:
-            # Keep original web behavior intact.
-            return FileResponse(path, media_type=media_type, filename=asset.filename)
-        start, end = 0, max(0, file_size - 1)
-        status_code = 200
-        headers = {
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(file_size),
-            "Content-Type": media_type,
-        }
-
-    chunk_size = 1024 * 64
-
-    def iter_file():
-        with path.open("rb") as f:
-            f.seek(start)
-            remaining = end - start + 1
-            while remaining > 0:
-                chunk = f.read(min(chunk_size, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    return StreamingResponse(iter_file(), status_code=status_code, headers=headers, media_type=media_type)
+    # Starlette FileResponse streams fixed-size chunks and implements suffix /
+    # multipart ranges, If-Range, 206/416 and HEAD without buffering the file.
+    media_type = safe_media_type(asset)
+    return FileResponse(path, media_type=media_type, filename=asset.filename,
+                        content_disposition_type='inline' if media_type.startswith(('audio/', 'video/')) else 'attachment')
 
 
 @router.get("/files/{file_id}/page/{page_num}")
-def get_pdf_page(
+async def get_pdf_page(
     file_id: str,
     page_num: int,
     scale: float = Query(1.0, ge=0.5, le=2.0),
     current_user: User = Depends(get_current_user_or_refresh),
 ):
-    """OVC: pdf - получение страницы PDF в виде изображения."""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        asset = _fetch_asset(file_id, current_user)
-        if asset.kind != "pdf":
-            raise HTTPException(status_code=400, detail="File is not a PDF")
-        if not asset.pages or page_num < 1 or page_num > asset.pages:
-            raise HTTPException(status_code=404, detail=f"Page {page_num} not found (PDF has {asset.pages or 0} pages)")
-        
-        # Проверяем кэш
-        cache_dir = PAGES_DIR / file_id
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        scale_key = int(scale * 100)
-        cache_path = cache_dir / f"{page_num}_{scale_key}.webp"
-        
-        if cache_path.exists():
-            logger.info(f"Serving cached PDF page {page_num} for {file_id}")
-            return FileResponse(cache_path, media_type="image/webp")
-        
-        # Читаем оригинальный файл и рендерим страницу
-        original_path = Path(asset.path_original)
-        if not original_path.exists():
-            raise HTTPException(status_code=404, detail="Original file is missing on disk")
-        
-        with original_path.open("rb") as f:
-            pdf_data = f.read()
-        
-        logger.info(f"Rendering PDF page {page_num} for {file_id} (scale={scale})")
-        # Проверяем доступность библиотек перед рендерингом
-        from app.services.files import HAS_PYMUPDF, HAS_PDF2IMAGE
-        if not HAS_PYMUPDF and not HAS_PDF2IMAGE:
-            logger.error(f"PDF rendering libraries not available (PyMuPDF: {HAS_PYMUPDF}, pdf2image: {HAS_PDF2IMAGE})")
-            raise HTTPException(
-                status_code=503,
-                detail=f"PDF rendering not available. PyMuPDF: {HAS_PYMUPDF}, pdf2image: {HAS_PDF2IMAGE}. Please install pymupdf: pip install pymupdf"
-            )
-        
-        page_image = _render_pdf_page(pdf_data, page_num, scale)
-        if not page_image:
-            logger.error(f"Failed to render PDF page {page_num} for {file_id} - render function returned None")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to render PDF page {page_num}. Libraries available: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE}"
-            )
-        
-        # Сохраняем в кэш
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with cache_path.open("wb") as f:
-            f.write(page_image)
-        
-        logger.info(f"Successfully rendered and cached PDF page {page_num} for {file_id}")
-        return Response(content=page_image, media_type="image/webp")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error rendering PDF page {page_num} for {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    asset = await run_in_threadpool(_fetch_asset, file_id, current_user)
+    if asset.kind != 'pdf':
+        raise HTTPException(400, 'File is not a PDF')
+    if not asset.pages or not 1 <= page_num <= asset.pages:
+        raise HTTPException(404, 'PDF page not found')
+    cache_path = PAGES_DIR / file_id / f'{page_num}_{int(scale*100)}.webp'
+    if cache_path.is_file():
+        return FileResponse(cache_path, media_type='image/webp')
+    data = await run_blocking(render_viewer, asset, 'pdf', page=page_num, scale=scale)
+    from app.services.storage import atomic_write
+    await run_in_threadpool(atomic_write, cache_path, data)
+    return FileResponse(cache_path, media_type='image/webp')
+
+
+def safe_media_type(asset):
+    mime = (asset.mime or '').split(';', 1)[0].lower()
+    allowed = {'application/pdf', 'text/plain', 'text/markdown', 'text/csv',
+               'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+               'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/wav', 'audio/mp4',
+               'audio/aac', 'audio/x-wav', 'audio/x-m4a',
+               'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo'}
+    return mime if mime in allowed else 'application/octet-stream'
 
 
 def _parse_range(range_header: str, file_size: int) -> tuple[int, int]:
-    if not range_header.startswith("bytes="):
-        return 0, file_size - 1
-    range_values = range_header.replace("bytes=", "").split("-", 1)
-    start = int(range_values[0]) if range_values[0] else 0
-    end = int(range_values[1]) if len(range_values) > 1 and range_values[1] else file_size - 1
-    start = max(0, start)
-    end = min(file_size - 1, end)
-    if start > end:
-        start = 0
+    import re
+    match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header)
+    if not match or file_size <= 0 or not any(match.groups()):
+        raise HTTPException(416, 'Invalid byte range', headers={'Content-Range':f'bytes */{file_size}'})
+    first, last = match.groups()
+    if first:
+        start, end = int(first), min(int(last), file_size-1) if last else file_size-1
+    else:
+        suffix = int(last)
+        start, end = max(0, file_size-suffix), file_size-1
+        if suffix == 0:
+            start = file_size
+    if start > end or start >= file_size:
+        raise HTTPException(416, 'Invalid byte range', headers={'Content-Range':f'bytes */{file_size}'})
     return start, end

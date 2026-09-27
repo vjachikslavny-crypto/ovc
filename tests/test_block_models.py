@@ -161,19 +161,20 @@ class BlockModelParsingTests(unittest.TestCase):
         self.assertEqual(parsed[0].type, "code")
         self.assertEqual(parsed[0].data.language, "python")
 
-    def test_table_block_requires_summary(self):
-        with self.assertRaises(ValidationError):
-            parse_blocks(
-                [
-                    {
-                        "type": "table",
-                        "data": {
-                            "kind": "csv",
-                            "src": "/files/t2/original",
-                        },
-                    }
-                ]
-            )
+    def test_table_block_without_summary_is_valid(self):
+        # summary — опциональное поле; таблица без него должна парситься успешно
+        blocks = [
+            {
+                "type": "table",
+                "data": {
+                    "kind": "csv",
+                    "src": "/files/t2/original",
+                },
+            }
+        ]
+        parsed = parse_blocks(blocks)
+        self.assertEqual(parsed[0].type, "table")
+        self.assertIsNone(parsed[0].data.summary)
 
     def test_parse_invalid_block_type(self):
         blocks = [{"type": "unknown", "data": {}}]

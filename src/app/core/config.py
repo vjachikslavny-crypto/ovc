@@ -74,8 +74,13 @@ class Settings:
         self.access_token_expires_min = int(os.getenv("ACCESS_TOKEN_EXPIRES_MIN", "15"))
         self.refresh_token_expires_days = int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30"))
         self.cookie_domain = os.getenv("COOKIE_DOMAIN") or None
-        self.cookie_secure = _env_bool("COOKIE_SECURE", False)
+        self.cookie_secure = _env_bool("COOKIE_SECURE", os.getenv("APP_ENV", "development").lower() == "production")
         self.cookie_samesite = os.getenv("COOKIE_SAMESITE", "lax")
+        self.cookie_samesite = self.cookie_samesite.lower()
+        if self.cookie_samesite not in {"lax", "strict", "none"}:
+            raise ValueError("COOKIE_SAMESITE must be lax, strict or none")
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            raise ValueError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true")
         self.public_base_url = os.getenv("PUBLIC_BASE_URL", "").strip()
         self.cors_origins = self._parse_cors_origins()
         self.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -102,6 +107,9 @@ class Settings:
         self.email_from = os.getenv("EMAIL_FROM", "no-reply@ovc.local")
         self.email_backend = os.getenv("EMAIL_BACKEND", "mock")
         self.app_env = os.getenv("APP_ENV", "development").strip().lower()
+        self.db_auto_migrate = _env_bool("DB_AUTO_MIGRATE", False)
+        if self.db_auto_migrate and self.app_env not in {"development", "test"}:
+            raise ValueError("DB_AUTO_MIGRATE is allowed only in development/test; production requires explicit migrations")
         self.desktop_mode = _env_bool("DESKTOP_MODE", False)
         self.allow_desktop_dev_fallback = _env_bool(
             "ALLOW_DESKTOP_DEV_FALLBACK",
@@ -138,8 +146,14 @@ class Settings:
         # Auth mode: "none" | "local" | "supabase" | "both"
         self.auth_mode: AuthMode = os.getenv("AUTH_MODE", "local").lower()  # type: ignore
         if self.auth_mode not in ("none", "local", "supabase", "both"):
-            self.auth_mode = "local"
+            raise ValueError("Unknown AUTH_MODE")
         
+        self.public_mode = _env_bool("PUBLIC_MODE") or self.app_env == "production" or bool(self.public_base_url)
+        if self.public_mode and self.auth_mode == "none":
+            if not _env_bool("ALLOW_UNSAFE_PUBLIC_NO_AUTH"):
+                raise ValueError("Public AUTH_MODE=none is unsafe; use authentication (override: ALLOW_UNSAFE_PUBLIC_NO_AUTH)")
+            self._warn("DANGER: public authentication disabled by ALLOW_UNSAFE_PUBLIC_NO_AUTH")
+
         # Supabase configuration
         self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
         self.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY", "")
@@ -164,12 +178,81 @@ class Settings:
             "RUNTIME_STATUS_ENABLED",
             self.desktop_mode or self.auth_mode == "none" or self.app_env != "production",
         )
+        # LLM / Agent
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
+        self.llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+        self.llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.4"))
+        self.llm_context_budget = int(os.getenv("LLM_CONTEXT_BUDGET", "6000"))
+        self.llm_timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+
+        if not 0 < self.llm_timeout_seconds < 3600 or not 0 < self.sync_request_timeout_seconds < 3600:
+            raise ValueError('AI and sync HTTP timeouts must be positive and finite (<3600s)')
+
         self.csp_report_only = _env_bool("CSP_REPORT_ONLY", False)
         self.csp_script_src_extra = self._parse_csv_env("CSP_SCRIPT_SRC_EXTRA")
         self.csp_style_src_extra = self._parse_csv_env("CSP_STYLE_SRC_EXTRA")
         self.csp_connect_src_extra = self._parse_csv_env("CSP_CONNECT_SRC_EXTRA")
         self.csp_img_src_extra = self._parse_csv_env("CSP_IMG_SRC_EXTRA")
         self.csp_frame_src_extra = self._parse_csv_env("CSP_FRAME_SRC_EXTRA")
+
+        # Stage 6: finite per-process budgets, shared by HTTP and desktop callers.
+        for name, default in {
+            'MAX_REQUEST_BYTES': 510 * 1024 * 1024,
+            'MAX_FILE_BYTES': 200 * 1024 * 1024,
+            'MAX_CONVERSION_BYTES': 50 * 1024 * 1024,
+            'MAX_PREVIEW_BYTES': 16 * 1024 * 1024,
+            'MAX_ARCHIVE_EXPANDED_BYTES': 200 * 1024 * 1024,
+            'MAX_AI_CONTEXT_CHARS': 100000,
+            'MAX_UPLOAD_FILES': 10,
+            'RUNTIME_WORKERS': 4,
+            'SUBPROCESS_OUTPUT_BYTES': 65536,
+            'RATE_LIMIT_UPLOAD_PER_MIN': 30,
+            'RATE_LIMIT_AI_PER_MIN': 30,
+            'RATE_LIMIT_SEARCH_PER_MIN': 120,
+            'RATE_LIMIT_REFRESH_PER_MIN': 60,
+        }.items():
+            value = int(os.getenv(name, str(default)))
+            if value <= 0:
+                raise ValueError(f'{name} must be positive')
+            setattr(self, name.lower(), value)
+        self.storage_min_free_bytes = int(os.getenv('STORAGE_MIN_FREE_BYTES', str(128 * 1024 * 1024)))
+        if self.storage_min_free_bytes < 0:
+            raise ValueError('STORAGE_MIN_FREE_BYTES must be nonnegative')
+        for name, default in {
+            'RUNTIME_JOB_TIMEOUT_SECONDS': 150, 'CONVERSION_TIMEOUT_SECONDS': 90,
+            'FFMPEG_TIMEOUT_SECONDS': 30, 'LIBREOFFICE_TIMEOUT_SECONDS': 60,
+            'REQUEST_BODY_TIMEOUT_SECONDS': 30, 'EXTERNAL_HTTP_TIMEOUT_SECONDS': 10,
+            'SHUTDOWN_GRACE_SECONDS': 5,
+        }.items():
+            value = float(os.getenv(name, str(default)))
+            if not 0 < value < 3600:
+                raise ValueError(f'{name} must be between 0 and 3600')
+            setattr(self, name.lower(), value)
+        self.trusted_proxy_ips = self._parse_csv_env('TRUSTED_PROXY_IPS')
+        if '*' in self.trusted_proxy_ips:
+            raise ValueError('TRUSTED_PROXY_IPS must contain explicit addresses/networks, not *')
+        import ipaddress
+        for peer in self.trusted_proxy_ips:
+            if ipaddress.ip_network(peer, strict=False).prefixlen == 0:
+                raise ValueError('TRUSTED_PROXY_IPS must not trust the entire Internet')
+        self.allowed_hosts = self._parse_csv_env('ALLOWED_HOSTS')
+        if '*' in self.cors_origins:
+            raise ValueError('Wildcard CORS is incompatible with credentialed requests')
+        if self.public_mode:
+            from urllib.parse import urlsplit
+            if not self.cookie_secure:
+                raise ValueError('Public HTTPS requires COOKIE_SECURE=true')
+            if self.allow_desktop_dev_fallback:
+                raise ValueError('Public mode forbids desktop dev fallback')
+            if not self.allowed_hosts or '*' in self.allowed_hosts:
+                raise ValueError('Public mode requires explicit ALLOWED_HOSTS')
+            if self.public_base_url:
+                public = urlsplit(self.public_base_url)
+                if public.scheme != 'https' or not public.hostname or public.username or public.password:
+                    raise ValueError('PUBLIC_BASE_URL must be a valid HTTPS URL without credentials')
+        if self.app_env == 'production' and self.db_auto_migrate:
+            raise ValueError('Production migrations must be explicit')
 
     def _warn(self, message: str) -> None:
         self.startup_warnings.append(message)
@@ -212,6 +295,8 @@ class Settings:
             "http://localhost:18741",
             "tauri://localhost",
         ]
+        if (_env_bool("PUBLIC_MODE") or os.getenv("APP_ENV", "").lower() == "production" or self.public_base_url):
+            defaults = []
         if self.public_base_url:
             defaults.append(self.public_base_url.rstrip("/"))
 
@@ -272,6 +357,10 @@ class Settings:
             "syncRemoteConfigured": self.sync_remote_configured,
             "syncPullEnabled": self.sync_pull_enabled,
             "runtimeStatusEnabled": self.runtime_status_enabled,
+            "runtimeWorkers": self.runtime_workers,
+            "conversionTimeoutSeconds": self.conversion_timeout_seconds,
+            "maxFileBytes": self.max_file_bytes,
+            "trustedProxyCount": len(self.trusted_proxy_ips),
             "startupWarnings": list(self.startup_warnings),
         }
 

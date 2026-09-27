@@ -35,8 +35,10 @@ def _insert_row(conn: sqlite3.Connection, table: str, row: dict, target_columns:
     try:
         conn.execute(sql, values)
         return True
-    except sqlite3.IntegrityError:
-        return False
+    except sqlite3.IntegrityError as exc:
+        if str(exc).startswith('UNIQUE constraint failed:'):
+            return False  # Existing entity; preserve the historical merge policy.
+        raise  # FK/ownership failures must roll back, never silently omit data.
 
 
 def _ensure_unique_username(conn: sqlite3.Connection, base: str) -> str:
@@ -64,7 +66,7 @@ def migrate(source_db: Path, target_db: Path, backup: bool = True) -> dict:
 
     target = sqlite3.connect(target_db)
     target.row_factory = sqlite3.Row
-    target.execute("PRAGMA foreign_keys = OFF")
+    target.execute("PRAGMA foreign_keys = ON")
 
     stats = {
         "users_inserted": 0,
@@ -80,6 +82,7 @@ def migrate(source_db: Path, target_db: Path, backup: bool = True) -> dict:
 
     try:
         with target:
+            target.execute('BEGIN IMMEDIATE')
             # Build target user indexes
             users_by_email: Dict[str, str] = {}
             users_by_username: Dict[str, str] = {}

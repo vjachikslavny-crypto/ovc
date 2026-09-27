@@ -246,26 +246,47 @@ function formatDate(date) {
 
 function getPreviewText(note) {
   if (!note.blocks || !note.blocks.length) return '';
-  
+
   for (const block of note.blocks) {
-    if (block.type === 'text' && block.content) {
-      // Убираем HTML теги и берём первые 100 символов
-      const text = block.content.replace(/<[^>]*>/g, '').trim();
-      if (text) {
-        return text.length > 80 ? text.slice(0, 80) + '…' : text;
-      }
+    const data = block.data || {};
+    let text = '';
+
+    if (block.type === 'paragraph') {
+      const parts = data.parts || [];
+      text = parts.map((p) => p.text || '').join('');
+    } else if (block.type === 'heading') {
+      text = data.text || '';
+    } else if (block.type === 'quote') {
+      text = data.text || '';
+    } else if (block.type === 'bulletList' || block.type === 'numberList') {
+      const items = data.items || [];
+      text = items
+        .map((item) => (typeof item === 'string' ? item : item.text || ''))
+        .join(', ');
+    } else if (block.type === 'code') {
+      text = data.code || '';
+    } else if (block.type === 'todo') {
+      const items = data.items || [];
+      text = items.map((item) => item.text || '').join(', ');
+    }
+
+    text = text.replace(/<[^>]*>/g, '').trim();
+    if (text) {
+      return text.length > 80 ? text.slice(0, 80) + '…' : text;
     }
   }
-  
-  // Если нет текста, показываем тип контента
-  const types = note.blocks.map(b => b.type);
+
+  const types = note.blocks.map((b) => b.type);
   if (types.includes('image')) return '🖼 Изображение';
-  if (types.includes('pdf')) return '📄 PDF документ';
+  if (types.includes('doc')) return '📄 Документ';
   if (types.includes('audio')) return '🎵 Аудио';
   if (types.includes('video')) return '🎬 Видео';
   if (types.includes('youtube')) return '▶ YouTube';
-  if (types.includes('instagram')) return '📸 Instagram Reel';
+  if (types.includes('instagram')) return '📸 Instagram';
   if (types.includes('tiktok')) return '🎵 TikTok';
-  
+  if (types.includes('sheet')) return '📊 Таблица';
+  if (types.includes('slides')) return '📽 Презентация';
+  if (types.includes('markdown')) return '📝 Markdown';
+
   return '';
 }

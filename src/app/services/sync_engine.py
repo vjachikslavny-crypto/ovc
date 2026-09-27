@@ -1,669 +1,812 @@
+"""Durable sync v1. HTTP is deliberately outside all local transactions.
+
+Legacy protocol 0 rows, maps and cursors are retained but never consumed here.
+"""
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
+import hashlib
+import io
 import json
 import logging
+from pathlib import Path
+import random
+import os
+import tempfile
 import threading
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit, urlunsplit, quote
+import uuid
 
 import httpx
-from sqlalchemy import func, or_, select
+from fastapi import HTTPException, UploadFile
+from sqlalchemy import select, func, or_
+from starlette.datastructures import Headers
+from starlette.requests import Request
 
 from app.core.config import settings
-from app.db.models import Note, NoteTag, SyncConflict, SyncNoteMap, SyncOutbox
+from app.core.ownership import get_owned_note, get_owned_file
+from app.db.models import (Note, NoteTag, NoteLink, FileAsset, SyncOutbox, SyncConflict,
+    SyncEntityMap, SyncPeerState, SyncIdentity)
 from app.db.session import get_session
+from app.services.sync_protocol import (dumps, now, identity, lock_stream, note_payload,
+    file_payload, file_ids, preserve_copy, advance_local_revision, record_relation_conflicts)
 
 logger = logging.getLogger(__name__)
-
-OP_CREATE_NOTE = "create_note"
-OP_UPDATE_NOTE = "update_note"
-OP_DELETE_NOTE = "delete_note"
-OP_COMMIT = "commit"
-OP_UPLOAD_FILE = "upload_file"
-
-STATUS_PENDING = "pending"
-STATUS_DONE = "done"
-STATUS_FAILED = "failed"
-
-_MAX_RETRIES_BEFORE_BACKOFF = 5
-
-_worker_lock = threading.Lock()
-_sync_lock = threading.Lock()
+OP_CREATE_NOTE, OP_UPDATE_NOTE, OP_DELETE_NOTE = 'create_note', 'update_note', 'delete_note'
+OP_COMMIT, OP_UPLOAD_FILE = 'commit', 'upload_file'
+ACTIVE = ('pending', 'retry', 'inflight', 'auth_required')
+TERMINAL = ('applied', 'conflict', 'failed_permanent')
+_worker_lock, _sync_lock = threading.Lock(), threading.Lock()
+_worker_stop = threading.Event()
 _worker_started = False
-_sync_thread: Optional[threading.Thread] = None
+_sync_thread = None
 
 
 class RetryableSyncError(Exception):
     pass
 
 
-def _now() -> datetime:
-    return datetime.utcnow()
+class AuthRequired(Exception):
+    pass
 
 
-def _parse_iso_utc(value: str) -> datetime:
-    if not value:
-        return datetime.min
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
+class PermanentSyncError(Exception):
+    pass
 
 
-@contextmanager
-def _sync_guard():
+def remote_key(url=None):
+    parts = urlsplit(url or settings.sync_remote_base_url)
+    if parts.scheme not in ('https', 'http') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError('Sync URL must be an HTTP(S) base URL without credentials/query/fragment')
+    port = parts.port
+    host = parts.hostname.lower()
+    if ':' in host:
+        host = '[' + host + ']'
+    netloc = host if not port or (parts.scheme, port) in [('https', 443), ('http', 80)] else f'{host}:{port}'
+    normalized = urlunsplit((parts.scheme.lower(), netloc, parts.path.rstrip('/'), '', ''))
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def _scope(session, uid):
+    try:
+        key = remote_key()
+    except ValueError:
+        raise HTTPException(503, 'Invalid remote sync base URL; check configuration')
+    return (uid, identity(session, 'client_id'), key)
+
+
+def _filter(model, scope):
+    return (model.user_id == scope[0], model.client_id == scope[1], model.remote_key == scope[2])
+
+
+def _mapping(session, scope, kind, local_id):
+    return session.get(SyncEntityMap, (*scope, kind, local_id))
+
+
+def _remote_mapping(session, scope, kind, remote_id):
+    return session.execute(select(SyncEntityMap).where(*_filter(SyncEntityMap, scope),
+        SyncEntityMap.entity_type == kind, SyncEntityMap.remote_id == remote_id)).scalar_one_or_none()
+
+
+def _pending(session, scope, kind, entity_id, *, include_failed=False):
+    return session.execute(select(SyncOutbox).where(*_filter(SyncOutbox, scope), SyncOutbox.protocol_version == 1,
+        SyncOutbox.entity_type == kind, SyncOutbox.entity_id == entity_id,
+        SyncOutbox.status.in_(ACTIVE + ('failed_permanent',) if include_failed else ACTIVE))
+        .order_by(SyncOutbox.created_at, SyncOutbox.id)).scalars().all()
+
+
+def _append(session, scope, kind, entity_id, op, payload, note_id=None, dependencies=None):
+    session.flush()
+    count = session.execute(select(func.count(SyncOutbox.id)).where(SyncOutbox.protocol_version == 1,
+        SyncOutbox.status != 'applied')).scalar_one()
+    if count >= settings.sync_outbox_max:
+        raise HTTPException(503, 'Sync queue is full. Local draft is retained; resolve sync before retrying save.')
+    previous = _pending(session, scope, kind, entity_id)
+    mapping = _mapping(session, scope, kind, entity_id)
+    deps = list(dependencies or [])
+    if previous:
+        deps.append({'op_id': previous[-1].id, 'base': True})
+    item = SyncOutbox(id=str(uuid.uuid4()), protocol_version=1, user_id=scope[0], client_id=scope[1],
+        remote_key=scope[2], entity_type=kind, entity_id=entity_id, note_id=note_id,
+        entity_remote_id=mapping.remote_id if mapping else None,
+        base_revision=mapping.remote_revision if mapping else None, op_type=op, payload_json=dumps(payload),
+        dependency_json=dumps(deps), status='pending', tries=0)
+    session.add(item)
+    session.flush()
+    return item
+
+
+def _ensure_note(session, scope, note_id):
+    mapping = _mapping(session, scope, 'note', note_id)
+    if mapping:
+        return None
+    pending = _pending(session, scope, 'note', note_id)
+    if pending:
+        return pending[0].id
+    note = get_owned_note(session, note_id, scope[0])
+    # Establish identity first: attachment/link dependencies may be cyclic.
+    skeleton = {'title': note.title, 'styleTheme': note.style_theme, 'blocks': [], 'tags': [], 'linksFrom': []}
+    first = _append(session, scope, 'note', note_id, 'create', skeleton, note_id)
+    return first.id
+
+
+def _queue_file(session, scope, asset, *, preserve_parent=True):
+    mapping = _mapping(session, scope, 'file', asset.id)
+    pending = _pending(session, scope, 'file', asset.id)
+    if mapping or pending:
+        return pending[-1].id if pending else None
+    deps = []
+    parent_needs_snapshot = False
+    if asset.note_id:
+        first = _ensure_note(session, scope, asset.note_id)
+        if first:
+            deps.append({'op_id': first})
+            parent_ops = _pending(session, scope, 'note', asset.note_id)
+            parent_needs_snapshot = len(parent_ops) == 1 and parent_ops[0].op_type == 'create'
+    payload = file_payload(asset)
+    item = _append(session, scope, 'file', asset.id, 'upload', payload, asset.note_id, deps)
+    if parent_needs_snapshot and preserve_parent:
+        # An upload to an unmapped existing note must not leave its remote parent
+        # as the empty identity shell and later pull that shell over local content.
+        _queue_note(session, scope, get_owned_note(session, asset.note_id, scope[0]))
+    return item.id
+
+
+def _queue_note(session, scope, note, delete=False, visiting=None):
+    visiting = set() if visiting is None else visiting
+    if note.id in visiting:
+        return
+    visiting.add(note.id)
+    deps = []
+    if not delete:
+        _ensure_note(session, scope, note.id)
+    elif not _mapping(session, scope, 'note', note.id) and not _pending(session, scope, 'note', note.id):
+        # Deleting an entirely local legacy note has no remote identity to delete.
+        return
+    snapshot = note_payload(session, note)
+    if not delete:
+        for fid in file_ids(snapshot['blocks']):
+            dep = _queue_file(session, scope, get_owned_file(session, fid, scope[0]), preserve_parent=False)
+            if dep:
+                deps.append({'op_id': dep})
+        for link in snapshot['linksFrom']:
+            target = link['toId']
+            dep = _ensure_note(session, scope, target)
+            if dep:
+                deps.append({'op_id': dep})
+                target_ops = _pending(session, scope, 'note', target)
+                if len(target_ops) == 1 and target_ops[0].op_type == 'create' and target != note.id:
+                    _queue_note(session, scope, get_owned_note(session, target, scope[0]), visiting=visiting)
+    _append(session, scope, 'note', note.id, 'delete' if delete else 'update', snapshot, note.id, deps)
+
+
+def enqueue_sync_operation(session, op_type, payload, *, note_id=None, user_id=None):
+    # Remote shell/shared-db never maintain an independent replica/outbox.
+    if settings.sync_mode != 'remote-sync':
+        return
+    if not user_id or settings.auth_mode == 'none':
+        raise HTTPException(409, 'Remote sync requires a real authenticated owner')
+    if not settings.sync_remote_base_url:
+        raise HTTPException(503, 'Remote sync URL is not configured')
+    lock_stream(session)
+    session.flush()
+    scope = _scope(session, user_id)
+    if op_type == OP_UPLOAD_FILE:
+        asset = get_owned_file(session, payload['fileAssetId'], user_id)
+        _queue_file(session, scope, asset)
+        return
+    ids = {note_id} if note_id else set()
+    if op_type == OP_COMMIT:
+        for action in payload.get('draft', []):
+            ids.update(action[k] for k in ('noteId', 'fromId') if action.get(k))
+    for nid in sorted(ids):
+        note = session.get(Note, nid)
+        if not note or note.user_id != user_id:
+            raise HTTPException(404, 'Note not found')
+        _queue_note(session, scope, note, delete=op_type == OP_DELETE_NOTE)
+
+
+def _rewrite(value, file_map):
+    if isinstance(value, str) and value.startswith('/files/'):
+        parts = value.split('/')
+        if len(parts) > 3:
+            if parts[2] not in file_map:
+                raise PermanentSyncError('Referenced file has no mapping')
+            parts[2] = file_map[parts[2]]
+            return '/'.join(parts)
+    if isinstance(value, list):
+        return [_rewrite(v, file_map) for v in value]
+    if isinstance(value, dict):
+        return {k: _rewrite(v, file_map) for k, v in value.items()}
+    return value
+
+
+def _remote_id(session, scope, kind, local_id):
+    mapping = _mapping(session, scope, kind, local_id)
+    if not mapping or mapping.status != 'mapped':
+        raise PermanentSyncError('Missing scoped entity mapping')
+    entity = session.get(Note if kind == 'note' else FileAsset, local_id)
+    if not entity or entity.user_id != scope[0]:
+        raise PermanentSyncError('Mapped entity ownership mismatch')
+    return mapping.remote_id
+
+
+def _queued_file(session, file_id, user_id):
+    # A pending upload can precede an offline deletion of its parent. The server
+    # will apply upload then tombstone in dependency order; ownership still holds.
+    asset = session.get(FileAsset, file_id)
+    parent = session.get(Note, asset.note_id) if asset and asset.note_id else None
+    if not asset or asset.user_id != user_id or (asset.note_id and (not parent or parent.user_id != user_id)):
+        raise PermanentSyncError('Local file ownership mismatch')
+    return asset
+
+
+def _claim(scope):
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        peer = session.get(SyncPeerState, scope)
+        if peer.auth_required:
+            return None
+        rows = session.execute(select(SyncOutbox).where(*_filter(SyncOutbox, scope),
+            SyncOutbox.protocol_version == 1, SyncOutbox.status.in_(('pending', 'retry', 'inflight')),
+            or_(SyncOutbox.next_retry_at.is_(None), SyncOutbox.next_retry_at <= now()))
+            .order_by(SyncOutbox.created_at, SyncOutbox.id)).scalars().all()
+        for item in rows:
+            try:
+                deps = json.loads(item.dependency_json)
+                dependencies = [session.get(SyncOutbox, d['op_id']) for d in deps]
+                if any(not d or (d.user_id, d.client_id, d.remote_key) != scope or d.status != 'applied' for d in dependencies):
+                    item.last_error = 'Waiting for prerequisite acknowledgement'
+                    continue
+                if not item.wire_json:
+                    payload = json.loads(item.payload_json)
+                    if item.entity_type == 'note':
+                        current = session.get(Note, item.entity_id)
+                        if not current or current.user_id != scope[0]:
+                            raise PermanentSyncError('Local note ownership mismatch')
+                        files = {fid: _remote_id(session, scope, 'file', fid) for fid in file_ids(payload.get('blocks', []))}
+                        payload['blocks'] = _rewrite(payload.get('blocks', []), files)
+                        payload['linksFrom'] = [dict(l, toId=_remote_id(session, scope, 'note', l['toId'])) for l in payload.get('linksFrom', [])]
+                        payload.pop('files', None)
+                    else:
+                        asset = _queued_file(session, item.entity_id, scope[0])
+                        if payload.get('noteId'):
+                            payload['noteId'] = _remote_id(session, scope, 'note', payload['noteId'])
+                    remote_id, base = item.entity_remote_id, item.base_revision
+                    if item.op_type != 'create' and item.entity_type == 'note':
+                        remote_id = _remote_id(session, scope, 'note', item.entity_id)
+                    for spec, dep in zip(deps, dependencies):
+                        if spec.get('base'):
+                            base = json.loads(dep.result_json)['revision']
+                    wire = {'op_id': item.id, 'protocol_version': 1, 'user_id': peer.remote_user_id,
+                        'client_id': scope[1], 'remote_key': peer.server_id, 'entity_type': item.entity_type,
+                        'entity_local_id': item.entity_id, 'entity_remote_id': remote_id,
+                        'operation_type': item.op_type, 'payload': payload, 'base_revision': base}
+                    item.wire_json = dumps(wire)
+                item.status, item.tries = 'inflight', item.tries + 1
+                item.next_retry_at = now() + dt.timedelta(seconds=max(60, settings.sync_request_timeout_seconds * 3))
+                item.last_error = None
+                file_info = None
+                if item.entity_type == 'file':
+                    asset = _queued_file(session, item.entity_id, scope[0])
+                    file_info = (asset.path_original, asset.filename, asset.mime)
+                return {'id': item.id, 'wire': json.loads(item.wire_json), 'file': file_info}
+            except (PermanentSyncError, HTTPException) as exc:
+                item.status, item.last_error = 'failed_permanent', str(exc)
+        return None
+
+
+def _http(response):
+    if response.status_code == 401:
+        raise AuthRequired('Remote authentication required')
+    if response.status_code >= 500 or response.status_code in (408, 425, 429):
+        raise RetryableSyncError(f'Remote HTTP {response.status_code}')
+    if response.status_code >= 400:
+        raise PermanentSyncError(f'Remote HTTP {response.status_code}')
+    return response
+
+
+def _build_client(*, access_token=None):
+    return httpx.Client(base_url=settings.sync_remote_base_url.rstrip('/') + '/',
+        timeout=settings.sync_request_timeout_seconds, headers={'Authorization': f'Bearer {access_token}'}, follow_redirects=False)
+
+
+def _verify_user(access_token, user_id):
+    from app.core.security import get_current_user
+    request = Request({'type': 'http', 'headers': [(b'authorization', f'Bearer {access_token}'.encode())]})
+    user = get_current_user(request)
+    context = getattr(request.state, 'auth_context', '')
+    if user.id != user_id or context not in ('local-user', 'supabase-user'):
+        raise AuthRequired('Verified user does not match queue owner')
+    return context, user.supabase_id if context == 'supabase-user' else user.id
+
+
+def _bind(scope, hello, principal):
+    if hello.get('protocol_version') != 1:
+        raise PermanentSyncError('Remote sync protocol is not supported')
+    if (hello.get('auth_context'), hello.get('auth_subject')) != principal:
+        raise AuthRequired('Remote authenticated identity differs from local identity')
+    try:
+        uuid.UUID(hello['server_id'])
+    except (KeyError, ValueError, TypeError):
+        raise PermanentSyncError('Remote server identity is invalid')
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        peer = session.get(SyncPeerState, scope)
+        if peer is None:
+            peer = SyncPeerState(user_id=scope[0], client_id=scope[1], remote_key=scope[2])
+            session.add(peer)
+        if peer.server_id and (peer.server_id != hello['server_id'] or peer.remote_user_id != hello['user_id']):
+            raise PermanentSyncError('Pinned server/account changed; explicit rebind required')
+        peer.server_id, peer.remote_user_id = hello['server_id'], hello['user_id']
+        peer.auth_required, peer.reachable, peer.last_error = False, True, None
+        for row in session.execute(select(SyncOutbox).where(*_filter(SyncOutbox, scope),
+            SyncOutbox.protocol_version == 1, SyncOutbox.status == 'auth_required')).scalars():
+            row.status, row.next_retry_at = 'retry', None
+
+
+def _error(scope, exc, item_id=None):
+    auth = isinstance(exc, AuthRequired)
+    permanent = isinstance(exc, PermanentSyncError)
+    # Never persist response bodies, URLs containing tokens or transport exception text.
+    message = str(exc) if auth or permanent else 'Remote temporarily unavailable; retry scheduled'
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        peer = session.get(SyncPeerState, scope)
+        if peer is None:
+            peer = SyncPeerState(user_id=scope[0], client_id=scope[1], remote_key=scope[2])
+            session.add(peer)
+        peer.last_error, peer.auth_required, peer.reachable = message, auth, auth or permanent
+        if item_id:
+            row = session.get(SyncOutbox, item_id)
+            if row and (row.user_id, row.client_id, row.remote_key) == scope and row.status != 'applied':
+                row.status = 'auth_required' if auth else 'failed_permanent' if permanent else 'retry'
+                row.last_error = message
+                row.next_retry_at = now() + dt.timedelta(seconds=min(300, 2 ** min(row.tries - 1, 9)) * random.uniform(.8, 1.2))
+
+
+def _preserve_pending(session, scope, note, remote_id, reason, op_id=None):
+    rows = _pending(session, scope, 'note', note.id, include_failed=True)
+    if not rows:
+        return
+    saved = preserve_copy(session, scope[0], note_payload(session, note))
+    session.add(SyncConflict(user_id=scope[0], client_id=scope[1], remote_key=scope[2], op_id=op_id,
+        local_note_id=note.id, remote_note_id=remote_id, kind=reason,
+        payload_json=dumps({'original_id': note.id, 'conflict_copy_id': saved.id, 'client_id': scope[1],
+            'source_op_id': op_id, 'local_revision': note.revision, 'snapshot': note_payload(session, note)})))
+    for row in rows:
+        row.status, row.last_error = 'conflict', 'Local version preserved in conflict copy and durable payload'
+
+
+def _ack(scope, claim, result):
+    if result.get('op_id') != claim['id']:
+        raise RetryableSyncError('Acknowledgement operation mismatch')
+    if result.get('status') not in ('applied', 'conflict'):
+        if result.get('status') == 'auth_required':
+            raise AuthRequired('Remote authentication required')
+        if result.get('status') == 'retry':
+            raise RetryableSyncError('Remote requested retry')
+        if result.get('status') == 'failed_permanent':
+            raise PermanentSyncError('Operation rejected by remote validation or ownership rules')
+        raise RetryableSyncError('Incomplete acknowledgement')
+    if not isinstance(result.get('revision'), int) or not isinstance(result.get('entity_remote_id'), str):
+        raise RetryableSyncError('Incomplete acknowledgement')
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        row = session.get(SyncOutbox, claim['id'])
+        if not row or (row.user_id, row.client_id, row.remote_key) != scope:
+            raise PermanentSyncError('Acknowledgement scope mismatch')
+        if row.result_json:
+            return
+        mapping = _mapping(session, scope, row.entity_type, row.entity_id)
+        if mapping is None:
+            mapping = SyncEntityMap(user_id=scope[0], client_id=scope[1], remote_key=scope[2],
+                entity_type=row.entity_type, local_id=row.entity_id, remote_id=result['entity_remote_id'])
+            session.add(mapping)
+        elif mapping.remote_id != result['entity_remote_id']:
+            raise PermanentSyncError('Acknowledgement changes established mapping')
+        mapping.remote_revision, mapping.status = result['revision'], 'mapped'
+        if row.entity_type == 'file':
+            mapping.sha256 = claim['wire']['payload']['sha256']
+        if result['status'] == 'conflict' and row.entity_type == 'note':
+            _preserve_pending(session, scope, session.get(Note, row.entity_id), mapping.remote_id, 'push_conflict', row.id)
+        if row.entity_type == 'note':
+            record_relation_conflicts(session, session.get(Note, row.entity_id),
+                result.get('relation_conflicts', []), client_id=scope[1], remote_key=scope[2],
+                op_id=row.id, remote_note_id=mapping.remote_id)
+        row.status, row.result_json, row.last_error, row.next_retry_at = result['status'], dumps(result), None, None
+        session.flush()
+        # Ack changes only remote mapping/receipt. Pull reconciles content and
+        # advances its local editor version independently of the remote number.
+
+
+def _pull_local_id(session, scope, kind, rid):
+    mapping = _remote_mapping(session, scope, kind, rid)
+    if mapping:
+        entity = session.get(Note if kind == 'note' else FileAsset, mapping.local_id)
+        if entity is not None and entity.user_id != scope[0]:
+            raise PermanentSyncError('Pull mapping ownership mismatch')
+        if kind == 'note' and entity is None:
+            session.add(Note(id=mapping.local_id, user_id=scope[0], title='Sync pending', tombstone=True))
+            session.flush()
+        return mapping.local_id
+    lid = str(uuid.uuid4())
+    session.add(SyncEntityMap(user_id=scope[0], client_id=scope[1], remote_key=scope[2],
+        entity_type=kind, local_id=lid, remote_id=rid, status='placeholder'))
+    if kind == 'note':
+        # Hidden until its full snapshot arrives, including across page boundaries.
+        session.add(Note(id=lid, user_id=scope[0], title='Sync pending', tombstone=True))
+    session.flush()
+    return lid
+
+
+def _download_files(client, scope, page):
+    manifests = {}
+    for change in page:
+        data = change['payload']
+        for asset in ([data] if change['entity_type'] == 'file' else data.get('files', [])):
+            manifests[asset['id']] = asset
+    needed = []
+    with get_session() as session:
+        for rid, manifest in manifests.items():
+            mapping = _remote_mapping(session, scope, 'file', rid)
+            asset = session.get(FileAsset, mapping.local_id) if mapping else None
+            if asset and asset.user_id != scope[0]:
+                raise PermanentSyncError('Mapped file ownership mismatch')
+            if asset and asset.hash_sha256 != manifest['sha256']:
+                raise PermanentSyncError('Immutable remote file checksum changed')
+            needed.append((rid, manifest, asset.path_original if asset else None))
+    from app.services.files import UPLOAD_ROOT
+    from app.services.storage import require_space
+    downloads = []
+    try:
+        for rid, manifest, local_path in needed:
+            if local_path and Path(local_path).is_file():
+                with open(local_path, 'rb') as stream:
+                    digest = hashlib.sha256()
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        digest.update(chunk)
+                if digest.hexdigest() == manifest['sha256']:
+                    continue
+            if not 0 <= manifest['size'] <= settings.max_file_bytes:
+                raise PermanentSyncError('Remote file exceeds configured size limit')
+            staging = UPLOAD_ROOT / '.staging'
+            staging.mkdir(parents=True, exist_ok=True)
+            require_space(staging, manifest['size'])
+            with tempfile.NamedTemporaryFile(dir=staging, prefix='sync-', delete=False) as target:
+                source = Path(target.name)
+                downloads.append((manifest, source))
+                digest, size = hashlib.sha256(), 0
+                with client.stream('GET', f'api/sync/files/{quote(rid, safe="")}/original') as response:
+                    _http(response)
+                    for chunk in response.iter_bytes(1024 * 1024):
+                        size += len(chunk)
+                        if size > manifest['size'] or size > settings.max_file_bytes:
+                            raise PermanentSyncError('Downloaded file exceeds manifest size')
+                        require_space(staging, len(chunk))
+                        target.write(chunk)
+                        digest.update(chunk)
+            if digest.hexdigest() != manifest['sha256'] or size != manifest['size']:
+                raise PermanentSyncError('Downloaded file checksum mismatch')
+        return downloads
+    except BaseException:
+        for _, source in downloads:
+            source.unlink(missing_ok=True)
+        raise
+
+
+def _apply_page(scope, changes, downloads, cursor, next_cursor):
+    from app.services.upload_pipeline import prepare_upload, cleanup_asset
+    from app.services import files as file_service
+    prepared, kept = [], []
+    committed = False
+    try:
+        # Network, disk writes and converters finish BEFORE the cursor transaction.
+        for manifest, source in downloads:
+            with get_session() as session:
+                mapping = _remote_mapping(session, scope, 'file', manifest['id'])
+                existing = session.get(FileAsset, mapping.local_id) if mapping else None
+            if existing:
+                if existing.user_id != scope[0] or existing.hash_sha256 != manifest['sha256']:
+                    raise PermanentSyncError('Mapped file identity mismatch')
+                path = Path(existing.path_original).resolve()
+                if not path.is_relative_to(file_service.UPLOAD_ROOT.resolve()):
+                    raise PermanentSyncError('Mapped file path outside configured storage')
+                path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, path)
+                prepared.append((manifest, None, None))
+            else:
+                with source.open('rb') as stream:
+                    upload = UploadFile(file=stream, filename=manifest['filename'], headers=Headers({'content-type': manifest['mime']}))
+                    stored = prepare_upload(upload, None, scope[0])
+                prepared.append((manifest, stored, stored.asset.id))
+        committed = _apply_page_transaction(scope, changes, prepared, cursor, next_cursor, kept)
+        return committed
+    finally:
+        for _, stored, original_id in prepared:
+            if stored and (not committed or original_id not in kept):
+                cleanup_asset(original_id)
+        for _, source in downloads:
+            source.unlink(missing_ok=True)
+
+
+def _apply_page_transaction(scope, changes, prepared, cursor, next_cursor, kept):
+    from app.services import files as file_service
+    with get_session(immediate=True) as session:
+        lock_stream(session)
+        peer = session.get(SyncPeerState, scope)
+        if peer.cursor != cursor:
+            return False  # Another process already committed this page; reread cursor.
+        for manifest, stored, original_id in prepared:
+            mapping = _remote_mapping(session, scope, 'file', manifest['id'])
+            existing = session.get(FileAsset, mapping.local_id) if mapping else None
+            if existing:
+                if existing.user_id != scope[0] or existing.hash_sha256 != manifest['sha256']:
+                    raise PermanentSyncError('Mapped file identity mismatch')
+                continue
+            if stored is None:
+                raise RetryableSyncError('File metadata changed during preparation')
+            parent = _pull_local_id(session, scope, 'note', manifest['noteId']) if manifest.get('noteId') else None
+            stored.asset.note_id = parent
+            session.add(stored.asset)
+            kept.append(original_id)
+            if mapping:
+                # Keep already published local URLs stable when recovering a lost row.
+                stored.asset.id = mapping.local_id
+                mapping.sha256, mapping.status = manifest['sha256'], 'mapped'
+                session.flush()
+            else:
+                session.add(SyncEntityMap(user_id=scope[0], client_id=scope[1], remote_key=scope[2], entity_type='file',
+                    local_id=stored.asset.id, remote_id=manifest['id'], remote_revision=1, sha256=manifest['sha256'], status='mapped'))
+            session.flush()
+        for change in changes:
+            if change['entity_type'] == 'file':
+                continue
+            if change['entity_type'] != 'note':
+                raise PermanentSyncError('Unsupported change type')
+            rid, detail = change['entity_id'], change['payload']
+            lid = _pull_local_id(session, scope, 'note', rid)
+            note = session.get(Note, lid)
+            if note.user_id != scope[0]:
+                raise PermanentSyncError('Local note ownership mismatch')
+            mapping = _mapping(session, scope, 'note', lid)
+            if change['revision'] < mapping.remote_revision:
+                continue
+            pending = _pending(session, scope, 'note', lid, include_failed=True)
+            if pending:
+                if change['revision'] == mapping.remote_revision and not change['deleted']:
+                    continue  # Own acknowledged older event must not replace a pending edit.
+                if any(row.wire_json and not row.result_json and row.status in ('retry', 'inflight', 'auth_required') for row in pending):
+                    # Replay the uncertain operation first. Advancing here could
+                    # skip the newer remote edit after a lost acknowledgement.
+                    raise RetryableSyncError('Waiting for uncertain operation receipt before pull')
+                _preserve_pending(session, scope, note, rid, 'pull_conflict')
+            ids = {fid: _remote_mapping(session, scope, 'file', fid) for fid in file_ids(detail.get('blocks', []))}
+            if any(not v or v.status != 'mapped' for v in ids.values()):
+                raise PermanentSyncError('Pull references an unavailable file')
+            before, previous_stamp = note_payload(session, note), note.updated_at
+            note.title = detail['title']
+            note.style_theme = detail.get('styleTheme', 'clean')
+            from app.agent.block_models import normalize_blocks
+            note.blocks_json = dumps(normalize_blocks(_rewrite(detail.get('blocks', []), {k: v.local_id for k, v in ids.items()})))
+            note.layout_hints, note.passport_json = dumps(detail.get('layoutHints', {})), dumps(detail.get('passport', {}))
+            note.tombstone = bool(change['deleted'])
+            note.created_at = dt.datetime.fromisoformat(detail['createdAt']).replace(tzinfo=None)
+            session.query(NoteTag).filter(NoteTag.note_id == lid).delete(synchronize_session=False)
+            for tag in sorted(set(detail.get('tags', []))):
+                session.add(NoteTag(note_id=lid, tag=tag))
+            session.query(NoteLink).filter(NoteLink.from_id == lid).delete(synchronize_session=False)
+            for link in detail.get('linksFrom', []):
+                target = _pull_local_id(session, scope, 'note', link['toId'])
+                session.add(NoteLink(from_id=lid, to_id=target, reason=link.get('reason'), confidence=link.get('confidence')))
+            session.flush()
+            after = note_payload(session, note)
+            # Own acknowledged snapshots need not invalidate an open editor when
+            # the observable aggregate is unchanged. Neither clock is copied.
+            note.updated_at = previous_stamp
+            if any(before[key] != after[key] for key in (
+                    'title', 'styleTheme', 'blocks', 'layoutHints', 'passport',
+                    'createdAt', 'tombstone', 'tags', 'linksFrom')):
+                advance_local_revision(note)
+            mapping.remote_revision, mapping.status = change['revision'], 'mapped'
+            from app.api.notes import _reindex_note
+            _reindex_note(session, note)
+            session.flush()
+        peer.cursor, peer.last_success_at, peer.last_error = next_cursor, now(), None
+    return True
+
+
+def _check_worker_stop():
+    if _worker_stop.is_set() and threading.current_thread() is _sync_thread:
+        raise RetryableSyncError('Server shutting down')
+
+
+def _pull(client, scope):
+    pulled = 0
+    while True:
+        _check_worker_stop()
+        with get_session() as session:
+            peer = session.get(SyncPeerState, scope)
+            cursor, server_id = peer.cursor, peer.server_id
+        page = _http(client.get('api/sync/pull', params={'cursor': cursor, 'limit': min(100, settings.sync_batch_size)})).json()
+        if page.get('server_id') != server_id or page.get('protocol_version') != 1:
+            raise PermanentSyncError('Pull server identity/protocol changed')
+        changes, next_cursor = page['changes'], page['next_cursor']
+        sequences = [c['sequence'] for c in changes]
+        if sequences != sorted(set(sequences)) or any(s <= cursor for s in sequences) or next_cursor != (sequences[-1] if sequences else cursor):
+            raise PermanentSyncError('Invalid pull cursor ordering')
+        downloads = _download_files(client, scope, changes)
+        try:
+            if _apply_page(scope, changes, downloads, cursor, next_cursor):
+                pulled += len(changes)
+                if not page.get('has_more'):
+                    return pulled
+        finally:
+            for _, source in downloads:
+                source.unlink(missing_ok=True)
+        if not changes and page.get('has_more'):
+            raise PermanentSyncError('Empty page cannot advance cursor')
+
+
+def _cycle_result(user_id, pushed=0, pulled=0, reason=None):
+    # Include durable failures discovered inside _claim, and those from earlier
+    # cycles. `failed` has exactly the same meaning as in /sync/status.
+    status = get_sync_status(user_id=user_id)
+    result = {key: status[key] for key in ('failed', 'pending', 'retry', 'lastError', 'relationConflicts')}
+    result.update(ok=not (reason or status['failed'] or status['retry'] or status['authRequired']),
+                  pushed=pushed, pulled=pulled)
+    if reason:
+        result['reason'] = reason
+    return result
+
+
+def trigger_sync_now(*, access_token=None, user_id=None, background=False):
+    if settings.sync_mode != 'remote-sync':
+        return {'ok': False, 'reason': f'sync_mode_{settings.sync_mode}'}
+    if not settings.sync_remote_base_url:
+        return {'ok': False, 'reason': 'remote_base_url_empty'}
+    if not user_id or not access_token or settings.auth_mode == 'none':
+        return {'ok': False, 'reason': 'missing_verified_user_context'}
     with _sync_lock:
-        yield
+        with get_session() as session:
+            scope = _scope(session, user_id)
+        client = None
+        pushed = pulled = 0
+        claim = None
+        try:
+            principal = _verify_user(access_token, user_id)
+            with get_session(immediate=True) as session:
+                lock_stream(session)
+                active = session.get(SyncIdentity, 'active_sync_user')
+                if background and active and active.value != user_id:
+                    return {'ok': False, 'reason': 'account_switched'}
+                if active is None:
+                    session.add(SyncIdentity(key='active_sync_user', value=user_id))
+                elif not background:
+                    active.value = user_id
+            client = _build_client(access_token=access_token)
+            hello = _http(client.get('api/sync/hello')).json()
+            _bind(scope, hello, principal)
+            for _ in range(settings.sync_batch_size):
+                _check_worker_stop()
+                claim = _claim(scope)
+                if claim is None:
+                    break
+                try:
+                    if claim['file']:
+                        path, name, mime = claim['file']
+                        with open(path, 'rb') as stream:
+                            result = _http(client.post('api/sync/files', data={'operation': dumps(claim['wire'])},
+                                files={'file': (name, stream, mime)})).json()
+                    else:
+                        result = _http(client.post('api/sync/push', json={'operations': [claim['wire']]})).json()['results'][0]
+                    _ack(scope, claim, result)
+                    pushed += 1
+                except (AuthRequired, PermanentSyncError, RetryableSyncError, httpx.HTTPError, OSError) as exc:
+                    _error(scope, exc, claim['id'])
+                    if not isinstance(exc, PermanentSyncError):
+                        return _cycle_result(user_id, pushed, pulled,
+                            'auth_required' if isinstance(exc, AuthRequired) else 'retry')
+                claim = None
+            if settings.sync_pull_enabled:
+                pulled = _pull(client, scope)
+            with get_session() as session:
+                peer = session.get(SyncPeerState, scope)
+                peer.last_success_at, peer.reachable = now(), True
+            return _cycle_result(user_id, pushed, pulled)
+        except HTTPException as exc:
+            if exc.status_code in (401, 403):
+                error = AuthRequired('Local authentication required')
+            elif exc.status_code >= 500 or exc.status_code == 429:
+                error = RetryableSyncError(f'Local processing HTTP {exc.status_code}')
+            else:
+                error = PermanentSyncError(f'Local processing HTTP {exc.status_code}')
+            _error(scope, error, claim['id'] if claim else None)
+            return _cycle_result(user_id, pushed, pulled,
+                'auth_required' if isinstance(error, AuthRequired) else 'sync_error')
+        except (AuthRequired, PermanentSyncError, RetryableSyncError, httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as exc:
+            _error(scope, exc, claim['id'] if claim else None)
+            return _cycle_result(user_id, pushed, pulled,
+                'auth_required' if isinstance(exc, AuthRequired) else 'sync_error')
+        finally:
+            if client is not None:
+                client.close()
 
 
-def start_sync_worker_once() -> None:
+def get_sync_status(*, user_id=None):
+    with get_session() as session:
+        cid = identity(session, 'client_id')
+        configuration_error = None
+        try:
+            key = remote_key() if settings.sync_remote_base_url else ''
+        except ValueError:
+            key, configuration_error = '', 'Invalid remote sync base URL; check configuration'
+        scope = (user_id, cid, key)
+        peer = session.get(SyncPeerState, scope) if user_id else None
+        counts = dict(session.execute(select(SyncOutbox.status, func.count()).where(
+            *_filter(SyncOutbox, scope), SyncOutbox.protocol_version == 1).group_by(SyncOutbox.status)).all())
+        failed_row = session.execute(select(SyncOutbox).where(*_filter(SyncOutbox, scope),
+            SyncOutbox.protocol_version == 1, SyncOutbox.status == 'failed_permanent')
+            .order_by(SyncOutbox.created_at, SyncOutbox.id).limit(1)).scalar_one_or_none()
+        relation_conflicts = session.execute(select(func.count()).select_from(SyncConflict).where(
+            *_filter(SyncConflict, scope), SyncConflict.kind == 'relation_target_deleted')).scalar_one()
+        legacy = session.execute(select(func.count()).select_from(SyncOutbox).where(
+            or_(SyncOutbox.protocol_version == 0, SyncOutbox.protocol_version.is_(None)), SyncOutbox.user_id == user_id)).scalar_one() if user_id else 0
+        return {'protocolVersion': 1, 'userId': user_id, 'clientId': cid, 'remoteKey': key,
+            'serverId': peer.server_id if peer else None, 'cursor': peer.cursor if peer else 0,
+            'enabled': settings.sync_mode == 'remote-sync', 'mode': settings.sync_mode,
+            'workerEnabled': settings.sync_worker_enabled, 'desktopMode': settings.desktop_mode,
+            'remoteConfigured': bool(settings.sync_remote_base_url),
+            'pending': sum(counts.get(s, 0) for s in ACTIVE), 'retry': counts.get('retry', 0),
+            'done': counts.get('applied', 0), 'conflicts': counts.get('conflict', 0),
+            'relationConflicts': relation_conflicts,
+            'failed': counts.get('failed_permanent', 0), 'quarantinedLegacy': legacy,
+            'remoteReachable': peer.reachable if peer else None, 'authRequired': peer.auth_required if peer else False,
+            'lastError': configuration_error or (peer.last_error if peer else None)
+                or (failed_row.last_error if failed_row else None),
+            'lastSuccessAt': peer.last_success_at.isoformat() if peer and peer.last_success_at else None}
+
+
+def start_sync_worker_once():
     global _worker_started, _sync_thread
-
-    if settings.sync_mode in {"off", "shared-db", "remote-shell"}:
-        logger.info(
-            "sync worker disabled: mode=%s (remote_configured=%s)",
-            settings.sync_mode,
-            settings.sync_remote_configured,
-        )
+    if settings.sync_mode != 'remote-sync' or not settings.sync_worker_enabled or settings.auth_mode == 'none':
         return
-
-    if not settings.sync_worker_enabled:
-        logger.warning(
-            "sync worker disabled: mode=%s requires SYNC_BEARER_TOKEN for background sync",
-            settings.sync_mode,
-        )
+    from app.core.security import get_current_user
+    try:
+        token = settings.sync_bearer_token
+        request = Request({'type': 'http', 'headers': [(b'authorization', f'Bearer {token}'.encode())]})
+        uid = get_current_user(request).id
+        _verify_user(token, uid)
+    except (HTTPException, AuthRequired):
+        settings.sync_worker_enabled = False
+        logger.error('Sync worker disabled: configured token has no verified owner')
         return
-
     with _worker_lock:
         if _worker_started:
             return
-
-        def _loop() -> None:
-            base_delay = max(3, settings.sync_poll_seconds)
-            delay = base_delay
-            while True:
+        _worker_stop.clear()
+        def loop():
+            while not _worker_stop.is_set():
                 try:
-                    trigger_sync_now()
-                    delay = base_delay
-                except Exception as exc:
-                    logger.warning("sync worker cycle failed: %s", exc)
-                    delay = min(max(base_delay, delay * 2), 120)
-                threading.Event().wait(delay)
-
-        _sync_thread = threading.Thread(target=_loop, name="ovc-sync-worker", daemon=True)
+                    result = trigger_sync_now(access_token=token, user_id=uid, background=True)
+                    if result.get('reason') in ('auth_required', 'account_switched'):
+                        settings.sync_worker_enabled = False
+                        logger.warning('Background sync paused: authentication expired or active account changed')
+                        return
+                except Exception:
+                    logger.exception('Sync worker cycle failed')
+                _worker_stop.wait(max(3, settings.sync_poll_seconds))
+        _sync_thread = threading.Thread(target=loop, name='ovc-sync-worker', daemon=True)
         _sync_thread.start()
         _worker_started = True
-        logger.info(
-            "sync worker started (mode=%s poll=%ss remote=%s)",
-            settings.sync_mode,
-            settings.sync_poll_seconds,
-            bool(settings.sync_remote_base_url),
-        )
-
-
-def enqueue_sync_operation(
-    session,
-    op_type: str,
-    payload: Dict[str, Any],
-    *,
-    note_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> None:
-    if not (settings.desktop_mode or settings.sync_enabled):
-        return
-
-    active_count = (
-        session.execute(
-            select(func.count(SyncOutbox.id)).where(SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]))
-        ).scalar_one()
-        or 0
-    )
-    if active_count >= settings.sync_outbox_max:
-        logger.warning("sync outbox is full (%s), skip enqueue op=%s", active_count, op_type)
-        return
-
-    item = SyncOutbox(
-        op_type=op_type,
-        user_id=user_id,
-        note_id=note_id,
-        payload_json=json.dumps(payload, ensure_ascii=False),
-        status=STATUS_PENDING,
-        tries=0,
-    )
-    session.add(item)
-
-
-def trigger_sync_now(
-    *,
-    access_token: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    if settings.sync_mode in {"off", "shared-db"}:
-        return {"ok": False, "reason": f"sync_mode_{settings.sync_mode}"}
-    if not settings.sync_remote_base_url:
-        return {"ok": False, "reason": "remote_base_url_empty"}
-    if user_id and settings.desktop_mode and not (access_token or "").strip():
-        return {"ok": False, "reason": "missing_user_access_token"}
-    if user_id and not (access_token or settings.sync_bearer_token):
-        return {"ok": False, "reason": "missing_sync_auth_token"}
-
-    with _sync_guard():
-        with get_session() as session:
-            client = _build_client(access_token=access_token)
-            pushed, failed = _push_outbox(session, client, user_id=user_id)
-            pulled = 0
-            conflicts = 0
-            if settings.sync_pull_enabled:
-                pulled, conflicts = _pull_remote_changes(session, client, user_id=user_id)
-
-            return {
-                "ok": True,
-                "pushed": pushed,
-                "failed": failed,
-                "pulled": pulled,
-                "conflicts": conflicts,
-            }
-
-
-def get_sync_status(*, user_id: Optional[str] = None) -> Dict[str, Any]:
-    with get_session() as session:
-        base_filter = []
-        if user_id:
-            base_filter.append(SyncOutbox.user_id == user_id)
-
-        pending = (
-            session.execute(
-                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_PENDING, *base_filter)
-            ).scalar_one()
-            or 0
-        )
-        failed = (
-            session.execute(
-                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_FAILED, *base_filter)
-            ).scalar_one()
-            or 0
-        )
-        done = (
-            session.execute(
-                select(func.count(SyncOutbox.id)).where(SyncOutbox.status == STATUS_DONE, *base_filter)
-            ).scalar_one()
-            or 0
-        )
-        conflicts = session.execute(select(func.count(SyncConflict.id))).scalar_one() or 0
-
-    return {
-        "enabled": bool(settings.sync_mode in {"remote-sync", "remote-shell"}),
-        "mode": settings.sync_mode,
-        "workerEnabled": settings.sync_worker_enabled,
-        "desktopMode": settings.desktop_mode,
-        "syncEnabledFlag": settings.sync_enabled,
-        "remoteConfigured": bool(settings.sync_remote_base_url),
-        "remoteBaseUrl": settings.sync_remote_base_url,
-        "pending": pending,
-        "failed": failed,
-        "done": done,
-        "conflicts": conflicts,
-    }
-
-
-def _build_client(*, access_token: Optional[str] = None) -> httpx.Client:
-    headers: Dict[str, str] = {}
-    token = (access_token or "").strip() or settings.sync_bearer_token
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    return httpx.Client(
-        base_url=settings.sync_remote_base_url.rstrip("/"),
-        timeout=settings.sync_request_timeout_seconds,
-        headers=headers,
-    )
-
-
-def _push_outbox(session, client: httpx.Client, *, user_id: Optional[str] = None) -> Tuple[int, int]:
-    query = (
-        select(SyncOutbox)
-        .where(SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]))
-        .order_by(SyncOutbox.created_at.asc())
-        .limit(settings.sync_batch_size)
-    )
-    if user_id:
-        query = query.where(or_(SyncOutbox.user_id == user_id, SyncOutbox.user_id.is_(None)))
-
-    items = session.execute(query).scalars().all()
-
-    pushed = 0
-    failed = 0
-    for item in items:
-        try:
-            payload = json.loads(item.payload_json or "{}")
-
-            if user_id and not _operation_belongs_to_user(session, item, payload, user_id):
-                continue
-            if user_id and not item.user_id:
-                item.user_id = user_id
-                session.add(item)
-
-            _flush_operation(session, client, item, payload)
-            item.status = STATUS_DONE
-            item.last_error = None
-            item.updated_at = _now()
-            session.flush()
-            pushed += 1
-        except RetryableSyncError as exc:
-            item.status = STATUS_FAILED
-            item.tries = (item.tries or 0) + 1
-            item.last_error = str(exc)
-            item.updated_at = _now()
-            failed += 1
-            if item.tries >= _MAX_RETRIES_BEFORE_BACKOFF:
-                logger.warning("sync op id=%s type=%s retry=%s err=%s", item.id, item.op_type, item.tries, exc)
-            break
-        except Exception as exc:  # noqa: BLE001
-            item.status = STATUS_FAILED
-            item.tries = (item.tries or 0) + 1
-            item.last_error = str(exc)
-            item.updated_at = _now()
-            failed += 1
-            logger.warning("sync op id=%s type=%s failed: %s", item.id, item.op_type, exc)
-
-    session.flush()
-    return pushed, failed
-
-
-def _flush_operation(session, client: httpx.Client, item: SyncOutbox, payload: Dict[str, Any]) -> None:
-    op_type = item.op_type
-
-    if op_type == OP_CREATE_NOTE:
-        _flush_create_note(session, client, item, payload)
-        return
-    if op_type == OP_UPDATE_NOTE:
-        _flush_update_note(session, client, payload)
-        return
-    if op_type == OP_DELETE_NOTE:
-        _flush_delete_note(session, client, payload)
-        return
-    if op_type == OP_COMMIT:
-        _flush_commit(session, client, payload)
-        return
-    if op_type == OP_UPLOAD_FILE:
-        _flush_upload_file(session, client, item, payload)
-        return
-
-    raise RuntimeError(f"unsupported op type: {op_type}")
-
-
-def _flush_create_note(session, client: httpx.Client, item: SyncOutbox, payload: Dict[str, Any]) -> None:
-    local_note_id = payload.get("localNoteId")
-    note_payload = payload.get("note") or {}
-    if not local_note_id:
-        raise RuntimeError("create_note payload missing localNoteId")
-
-    existing_remote = _get_remote_note_id(session, local_note_id)
-    if existing_remote:
-        return
-
-    response = client.post("/api/notes", json=note_payload, headers={"X-Desktop-Op-Id": item.id})
-    if response.status_code >= 400:
-        raise RetryableSyncError(f"remote create failed: {response.status_code} {response.text}")
-
-    remote_id = response.json().get("id")
-    if not remote_id:
-        raise RuntimeError("remote create response missing id")
-    _set_note_map(session, local_note_id, remote_id)
-
-
-def _flush_update_note(session, client: httpx.Client, payload: Dict[str, Any]) -> None:
-    local_note_id = payload.get("localNoteId")
-    patch = payload.get("patch") or {}
-    snapshot = payload.get("snapshot") or None
-    if not local_note_id:
-        raise RuntimeError("update_note payload missing localNoteId")
-
-    remote_id = _get_remote_note_id(session, local_note_id) or local_note_id
-    response = client.patch(f"/api/notes/{remote_id}", json=patch)
-    if response.status_code == 404 and snapshot:
-        create_payload = {
-            "title": snapshot.get("title") or "Новая заметка",
-            "styleTheme": snapshot.get("styleTheme") or "clean",
-            "layoutHints": snapshot.get("layoutHints") or {},
-            "blocks": snapshot.get("blocks") or [],
-            "passport": snapshot.get("passport") or {},
-        }
-        created = client.post("/api/notes", json=create_payload)
-        if created.status_code >= 400:
-            raise RetryableSyncError(
-                f"remote create for update fallback failed: {created.status_code} {created.text}"
-            )
-        created_id = created.json().get("id")
-        if created_id:
-            _set_note_map(session, local_note_id, created_id)
-        return
-
-    if response.status_code >= 400:
-        raise RetryableSyncError(f"remote update failed: {response.status_code} {response.text}")
-
-
-def _flush_delete_note(session, client: httpx.Client, payload: Dict[str, Any]) -> None:
-    local_note_id = payload.get("localNoteId")
-    if not local_note_id:
-        raise RuntimeError("delete_note payload missing localNoteId")
-
-    remote_id = _get_remote_note_id(session, local_note_id) or local_note_id
-    response = client.delete(f"/api/notes/{remote_id}")
-    if response.status_code not in (200, 404):
-        raise RetryableSyncError(f"remote delete failed: {response.status_code} {response.text}")
-
-
-def _flush_commit(session, client: httpx.Client, payload: Dict[str, Any]) -> None:
-    draft = payload.get("draft")
-    if not isinstance(draft, list):
-        raise RuntimeError("commit payload missing draft list")
-
-    mapped_draft = [_map_action_ids(session, action) for action in draft]
-    response = client.post("/api/commit", json={"draft": mapped_draft})
-    if response.status_code >= 400:
-        raise RetryableSyncError(f"remote commit failed: {response.status_code} {response.text}")
-
-
-def _flush_upload_file(
-    session,
-    client: httpx.Client,
-    item: SyncOutbox,
-    payload: Dict[str, Any],
-) -> None:
-    local_note_id = payload.get("localNoteId")
-    file_path = payload.get("filePath")
-    file_asset_id = payload.get("fileAssetId") or ""
-    filename = payload.get("filename") or "upload"
-    mime = payload.get("mime") or "application/octet-stream"
-
-    if not local_note_id or not file_path:
-        raise RuntimeError("upload_file payload missing localNoteId/filePath")
-
-    remote_note_id = _get_remote_note_id(session, local_note_id)
-    if not remote_note_id:
-        has_pending_create = (
-            session.execute(
-                select(func.count(SyncOutbox.id)).where(
-                    SyncOutbox.op_type == OP_CREATE_NOTE,
-                    SyncOutbox.note_id == local_note_id,
-                    SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]),
-                )
-            ).scalar_one()
-            or 0
-        )
-        if has_pending_create:
-            raise RetryableSyncError(
-                f"note mapping for upload {local_note_id} is not ready yet"
-            )
-        remote_note_id = local_note_id
-
-    try:
-        with open(file_path, "rb") as f:
-            files = {"files": (filename, f, mime)}
-            response = client.post(
-                f"/api/upload?noteId={remote_note_id}",
-                files=files,
-                headers={
-                    "X-Desktop-File-Id": str(file_asset_id),
-                    "X-Desktop-Op-Id": item.id,
-                },
-            )
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"local file missing: {file_path}") from exc
-
-    if response.status_code >= 400:
-        raise RetryableSyncError(f"remote upload failed: {response.status_code} {response.text}")
-
-
-def _map_action_ids(session, action: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(action, dict):
-        return action
-
-    mapped = dict(action)
-    for key in ("noteId", "fromId", "toId"):
-        value = mapped.get(key)
-        if not value:
-            continue
-        remote = _get_remote_note_id(session, value)
-        if remote:
-            mapped[key] = remote
-        else:
-            has_pending_create = (
-                session.execute(
-                    select(func.count(SyncOutbox.id)).where(
-                        SyncOutbox.op_type == OP_CREATE_NOTE,
-                        SyncOutbox.note_id == value,
-                        SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]),
-                    )
-                ).scalar_one()
-                or 0
-            )
-            if has_pending_create:
-                raise RetryableSyncError(f"note mapping for {value} is not ready yet")
-    return mapped
-
-
-def _pull_remote_changes(
-    session,
-    client: httpx.Client,
-    *,
-    user_id: Optional[str] = None,
-) -> Tuple[int, int]:
-    pulled = 0
-    conflicts = 0
-    offset = 0
-    limit = 100
-
-    while True:
-        response = client.get(f"/api/notes?limit={limit}&offset={offset}")
-        if response.status_code >= 400:
-            raise RetryableSyncError(f"remote pull list failed: {response.status_code} {response.text}")
-
-        payload = response.json() or {}
-        items = payload.get("items") or []
-        if not items:
-            break
-
-        for item in items:
-            remote_id = item.get("id")
-            if not remote_id:
-                continue
-
-            local_id = _get_local_note_id(session, remote_id) or remote_id
-            local_note = session.get(Note, local_id)
-            pending_for_note = _has_pending_note_ops(session, local_id)
-            remote_updated = _parse_iso_utc(item.get("updatedAt") or "")
-
-            if local_note and pending_for_note and remote_updated > (local_note.updated_at or datetime.min):
-                _create_conflict_copy(session, local_note, remote_id)
-                _drop_pending_note_ops(session, local_note.id)
-                conflicts += 1
-
-            if pending_for_note:
-                continue
-
-            detail = _fetch_remote_note_detail(client, remote_id)
-            if local_note is None:
-                _upsert_local_note_from_remote(session, local_id, detail, user_id=user_id)
-                _set_note_map(session, local_id, remote_id)
-                pulled += 1
-                continue
-
-            local_updated = local_note.updated_at or datetime.min
-            if remote_updated > local_updated:
-                _upsert_local_note_from_remote(session, local_id, detail, user_id=user_id)
-                _set_note_map(session, local_id, remote_id)
-                pulled += 1
-
-        total = payload.get("total") or 0
-        offset += len(items)
-        if offset >= total:
-            break
-
-    return pulled, conflicts
-
-
-def _fetch_remote_note_detail(client: httpx.Client, remote_id: str) -> Dict[str, Any]:
-    response = client.get(f"/api/notes/{remote_id}")
-    if response.status_code >= 400:
-        raise RetryableSyncError(f"remote pull detail failed: {response.status_code} {response.text}")
-    return response.json() or {}
-
-
-def _upsert_local_note_from_remote(
-    session,
-    local_id: str,
-    detail: Dict[str, Any],
-    *,
-    user_id: Optional[str] = None,
-) -> None:
-    note = session.get(Note, local_id)
-    if note is None:
-        note = Note(id=local_id)
-    if user_id:
-        note.user_id = user_id
-
-    note.title = detail.get("title") or "Новая заметка"
-    note.style_theme = detail.get("styleTheme") or "clean"
-    note.layout_hints = json.dumps(detail.get("layoutHints") or {}, ensure_ascii=False)
-    note.blocks_json = json.dumps(detail.get("blocks") or [], ensure_ascii=False)
-    note.passport_json = json.dumps(detail.get("passport") or {}, ensure_ascii=False)
-
-    updated_at = _parse_iso_utc(detail.get("updatedAt") or "")
-    created_at = _parse_iso_utc(detail.get("createdAt") or "")
-    note.updated_at = updated_at if updated_at != datetime.min else _now()
-    note.created_at = created_at if created_at != datetime.min else note.updated_at
-
-    session.add(note)
-    session.flush()
-
-    session.query(NoteTag).filter(NoteTag.note_id == note.id).delete()
-    tags = detail.get("tags") or []
-    for tag in tags:
-        session.add(NoteTag(note_id=note.id, tag=str(tag)))
-
-
-def _create_conflict_copy(session, note: Note, remote_note_id: str) -> None:
-    copy_note = Note(
-        title=f"{note.title} (conflict copy)",
-        style_theme=note.style_theme,
-        layout_hints=note.layout_hints,
-        blocks_json=note.blocks_json,
-        passport_json=note.passport_json,
-        user_id=note.user_id,
-        created_at=_now(),
-        updated_at=_now(),
-    )
-    session.add(copy_note)
-    session.flush()
-
-    conflict = SyncConflict(
-        local_note_id=note.id,
-        remote_note_id=remote_note_id,
-        kind="lww_conflict_copy",
-        payload_json=json.dumps(
-            {
-                "localNoteId": note.id,
-                "conflictCopyId": copy_note.id,
-                "remoteNoteId": remote_note_id,
-            },
-            ensure_ascii=False,
-        ),
-    )
-    session.add(conflict)
-
-
-def _drop_pending_note_ops(session, local_note_id: str) -> None:
-    rows = (
-        session.execute(
-            select(SyncOutbox).where(
-                SyncOutbox.note_id == local_note_id,
-                SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]),
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for row in rows:
-        row.status = STATUS_DONE
-        row.last_error = "conflict_resolved_last_write_wins"
-        row.updated_at = _now()
-        session.add(row)
-
-
-def _has_pending_note_ops(session, local_note_id: str) -> bool:
-    count = (
-        session.execute(
-            select(func.count(SyncOutbox.id)).where(
-                SyncOutbox.note_id == local_note_id,
-                SyncOutbox.status.in_([STATUS_PENDING, STATUS_FAILED]),
-            )
-        ).scalar_one()
-        or 0
-    )
-    return count > 0
-
-
-def _get_remote_note_id(session, local_note_id: str) -> Optional[str]:
-    row = session.get(SyncNoteMap, local_note_id)
-    return row.remote_note_id if row else None
-
-
-def _get_local_note_id(session, remote_note_id: str) -> Optional[str]:
-    row = (
-        session.execute(select(SyncNoteMap).where(SyncNoteMap.remote_note_id == remote_note_id))
-        .scalars()
-        .first()
-    )
-    return row.local_note_id if row else None
-
-
-def _set_note_map(session, local_note_id: str, remote_note_id: str) -> None:
-    row = session.get(SyncNoteMap, local_note_id)
-    if row is None:
-        row = SyncNoteMap(local_note_id=local_note_id, remote_note_id=remote_note_id)
-    else:
-        row.remote_note_id = remote_note_id
-    row.updated_at = _now()
-    session.add(row)
-
-
-def _operation_belongs_to_user(
-    session,
-    item: SyncOutbox,
-    payload: Dict[str, Any],
-    user_id: str,
-) -> bool:
-    if item.user_id:
-        return item.user_id == user_id
-
-    note_ids: Set[str] = set()
-    for key in ("localNoteId", "noteId", "fromId", "toId"):
-        value = payload.get(key)
-        if isinstance(value, str) and value:
-            note_ids.add(value)
-    if item.note_id:
-        note_ids.add(item.note_id)
-
-    if item.op_type == OP_COMMIT:
-        draft = payload.get("draft") or []
-        if isinstance(draft, list):
-            for action in draft:
-                if not isinstance(action, dict):
-                    continue
-                for key in ("noteId", "fromId", "toId"):
-                    value = action.get(key)
-                    if isinstance(value, str) and value:
-                        note_ids.add(value)
-
-    if not note_ids:
-        return False
-
-    for note_id in note_ids:
-        note = session.get(Note, note_id)
-        if note and note.user_id not in {None, user_id}:
-            return False
-    return True
+        logger.info('Sync v1 worker bound to a verified owner; legacy queue quarantined')
+
+
+def stop_sync_worker():
+    global _worker_started
+    _worker_stop.set()
+    if _sync_thread and _sync_thread.is_alive():
+        _sync_thread.join(timeout=settings.shutdown_grace_seconds)
+    if not _sync_thread or not _sync_thread.is_alive():
+        _worker_started = False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import math
+import os
 import struct
 import sys
 import unittest
@@ -18,9 +19,25 @@ sys.path.insert(0, str(ROOT / "src"))
 try:
     from app.main import app  # noqa: E402
     from app.db import migrate as db_migrate  # noqa: E402
+    from app.core.security import get_current_user, get_current_user_or_refresh  # noqa: E402
+    from app.models.user import User  # noqa: E402
 
     _APP_IMPORT_ERROR = None
-    db_migrate.upgrade()
+    if os.getenv("OVC_ISOLATED_TESTS") != "1":
+        raise RuntimeError("Run this integration suite with pytest; conftest isolates DB/storage")
+
+    # Мок-пользователь для тестов — обходим JWT-аутентификацию
+    _TEST_USER = User(
+        id="test-user-id",
+        username="testuser",
+        password_hash="x",
+        is_active=True,
+        role="user",
+    )
+
+    def _override_get_current_user():
+        return _TEST_USER
+
     client = TestClient(app)
 except ModuleNotFoundError as exc:  # pragma: no cover - dependency missing on CI
     _APP_IMPORT_ERROR = exc
@@ -134,6 +151,17 @@ def make_large_markdown() -> bytes:
 
 @unittest.skipIf(client is None, f"FastAPI app unavailable: {_APP_IMPORT_ERROR}")
 class UploadApiTests(unittest.TestCase):
+    def setUp(self):
+        from app.db.session import get_session
+        with get_session() as session:
+            session.merge(_TEST_USER)
+        client.cookies.clear()
+        app.dependency_overrides[get_current_user] = _override_get_current_user
+        app.dependency_overrides[get_current_user_or_refresh] = _override_get_current_user
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
     def test_upload_image_returns_block(self):
         payload = make_png()
         response = client.post(
@@ -157,12 +185,15 @@ class UploadApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 413)
 
-    def test_upload_rejects_plain_text(self):
+    def test_upload_plain_text_accepted_as_markdown(self):
+        # text/plain входит в MARKDOWN_MIME_TYPES — принимается как markdown-файл
         response = client.post(
             "/api/upload",
-            files={"files": ("note.txt", b"hello", "text/plain")},
+            files={"files": ("note.txt", b"# Hello\n\nWorld", "text/plain")},
         )
-        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.status_code, 200)
+        block = response.json()["blocks"][0]
+        self.assertEqual(block["type"], "markdown")
 
     def test_upload_pdf_creates_doc_block(self):
         pdf_bytes = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"

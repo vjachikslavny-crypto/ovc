@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -7,8 +9,12 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from app.core.http_runtime import RuntimeHTTPMiddleware
+from app.services.runtime import run_blocking, start_runtime, stop_runtime
 from fastapi.templating import Jinja2Templates
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.api.chat import router as chat_router
 from app.api.commit import router as commit_router
@@ -23,6 +29,8 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.users import router as users_router
 from app.core.security import (
     CSRF_COOKIE,
+    ACCESS_COOKIE, REFRESH_COOKIE, require_csrf,
+    get_current_user_or_refresh, get_bearer_token,
     create_access_token,
     get_user_from_refresh_cookie,
     issue_csrf_token,
@@ -50,20 +58,31 @@ app.add_middleware(
 
 # OVC: pdf - логируем статус библиотек при старте
 @app.on_event("startup")
-async def startup_event():
+def startup_event():
+    start_runtime()
     logger.info(f"PDF rendering libraries: PyMuPDF={HAS_PYMUPDF}, pdf2image={HAS_PDF2IMAGE}")
     if not HAS_PYMUPDF and not HAS_PDF2IMAGE:
         logger.warning("PDF rendering not available! Install pymupdf: pip install pymupdf")
-    try:
+    from app.db.session import engine
+    from app.db.readiness import require_ready
+    from app.services.files import UPLOAD_ROOT
+    if settings.db_auto_migrate:
         from app.db.migrate import upgrade
-
-        upgrade()
-    except Exception as exc:
-        logger.warning("Schema migration failed on startup: %s", exc)
-    logger.info("runtime config: %s", settings.runtime_summary())
+        upgrade(engine)
+    require_ready(engine, UPLOAD_ROOT)
+    logging.getLogger("uvicorn.error").info("OVC runtime config: %s", settings.runtime_summary())
     for warning in settings.startup_warnings:
         logger.warning("config warning: %s", warning)
     start_sync_worker_once()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    from app.services.sync_engine import stop_sync_worker
+    stop_runtime()
+    stop_sync_worker()
+    from app.db.session import engine
+    engine.dispose()
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(commit_router, prefix="/api")
@@ -165,6 +184,8 @@ def _build_csp_header() -> str:
         "media-src": _dedupe(media_src),
         "frame-src": _dedupe(frame_src),
         "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
     }
 
@@ -182,7 +203,7 @@ async def _proxy_remote_file_if_needed(request: Request, response):
     """
     if not settings.desktop_mode:
         return response
-    if request.method.upper() != "GET":
+    if request.method.upper() not in {"GET", "HEAD"}:
         return response
     if response.status_code != 404:
         return response
@@ -220,68 +241,143 @@ async def _proxy_remote_file_if_needed(request: Request, response):
         if value:
             proxy_headers[header_name] = value
 
-    if settings.sync_bearer_token:
-        proxy_headers["authorization"] = f"Bearer {settings.sync_bearer_token}"
-    else:
+    def authorize_proxy():
+        # A 404 can mean an ownership rejection. Never retry with a global identity.
+        from app.db.session import get_session
+        from app.db.models import FileAsset, Note
+        from app.core.ownership import get_owned_file, owned_notes_filter
+        import json
         try:
-            proxy_user = get_user_from_refresh_cookie(request)
-            proxy_headers["authorization"] = f"Bearer {create_access_token(str(proxy_user.id))}"
-        except Exception:
-            pass
+            proxy_user = get_current_user_or_refresh(request)
+            file_id = request.url.path.split("/")[2]
+            with get_session() as session:
+                asset = session.get(FileAsset, file_id)
+                if asset is not None:
+                    get_owned_file(session, file_id, proxy_user.id)
+                else:
+                    # Remote-only media must at least be referenced by an owned note.
+                    def references(value):
+                        if isinstance(value, str):
+                            return value.startswith(f"/files/{file_id}/")
+                        if isinstance(value, dict):
+                            return any(references(v) for v in value.values())
+                        if isinstance(value, list):
+                            return any(references(v) for v in value)
+                        return False
+                    notes = session.query(Note).filter(owned_notes_filter(proxy_user.id)).all()
+                    if not any(references(json.loads(n.blocks_json or "[]")) for n in notes):
+                        return False
+            token = get_bearer_token(request)
+            if not token or settings.auth_mode == "none":
+                return False
+            proxy_headers["authorization"] = f"Bearer {token}"
+        except (HTTPException, ValueError):
+            return False
+        return True
+    if not await run_in_threadpool(authorize_proxy):
+        return response
 
+    deadline = time.monotonic() + settings.runtime_job_timeout_seconds
+    client = httpx.AsyncClient(timeout=settings.sync_request_timeout_seconds, follow_redirects=False)
+    proxy_headers['accept-encoding'] = 'identity'
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.sync_request_timeout_seconds,
-            follow_redirects=True,
-        ) as client:
-            proxied = await client.get(target, headers=proxy_headers)
+        proxied = await asyncio.wait_for(client.send(
+            client.build_request(request.method, target, headers=proxy_headers), stream=True),
+            timeout=settings.sync_request_timeout_seconds)
+        if proxied.status_code not in (200, 206, 304, 416):
+            await proxied.aclose()
+            await client.aclose()
+            return response
+        if int(proxied.headers.get('content-length', '0')) > settings.max_file_bytes:
+            await proxied.aclose()
+            await client.aclose()
+            from starlette.responses import JSONResponse
+            return JSONResponse({'detail':'Remote file exceeds configured limit'}, status_code=413)
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.warning("remote file proxy failed for %s: %s", target, exc)
+        await client.aclose()
+        logger.warning('remote_file_proxy_failed type=%s', type(exc).__name__)
         return response
-
-    if proxied.status_code >= 400:
-        return response
-
-    passthrough_headers = {}
-    for header_name in (
-        "cache-control",
-        "etag",
-        "last-modified",
-        "content-disposition",
-        "content-range",
-        "accept-ranges",
-    ):
-        value = proxied.headers.get(header_name)
-        if value:
-            passthrough_headers[header_name] = value
-
-    return Response(
-        content=proxied.content,
-        status_code=proxied.status_code,
-        headers=passthrough_headers,
-        media_type=proxied.headers.get("content-type"),
-    )
+    passthrough_headers = {name: proxied.headers[name] for name in (
+        'cache-control', 'etag', 'last-modified', 'content-disposition', 'content-range',
+        'accept-ranges', 'content-length', 'content-type') if name in proxied.headers}
+    async def close_proxy():
+        await proxied.aclose()
+        await client.aclose()
+    async def content():
+        size = 0
+        try:
+            iterator = proxied.aiter_raw().__aiter__()
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(iterator.__anext__(), max(0, deadline-time.monotonic()))
+                except StopAsyncIteration:
+                    break
+                size += len(chunk)
+                if size > settings.max_file_bytes:
+                    logger.warning('remote_file_proxy_size_exceeded')
+                    raise RuntimeError('Remote file exceeds configured size limit')
+                yield chunk
+        finally:
+            await close_proxy()
+    from starlette.background import BackgroundTask
+    return StreamingResponse(content(), status_code=proxied.status_code, headers=passthrough_headers,
+                             background=BackgroundTask(close_proxy))
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    if (request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not request.headers.get("Authorization")
+            and (request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE))):
+        try:
+            require_csrf(request)
+        except HTTPException as exc:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     response = await call_next(request)
     response = await _proxy_remote_file_if_needed(request, response)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=(), clipboard-read=(), clipboard-write=(self)"
     csp_header_name = "Content-Security-Policy-Report-Only" if settings.csp_report_only else "Content-Security-Policy"
-    response.headers[csp_header_name] = _build_csp_header()
+    response.headers.setdefault(csp_header_name, _build_csp_header())
+    if settings.public_mode and request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
     auth_context = getattr(request.state, "auth_context", None)
     if auth_context and settings.runtime_status_enabled:
         response.headers["X-OVC-Auth-Context"] = str(auth_context)
     return response
 
 
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    from fastapi.responses import JSONResponse
+    # No SQL parameters, tokens, private payloads or exception text in logs/response.
+    request_id = getattr(request.state, 'request_id', '')
+    logger.error('unhandled_request id=%s type=%s', request_id, type(exc).__name__)
+    return JSONResponse({'detail':'Internal server error', 'requestId':request_id}, status_code=500,
+        headers={'X-Request-ID':request_id, 'X-Content-Type-Options':'nosniff',
+                 'X-Frame-Options':'DENY', 'Referrer-Policy':'strict-origin-when-cross-origin',
+                 'Content-Security-Policy':_build_csp_header(),
+                 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()'})
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+@app.get("/readyz")
+def readyz():
+    from fastapi.responses import JSONResponse
+    from app.db.session import engine
+    from app.db.readiness import status
+    from app.services.files import UPLOAD_ROOT
+    result = status(engine, UPLOAD_ROOT)
+    return JSONResponse(result, status_code=200 if result['ok'] else 503)
 
 
 def _require_user(request: Request):
@@ -303,6 +399,9 @@ def _template_context(request: Request, user):
         "user": user,
         "auth_mode": settings.auth_mode,
         "desktop_mode": settings.desktop_mode,
+        "workspace_access": bool(user)
+        or settings.auth_mode == "none"
+        or (settings.desktop_mode and settings.allow_desktop_dev_fallback),
         "supabase_url": settings.supabase_url if settings.auth_mode in ("supabase", "both") else "",
         "supabase_anon_key": settings.supabase_anon_key if settings.auth_mode in ("supabase", "both") else "",
     }
@@ -310,13 +409,20 @@ def _template_context(request: Request, user):
 
 @app.get("/")
 def index(request: Request, note_id: str = None):
+    if note_id:
+        return RedirectResponse(url=f"/notes/{note_id}")
+
+    user = _require_user(request)
+    response = templates.TemplateResponse("welcome.html", _template_context(request, user))
+    _ensure_csrf_cookie(request, response)
+    return response
+
+
+@app.get("/editor")
+def editor_page(request: Request, note_id: str = None):
     user = _require_user(request)
     if not user and not _allow_anonymous():
         return RedirectResponse(url="/login")
-    if not user and not settings.desktop_mode and settings.auth_mode != "none":
-        response = templates.TemplateResponse("welcome.html", _template_context(request, user))
-        _ensure_csrf_cookie(request, response)
-        return response
     context = _template_context(request, user)
     context["note_id"] = note_id
     response = templates.TemplateResponse("editor.html", context)
@@ -407,3 +513,9 @@ def runtime_status(request: Request):
             "identityUserId": identity_user_id,
         },
     }
+
+
+# Added last so limits and socket-peer proxy validation wrap all application routes.
+if settings.allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+app.add_middleware(RuntimeHTTPMiddleware)

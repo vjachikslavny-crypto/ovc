@@ -20,25 +20,29 @@ function clearAccessCookie() {
   document.cookie = `ovc_access_token=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
+function readAccessCookie() {
+  const cookieToken = getCookie('ovc_access_token');
+  if (!cookieToken) return null;
+  accessToken = cookieToken;
+  return accessToken;
+}
+
 async function refreshAccessToken() {
   const hasSupabase = window.supabaseAuth && (AUTH_MODE === 'supabase' || AUTH_MODE === 'both');
 
   // For local and both modes prioritize local cookie refresh first.
   if (AUTH_MODE === 'local' || AUTH_MODE === 'both' || AUTH_MODE === 'none') {
-    const refreshCookie = getCookie('refresh_token');
-    if (refreshCookie) {
-      const csrf = getCookie('csrf_token');
-      if (csrf) {
-        const res = await fetch('/auth/refresh', {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': csrf },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          accessToken = data.accessToken;
-          persistAccessCookie(accessToken);
-          return accessToken;
-        }
+    const csrf = getCookie('csrf_token');
+    if (csrf) {
+      const res = await fetch('/auth/refresh', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrf },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        accessToken = data.accessToken;
+        persistAccessCookie(accessToken);
+        return accessToken;
       }
     }
   }
@@ -66,18 +70,17 @@ window.refreshAccessToken = refreshAccessToken;
 
 async function ensureAccessToken() {
   if (accessToken) return accessToken;
+  const cookieAccessToken = readAccessCookie();
+  if (cookieAccessToken) return cookieAccessToken;
 
   // In local/both mode prefer local refresh-token session.
   if (AUTH_MODE === 'local' || AUTH_MODE === 'both' || AUTH_MODE === 'none') {
-    const refreshCookie = getCookie('refresh_token');
-    if (refreshCookie) {
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      return refreshPromise;
+    if (!refreshPromise) {
+      refreshPromise = refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
     }
+    return refreshPromise;
   }
 
   // Fallback to Supabase token (for supabase mode or when local cookie absent).
